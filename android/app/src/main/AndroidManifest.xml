@@ -1,0 +1,144 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES"/>
+    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO"/>
+    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO"/>
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+
+
+    <application
+      android:name=".MainApplication"
+      android:label="@string/app_name"
+      android:icon="@mipmap/ic_launcher"
+      android:allowBackup="false"
+      android:theme="@style/AppTheme"
+      android:requestLegacyExternalStorage="true"
+      android:supportsRtl="true">
+      <activity
+        android:name=".MainActivity"
+        android:label="@string/app_name"
+        android:configChanges="keyboard|keyboardHidden|orientation|screenLayout|screenSize|smallestScreenSize|uiMode"
+        android:launchMode="singleTask"
+        android:windowSoftInputMode="adjustResize"
+        android:exported="true"
+          android:supportsPictureInPicture="true"
+    android:resizeableActivity="true">
+        <intent-filter>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent-filter>
+
+            <intent-filter>
+        <action android:name="android.intent.action.VIEW"/>
+        <category android:name="android.intent.category.DEFAULT"/>
+        <category android:name="android.intent.category.BROWSABLE"/>
+         <data android:scheme="https" android:host="drive.google.com" />
+            <data android:scheme="https" android:host="www.youtube.com" />
+    <data android:scheme="http" android:host="www.youtube.com" />
+        <data android:scheme="http" android:host="youtube.com"/>
+        <data android:scheme="https" android:host="youtube.com"/>
+        <data android:scheme="http" android:host="youtu.be"/>
+        <data android:scheme="https" android:host="youtu.be"/>
+    </intent-filter>
+
+    <intent-filter>
+        <action android:name="android.intent.action.VIEW"/>
+        <category android:name="android.intent.category.DEFAULT"/>
+        <category android:name="android.intent.category.BROWSABLE"/>
+        <data android:scheme="file"/>
+        <data android:scheme="content"/>
+        <data android:mimeType="audio/*"/>
+        <data android:mimeType="video/*"/>
+    </intent-filter>
+
+    <intent-filter android:label="@string/app_name">
+  <action android:name="android.intent.action.SEND" />
+  <category android:name="android.intent.category.DEFAULT" />
+  <data android:mimeType="*/*" />
+</intent-filter>
+<intent-filter android:label="@string/app_name">
+  <action android:name="android.intent.action.SEND_MULTIPLE" />
+  <category android:name="android.intent.category.DEFAULT" />
+  <data android:mimeType="*/*" />
+</intent-filter>
+
+      </activity>
+  <service 
+    android:name="com.asterinet.react.bgactions.RNBackgroundActionsTask" 
+    android:foregroundServiceType="shortService"/>
+
+ 
+
+    </application>
+<queries>
+    <!-- PDF -->
+    <intent>
+        <action android:name="android.intent.action.VIEW" />
+        <data android:mimeType="application/pdf" />
+    </intent>
+
+    <!-- Word Documents -->
+    <intent>
+        <action android:name="android.intent.action.VIEW" />
+        <data android:mimeType="application/msword" />
+    </intent>
+    <intent>
+        <action android:name="android.intent.action.VIEW" />
+        <data android:mimeType="application/vnd.openxmlformats-officedocument.wordprocessingml.document" />
+    </intent>
+
+    <!-- Excel Spreadsheets -->
+    <intent>
+        <action android:name="android.intent.action.VIEW" />
+        <data android:mimeType="application/vnd.ms-excel" />
+    </intent>
+    <intent>
+        <action android:name="android.intent.action.VIEW" />
+        <data android:mimeType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />
+    </intent>
+
+    <!-- PowerPoint Presentations -->
+    <intent>
+        <action android:name="android.intent.action.VIEW" />
+        <data android:mimeType="application/vnd.ms-powerpoint" />
+    </intent>
+    <intent>
+        <action android:name="android.intent.action.VIEW" />
+        <data android:mimeType="application/vnd.openxmlformats-officedocument.presentationml.presentation" />
+    </intent>
+
+    <!-- Image Types -->
+    <intent>
+        <action android:name="android.intent.action.VIEW" />
+        <data android:mimeType="image/jpeg" />
+    </intent>
+    <intent>
+        <action android:name="android.intent.action.VIEW" />
+        <data android:mimeType="image/png" />
+    </intent>
+    <intent>
+        <action android:name="android.intent.action.VIEW" />
+        <data android:mimeType="image/webp" />
+    </intent>
+    <intent>
+        <action android:name="android.intent.action.VIEW" />
+        <data android:mimeType="image/gif" />
+    </intent>
+    <intent>
+        <action android:name="android.intent.action.VIEW" />
+        <data android:mimeType="image/bmp" />
+    </intent>
+    <intent>
+        <action android:name="android.intent.action.VIEW" />
+        <data android:mimeType="image/svg+xml" />
+    </intent>
+</queries>
+
+</manifest>

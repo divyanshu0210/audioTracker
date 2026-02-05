@@ -1,0 +1,55 @@
+{
+  "project_info": {
+    "project_number": "196911493674",
+    "project_id": "audiotracker-c3c4c",
+    "storage_bucket": "audiotracker-c3c4c.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:196911493674:android:402e9388d89d8bd0e04953",
+        "android_client_info": {
+          "package_name": "com.audiotracker"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "196911493674-8o1433uqho4t9k3tl6h7gab980crvube.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.audiotracker",
+            "certificate_hash": "5e8f16062ea3cd2c4a0d547876baa6f38cabf625"
+          }
+        },
+        {
+          "client_id": "196911493674-9qddmij1gdbm1mjr3o1h9quku45hiu52.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.audiotracker",
+            "certificate_hash": "396347b232e365485fcdcab55395892319895fba"
+          }
+        },
+        {
+          "client_id": "196911493674-ckh0hql1d8s8auii5bp3berm2lmej1k2.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBNRT5RZyOuVG_u2czmpvXXU1JPTqHN2ws"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "196911493674-ckh0hql1d8s8auii5bp3berm2lmej1k2.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

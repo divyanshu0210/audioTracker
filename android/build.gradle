@@ -1,0 +1,47 @@
+buildscript {
+    ext {
+        buildToolsVersion = "35.0.0"
+        minSdkVersion = 24
+        compileSdkVersion = 35
+        targetSdkVersion = 34
+        ndkVersion = "27.1.12297006"
+        kotlinVersion = "2.1.10"
+    }
+      subprojects { subproject ->
+        afterEvaluate{
+            if((subproject.plugins.hasPlugin('android') || subproject.plugins.hasPlugin('android-library'))) {
+                android {
+                    compileSdkVersion rootProject.ext.compileSdkVersion
+                    buildToolsVersion rootProject.ext.buildToolsVersion
+                }
+            }
+        }
+    }
+    repositories {
+        google()
+        mavenCentral()
+
+    }
+    dependencies {
+        classpath("com.android.tools.build:gradle")
+        classpath("com.facebook.react:react-native-gradle-plugin")
+        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin")
+        classpath 'com.google.gms:google-services:4.3.15'
+
+    }
+
+    allprojects {
+    repositories {
+         maven {
+            url("${project(':react-native-background-fetch').projectDir}/libs")
+        }
+    }}
+   
+}
+
+
+plugins
+{
+    id "com.facebook.react.rootproject"
+    // id("com.google.gms.google-services") version "4.3.15" apply false
+}

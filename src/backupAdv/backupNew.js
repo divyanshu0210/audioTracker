@@ -7,12 +7,10 @@
 // - Images are incrementally backed up only on reconnect, no local storage.
 // - Modularized to remove redundancy.
 // - Assumes SQLite database with created_at/updated_at columns; deletions need separate handling.
-
 import RNFetchBlob from 'react-native-blob-util';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {GoogleSignin} from '@react-native-google-signin/google-signin';
 import NetInfo from '@react-native-community/netinfo';
-import {AppState} from 'react-native';
 import BackgroundFetch from 'react-native-background-fetch';
 import {
   getUserDatabase,
@@ -26,6 +24,7 @@ import {
   saveBackupTimestamp,
 } from './backupUtils';
 import {verifyGoogleDriveUpload} from './googleDriveBackupUtils';
+import {getSetting} from '../database/settings';
 
 // Constants
 const BACKUP_FOLDER = `${RNFetchBlob.fs.dirs.DocumentDir}/backups`;
@@ -82,6 +81,26 @@ async function getOrCreateDriveFolder(folderName, parentId = 'root') {
     throw error;
   }
 }
+
+export const initializeBackupSystem = async () => {
+  await ensureFolderExists(BACKUP_FOLDER, 'backup');
+
+  for (const [key, path] of Object.entries(LOCAL_BACKUP_FOLDERS)) {
+    await ensureFolderExists(path, `${key} backup`);
+  }
+
+  await initializeDriveFolders();
+};
+
+const ensureFolderExists = async (folderPath, label) => {
+  const exists = await RNFetchBlob.fs.exists(folderPath);
+  if (!exists) {
+    await RNFetchBlob.fs.mkdir(folderPath);
+    console.log(`📁 Created ${label} folder at:`, folderPath);
+  } else {
+    console.log(`📁 ${label} folder already exists at:`, folderPath);
+  }
+};
 
 // Initialize Drive folders
 async function initializeDriveFolders() {
@@ -402,12 +421,13 @@ async function processLocalBackupQueue() {
 
     if (sortedFiles.length > 0 && allUploaded && type !== 'images') {
       // Apply clearing if differential
-      const lowerLevels = {
-        yearly: ['monthly', 'weekly', 'daily'],
-        monthly: ['weekly', 'daily'],
-        weekly: ['daily'],
-        daily: [],
-      }[type] ?? [];
+      const lowerLevels =
+        {
+          yearly: ['monthly', 'weekly', 'daily'],
+          monthly: ['weekly', 'daily'],
+          weekly: ['daily'],
+          daily: [],
+        }[type] ?? [];
       for (const level of lowerLevels) {
         await deleteOldDriveBackups(level, 0); // Clear on Drive
         await deleteOldLocalBackups(level, 0); // Ensure local is clean
@@ -436,7 +456,7 @@ const retryOnFailure = async (fn, {maxRetries = 3, delayMs = 5000}) => {
 
 // Main performBackup function
 export const performBackup = async () => {
-  const {setBackupInProgress,backupInProgress} = useDbStore.getState();
+  const {setBackupInProgress, backupInProgress} = useDbStore.getState();
   if (backupInProgress) return;
   setBackupInProgress(true);
 
@@ -564,11 +584,18 @@ export const performBackup = async () => {
 
 // Perform backup task
 export const performBackupTask = async () => {
-  console.log(
-    `[BackupTask] Starting backup at: ${new Date().toLocaleString()}`,
-  );
+  console.log(`[BackupTask] Start: ${new Date().toLocaleString()}`);
+
+  if (!(await getSetting('BACKUP_TASK_SCHEDULED'))) {
+    console.log('[BackupTask] Backup task not scheduled, skipping backup.');
+    return;
+  }
   const userId = await AsyncStorage.getItem('userId');
-  if (!userId) return;
+  if (!userId) {
+    console.log('[BackupTask] No user logged in, skipping backup.');
+    return;
+  }
+
   const db = await initUserDatabase(userId);
 
   try {
@@ -600,18 +627,3 @@ export const configureBackgroundBackup = () => {
     },
   );
 };
-
-// Trigger on connectivity change or app resume
-// NetInfo.addEventListener(state => {
-//   if (state.isConnected) {
-//     console.log('Internet reconnected, processing backups');
-//     performBackupTask();
-//   }
-// });
-
-// AppState.addEventListener('change', state => {
-//   if (state === 'active') {
-//     console.log('App resumed, triggering backup');
-//     performBackupTask();
-//   }
-// });

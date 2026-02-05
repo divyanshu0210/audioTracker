@@ -4,7 +4,6 @@ import {
   Text,
   TextInput,
   StyleSheet,
-  Keyboard,
   Animated,
   Switch,
   ActivityIndicator,
@@ -18,8 +17,7 @@ import useSettingsStore from './settingsStore';
 import SignOutButton from '../auth/SignOutButton';
 import {useNavigation} from '@react-navigation/core';
 import useDbStore from '../database/dbStore';
-import { performBackupTask } from '../backupAdv/backupNew';
-// import { performBackupTask } from '../backupAdv/backupManager';
+import {performBackupTask} from '../backupAdv/backupNew';
 
 const SettingsScreen = () => {
   const navigation = useNavigation();
@@ -30,18 +28,9 @@ const SettingsScreen = () => {
   const [newWatchTime, setNewWatchTime] = useState(
     settings.TARGET_NEW_WATCH_TIME.toString(),
   );
-  const [newMobileNumber, setNewMobileNumber] = useState('');
-  const [mentorNumbers, setMentorNumbers] = useState([
-    ...settings['Mentor Mobile Numbers'],
-  ]);
+
   const [notificationOpacity] = useState(new Animated.Value(0));
   const {backupInProgress} = useDbStore();
-
-  const backupFrequencyOptions = [
-    {label: 'Daily', value: 'daily'},
-    {label: 'Weekly', value: 'weekly'},
-    {label: 'Monthly', value: 'monthly'},
-  ];
 
   const [lastBackupTime, setLastBackupTime] = useState('Never');
 
@@ -66,25 +55,16 @@ const SettingsScreen = () => {
 
   const handleBackupEnabledToggle = async value => {
     const updated = {
-      BACKUP_FREQUENCY: settings.BACKUP_FREQUENCY,
       BACKUP_ENABLED: value,
+      LAST_BACKUP_TIME: '1970-01-01 00:00:00',
+      LAST_BACKUP_LOCAL_TIME: '1970-01-01 00:00:00',
     };
     updateSettings(updated);
-    updateSettings({LAST_BACKUP_TIME: '1970-01-01 00:00:00'});
-    updateSettings({LAST_BACKUP_LOCAL_TIME: '1970-01-01 00:00:00'});
     await AsyncStorage.setItem('BACKUP_ENABLED', JSON.stringify(value));
-    await AsyncStorage.removeItem('BACKUP_TIMESTAMP_' + (await AsyncStorage.getItem('userId')));
+    await AsyncStorage.removeItem(
+      'BACKUP_TIMESTAMP_' + (await AsyncStorage.getItem('userId')),
+    );
     loadBackupTime();
-    AndroidBackgroundService.toggleBackupTask(updated);
-  };
-
-  const handleBackupFrequencyChange = value => {
-    console.log(`[Backup Frequency] Changing backup frequency to: ${value}`);
-    const updated = {
-      BACKUP_ENABLED: settings.BACKUP_ENABLED,
-      BACKUP_FREQUENCY: value,
-    };
-    updateSettings(updated);
     AndroidBackgroundService.toggleBackupTask(updated);
   };
 
@@ -111,54 +91,24 @@ const SettingsScreen = () => {
     });
   }, [navigation]);
 
-  // const saveSettings = async () => {
-  //   const updatedSettings = {
-  //     TARGET_WATCH_TIME: parseInt(watchTime) || 0,
-  //     TARGET_NEW_WATCH_TIME: parseInt(newWatchTime) || 0,
-  //     'Mentor Mobile Numbers': mentorNumbers,
-  //     BACKUP_ENABLED: backupEnabled,
-  //     BACKUP_FREQUENCY: backupFrequency,
-  //   };
-
-  //   updateSettings(updatedSettings);
-  //   // Update the background service with new settings
-  //   AndroidBackgroundService.init(updatedSettings);
-
-  //   Keyboard.dismiss();
-  //   showNotification();
-  // };
-
   // Automatically update settings whenever they change
   // For general settings
   useEffect(() => {
     const updatedSettings = {
       TARGET_WATCH_TIME: parseInt(watchTime) || 0,
       TARGET_NEW_WATCH_TIME: parseInt(newWatchTime) || 0,
-      'Mentor Mobile Numbers': mentorNumbers,
+      // 'Mentor Mobile Numbers': mentorNumbers,
     };
 
     updateSettings(updatedSettings);
     // showNotification();
-  }, [watchTime, newWatchTime, mentorNumbers]);
+  }, [watchTime, newWatchTime]);
 
   const handleAutoplayToggle = value => {
     const updated = {
       autoplay: value,
     };
     updateSettings(updated);
-  };
-
-  const addMentorNumber = () => {
-    const num = parseInt(newMobileNumber);
-    if (!isNaN(num) && !mentorNumbers.includes(num)) {
-      setMentorNumbers([...mentorNumbers, num]);
-      setNewMobileNumber('');
-      Keyboard.dismiss();
-    }
-  };
-
-  const removeMentorNumber = num => {
-    setMentorNumbers(mentorNumbers.filter(n => n !== num));
   };
 
   return (
@@ -170,8 +120,6 @@ const SettingsScreen = () => {
           Settings saved successfully!
         </Text>
       </Animated.View>
-
-      {/* <Text style={styles.header}>Settings</Text> */}
 
       {/* Target Watch Time Section */}
       {/* <View style={styles.section}>
@@ -241,28 +189,6 @@ const SettingsScreen = () => {
             onValueChange={handleBackupEnabledToggle}
           />
         </View>
-
-        {/* Backup frequency */}
-        {settings.BACKUP_ENABLED && (
-          <>
-            {/* <Text style={[styles.label, {marginTop: 15}]}>
-              Backup Frequency
-            </Text> */}
-            <Picker
-              selectedValue={settings.BACKUP_FREQUENCY}
-              onValueChange={handleBackupFrequencyChange}
-              mode="dropdown"
-              style={styles.picker}>
-              {backupFrequencyOptions.map(option => (
-                <Picker.Item
-                  key={option.value}
-                  label={option.label}
-                  value={option.value}
-                />
-              ))}
-            </Picker>
-          </>
-        )}
       </View>
 
       {/* Player Settings Section */}
@@ -282,58 +208,6 @@ const SettingsScreen = () => {
           />
         </View>
       </View>
-
-      {/* Mentor Mobile Numbers Section */}
-      {/* <View style={styles.section}>
-        <Text style={styles.label}>Mentor Mobile Numbers</Text>
-
-        <FlatList
-          data={mentorNumbers}
-          keyExtractor={item => item.toString()}
-          renderItem={({item}) => (
-            <View style={styles.numberItem}>
-              <Text style={styles.numberText}>{item}</Text>
-              <TouchableOpacity
-                onPress={() => removeMentorNumber(item)}
-                style={styles.removeButton}>
-                <Text style={styles.removeText}>Remove</Text>
-              </TouchableOpacity>
-            </View>
-          )}
-          scrollEnabled={false}
-          ListEmptyComponent={
-            <Text style={styles.emptyText}>No mentor numbers added</Text>
-          }
-          style={styles.list}
-        />
-
-        <View style={styles.addNumberContainer}>
-          <TextInput
-            value={newMobileNumber}
-            onChangeText={setNewMobileNumber}
-            keyboardType="phone-pad"
-            placeholder="Enter mentor's mobile number"
-            style={[styles.input, {flex: 1}]}
-          />
-          <Button
-            mode="contained"
-            onPress={addMentorNumber}
-            style={styles.addButton}
-            labelStyle={styles.buttonText}
-            disabled={!newMobileNumber}>
-            Add
-          </Button>
-        </View>
-      </View> */}
-
-      {/* Save Button */}
-      {/* <Button
-        mode="contained"
-        onPress={saveSettings}
-        style={styles.saveButton}
-        labelStyle={styles.buttonText}>
-        Save Settings
-      </Button> */}
     </ScrollView>
   );
 };

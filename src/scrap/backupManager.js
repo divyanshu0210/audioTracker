@@ -5,12 +5,12 @@ import {
   prepareImageIncrementalBackup,
   prepareIncrementalBackup,
   saveBackupTimestamp,
-} from './backupUtils';
+} from '../backupAdv/backupUtils';
 import {
   uploadToGoogleDrive,
   verifyGoogleDriveUpload,
   deleteOldDriveBackups,
-} from './googleDriveBackupUtils';
+} from '../backupAdv/googleDriveBackupUtils';
 import RNFetchBlob from 'react-native-blob-util';
 import useDbStore from '../database/dbStore';
 import {getSetting} from '../database/settings';
@@ -20,7 +20,7 @@ import {
   getUserDatabase,
   initUserDatabase,
 } from '../database/UserDatabaseInstance';
-import { LOCAL_BACKUP_FOLDERS } from './backupNew';
+import { LOCAL_BACKUP_FOLDERS } from '../backupAdv/backupNew';
 
 const BACKUP_FOLDER = `${RNFetchBlob.fs.dirs.DocumentDir}/backups`;
 const IMAGES_BACKUP_FOLDER = `${BACKUP_FOLDER}/images`;

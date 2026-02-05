@@ -11,7 +11,6 @@ import AndroidBackgroundService from '../backgroundService/backgroundService';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { MenuOption } from 'react-native-popup-menu';
 import { performBackupTask } from '../backupAdv/backupNew';
-// import { performBackupTask } from '../backupAdv/backupManager';
 
 export default function SignOutButton({ label = 'LogOut' }) {
   const navigation = useNavigation();

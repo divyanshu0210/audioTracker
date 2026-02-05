@@ -19,7 +19,6 @@ import {syncUserToBackend} from '../appMentorBackend/userMgt';
 import WebSocketManager from '../appWebSocket/WebSocketManager';
 import {handleWSNotifications} from '../appNotification/notificationsMgt';
 import AndroidBackgroundService from '../backgroundService/backgroundService';
-import {initializeBackupSystem} from '../backupAdv/backupManager';
 import {
   checkAndPromptRestore,
   hasRestoreCheckCompleted,
@@ -29,7 +28,8 @@ import {initFTSDatabase} from '../database/FTSDatabase';
 import {initUserDatabase} from '../database/UserDatabaseInstance';
 import {initDatabase} from '../database/database';
 import useDbStore from '../database/dbStore';
-import { setupFCM } from '../appNotification/appFCMNotification/fcmNotificationService';
+import {setupFCM} from '../appNotification/appFCMNotification/fcmNotificationService';
+import {initializeBackupSystem} from '../backupAdv/backupNew';
 
 const GoogleLoginScreen = ({navigation}) => {
   const [isLoading, setIsLoading] = useState(false);
@@ -100,8 +100,7 @@ const GoogleLoginScreen = ({navigation}) => {
 
       setUserInfo(userInfo.user);
       // const ws = new WebSocketManager(userInfo.user.id, handleWSNotifications);
-      setupFCM(userInfo.user)
-
+      setupFCM(userInfo.user);
 
       // Check for backup restore prompt
       const alreadyChecked = await hasRestoreCheckCompleted(userInfo.user.id);
@@ -112,12 +111,9 @@ const GoogleLoginScreen = ({navigation}) => {
       }
       const settings = await initializeSettings(); // initialises the store with default/stored settings
       // Creates backup directory
-      await AndroidBackgroundService.init();
       initializeBackupSystem();
-      await AndroidBackgroundService.ensureAndSyncBackupBGService(
-        sessionType,
-        settings,
-      );
+      await AndroidBackgroundService.init();
+      await AndroidBackgroundService.ensureAndSyncBackupBGService(settings);
 
       navigation.replace('MainApp', {user: userInfo.user});
     } catch (error) {

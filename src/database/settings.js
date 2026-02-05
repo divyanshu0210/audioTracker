@@ -7,7 +7,8 @@ export const getSetting = async key => {
   const fastdb = db || getDb();
   // Define known special key types
   const BOOLEAN_KEYS = ['BACKUP_ENABLED', 'BACKUP_TASK_SCHEDULED', 'autoplay'];
-  const ARRAY_KEYS = ['Mentor Mobile Numbers'];
+  const ARRAY_KEYS = [];
+  // const ARRAY_KEYS = ['Mentor Mobile Numbers'];
 
   return new Promise((resolve, reject) => {
     fastdb.transaction(tx => {

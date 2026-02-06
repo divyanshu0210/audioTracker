@@ -20,64 +20,48 @@ import WeekReport from './WeekReport';
 import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
 import WeeklyReportCard from './WeeklyReportCard';
 import useMentorMenteeStore from '../appMentor/useMentorMenteeStore';
-import {getMonthlyWatchTimefromBackend, getWatchTimefromBackend} from '../appMentorBackend/reportMgt';
+import {
+  getMonthlyWatchTimefromBackend,
+  getWatchTimefromBackend,
+} from '../appMentorBackend/reportMgt';
+
+const ACHIEVEMENT_BANDS = [
+  {min: 100, color: '#1B5E20'}, // Goal crushed
+  {min: 75, color: '#47c04dff'}, // On track
+  {min: 40, color: '#F9A825'}, // Needs push
+  {min: 15, color: '#FB8C00'}, // Behind
+  {min: 0, color: '#FF6666'}, // Critical
+];
 
 const getAchievementColor = (time, target) => {
-  if (!target || target === 0) return null;
+  if (!target || target <= 0) return null;
 
   const percentage = (time / target) * 100;
 
-  if (percentage >= 100) return '#2E7D32'; // Dark Green
-  if (percentage >= 90) return '#47c04dff'; // Light Green
-  if (percentage >= 50) return '#A5D6A7'; // Amber
-  if (percentage >= 15) return '#FFbbbb'; // Orange
-  return '#FF6666'; // Red
+  const band = ACHIEVEMENT_BANDS.find(b => percentage >= b.min);
+  return band?.color ?? null;
 };
 
 const getLegendWithTime = target => {
+  if (!target || target <= 0) return [];
+
   const getMinutes = percent => Math.floor((percent / 100) * target);
 
-  return [
-    {
-      color: '#2E7D32',
-      label: `${getMinutes(100)}+ min`,
-      // label: `100%+ (${getMinutes(100)}+ min)`,
-    },
-    {
-      color: '#47c04dff',
-      label: `${getMinutes(91)}–${getMinutes(99)} min`,
-      // label: `75–99% (${getMinutes(75)}–${getMinutes(99)} min)`,
-    },
-    {
-      color: '#A5D6A7',
-      label: `${getMinutes(50)}–${getMinutes(90)} min`,
-      // label: `50–74% (${getMinutes(50)}–${getMinutes(74)} min)`,
-    },  
-    {
-      color: '#FFbbbb',
-      label: `${getMinutes(15)}–${getMinutes(49)} min`,
-      // label: `15–49% (${getMinutes(15)}–${getMinutes(49)} min)`,
-    },
-    {
-      color: '#FF6666',
-      label: `0-${getMinutes(14)} min`,
-      // label: `0–14% (0–${getMinutes(14)} min)`,
-    },
-    // {
-    //   color: 'rgba(100,100,255,0.3)',
-    //   label: 'Today',
-    // },
-    // {
-    //   color: 'rgba(135, 135, 255, 0.1)',
-    //   label: 'Current Week',
-    // },
-    // {
-    //   color: 'transparent',
-    //   borderColor: '#1E90FF',
-    //   borderWidth: 1,
-    //   label: 'Selected',
-    // },
-  ];
+  return ACHIEVEMENT_BANDS.map((band, index) => {
+    const nextBand = ACHIEVEMENT_BANDS[index - 1];
+
+    let label;
+    if (!nextBand) {
+      // Top band (100%+)
+      label = `${getMinutes(band.min)}+ min`;
+    } else {
+      label = `${getMinutes(band.min)}–${getMinutes(nextBand.min - 1)} min`;
+    }
+    return {
+      color: band.color,
+      label,
+    };
+  });
 };
 
 const CalendarProgress = () => {
@@ -105,13 +89,11 @@ const CalendarProgress = () => {
   }, [settings.TARGET_NEW_WATCH_TIME]);
   const {activeMentee: mentee} = useMentorMenteeStore();
 
-
   useEffect(() => {
     if (
       prevTargetNewWatchTime.current !==
       settingsRef.current.TARGET_NEW_WATCH_TIME
     ) {
-   
       cache.current = {};
       // Refetch current month data
       fetchWatchData(currentMonth, true, true);
@@ -126,8 +108,7 @@ const CalendarProgress = () => {
   ]);
 
   useEffect(() => {
-
-    fetchWatchData(currentMonth, true,true);
+    fetchWatchData(currentMonth, true, true);
     const previousMonth = getPreviousMonth(currentMonth);
     fetchWatchData(previousMonth, false);
   }, [mentee]);
@@ -142,74 +123,70 @@ const CalendarProgress = () => {
     }, [currentMonth]),
   );
 
- const fetchWatchData = async (
-  month,
-  updateUI = true,
-  forceRefresh = false,
-) => {
-  // Force refresh if mentee exists
-  const isMentorView = !!mentee;
-  const shouldForceFetch = isMentorView || forceRefresh;
+  const fetchWatchData = async (
+    month,
+    updateUI = true,
+    forceRefresh = false,
+  ) => {
+    // Force refresh if mentee exists
+    const isMentorView = !!mentee;
+    const shouldForceFetch = isMentorView || forceRefresh;
 
-  if (!shouldForceFetch && cache.current[month]) {
-    if (updateUI) setData(cache.current[month]);
-    return;
-  }
-
-  const currentMonthNow = new Date().toISOString().slice(0, 7);
-  if (month > currentMonthNow) {
-    setData({});
-    return;
-  }
-
-  if (updateUI) setLoading(true);
-
-  try {
-    const watchData = await generateWatchData(
-      month,
-      settingsRef.current.TARGET_NEW_WATCH_TIME,
-      mentee?.id, // Pass mentee ID if exists
-    );
-    if (!isMentorView) {
-      cache.current[month] = watchData; // Only cache for self
+    if (!shouldForceFetch && cache.current[month]) {
+      if (updateUI) setData(cache.current[month]);
+      return;
     }
-    if (updateUI) setData(watchData);
-  } catch (error) {
-    console.error('Error fetching watch data:', error);
-  }
 
-  if (updateUI) setLoading(false);
-};
+    const currentMonthNow = new Date().toISOString().slice(0, 7);
+    if (month > currentMonthNow) {
+      setData({});
+      return;
+    }
 
+    if (updateUI) setLoading(true);
 
-  const  getTodayDatafromBackend= async()=> {
-    const data = await getWatchTimefromBackend(mentee.id, today, today)
-  if (!data || Object.keys(data).length === 0) {
-    return {
-      totalWatchTime: 0,
-      totalNewWatchTime: 0,
-      totalUnfltrdWatchTime: 0
-    };
-  }
+    try {
+      const watchData = await generateWatchData(
+        month,
+        settingsRef.current.TARGET_NEW_WATCH_TIME,
+        mentee?.id, // Pass mentee ID if exists
+      );
+      if (!isMentorView) {
+        cache.current[month] = watchData; // Only cache for self
+      }
+      if (updateUI) setData(watchData);
+    } catch (error) {
+      console.error('Error fetching watch data:', error);
+    }
 
-  const firstKey = Object.keys(data)[0];
-  const {
-    totalWatchTime = 0,
-    totalNewWatchTime = 0,
-    totalUnfltrdWatchTime = 0
-  } = data[firstKey] || {};
+    if (updateUI) setLoading(false);
+  };
 
-  return { totalWatchTime, totalNewWatchTime, totalUnfltrdWatchTime };
-}
+  const getTodayDatafromBackend = async () => {
+    const data = await getWatchTimefromBackend(mentee.id, today, today);
+    if (!data || Object.keys(data).length === 0) {
+      return {
+        totalWatchTime: 0,
+        totalNewWatchTime: 0,
+        totalUnfltrdWatchTime: 0,
+      };
+    }
 
+    const firstKey = Object.keys(data)[0];
+    const {
+      totalWatchTime = 0,
+      totalNewWatchTime = 0,
+      totalUnfltrdWatchTime = 0,
+    } = data[firstKey] || {};
 
+    return {totalWatchTime, totalNewWatchTime, totalUnfltrdWatchTime};
+  };
 
   const fetchWatchDataForToday = async () => {
     try {
-      const {totalWatchTime, totalNewWatchTime, totalUnfltrdWatchTime} =
-        mentee
-          ? await getTodayDatafromBackend(today)
-          : await getSumOfWatchTimesByDate(today);
+      const {totalWatchTime, totalNewWatchTime, totalUnfltrdWatchTime} = mentee
+        ? await getTodayDatafromBackend(today)
+        : await getSumOfWatchTimesByDate(today);
       const totalWatchTimeInMinutes = totalWatchTime / 60;
       const totalNewWatchTimeInMinutes = totalNewWatchTime / 60;
       const totalUnfltrdWatchTimeInMinutes = totalUnfltrdWatchTime / 60;
@@ -274,7 +251,7 @@ const CalendarProgress = () => {
     navigation.navigate('DayReport', {
       date: day.dateString,
       watchData: dayData,
-      mentee : mentee
+      mentee: mentee,
     });
   };
 
@@ -447,8 +424,8 @@ const CalendarProgress = () => {
                     ]}>
                     {isFutureDate
                       ? ''
-                      // : `${Math.round(dayData.totalNewWatchTime)} min`}
-                      : `${Math.round(dayData.totalUnfltrdWatchTime)} min`}
+                      : // : `${Math.round(dayData.totalNewWatchTime)} min`}
+                        `${Math.round(dayData.totalUnfltrdWatchTime)} min`}
                   </Text>
                 </View>
 

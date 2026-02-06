@@ -24,7 +24,7 @@ import {
   saveBackupTimestamp,
 } from './backupUtils';
 import {verifyGoogleDriveUpload} from './googleDriveBackupUtils';
-import {getSetting} from '../database/settings';
+import {getSetting,setSetting} from '../database/settings';
 
 // Constants
 const BACKUP_FOLDER = `${RNFetchBlob.fs.dirs.DocumentDir}/backups`;
@@ -114,7 +114,7 @@ async function initializeDriveFolders() {
   return folderIds;
 }
 
-// Initialize local folders (exclude images)
+// Initialize local folders 
 async function initializeLocalFolders() {
   for (const [key, path] of Object.entries(LOCAL_BACKUP_FOLDERS)) {
     if (!(await RNFetchBlob.fs.exists(path))) {
@@ -138,49 +138,61 @@ async function getDriveFolderId(type) {
 }
 
 // Calendar-based helpers
-function isEndOfWeek(date = new Date()) {
+function isStartOfWeek(date = new Date()) {
   return date.getDay() === 0; // Sunday
 }
-
-function isEndOfMonth(date = new Date()) {
-  const tomorrow = new Date(date);
-  tomorrow.setDate(date.getDate() + 1);
-  return tomorrow.getDate() === 1;
+function isStartOfMonth(date = new Date()) {
+  return date.getDate() === 1;
 }
-
-function isEndOfYear(date = new Date()) {
-  return date.getMonth() === 11 && date.getDate() === 31;
+function isStartOfYear(date = new Date()) {
+  return date.getMonth() === 0 && date.getDate() === 1;
 }
-
-function getWeekStartEndDates(date = new Date()) {
-  const start = new Date(date);
-  start.setDate(date.getDate() - date.getDay());
-  start.setHours(0, 0, 0, 0);
-  const end = new Date(start);
-  end.setDate(start.getDate() + 6);
+function getPreviousWeekStartToToday(date = new Date()) {
+  const end = new Date(date);
   end.setHours(23, 59, 59, 999);
+
+  // Nominal start = 7 days before
+  const start = new Date(end);
+  start.setDate(end.getDate() - 7);
+  start.setHours(0, 0, 0, 0);
+
+  // Start of current month
+  const monthStart = new Date(end.getFullYear(), end.getMonth(), 1);
+  monthStart.setHours(0, 0, 0, 0);
+
+  // Prevent spilling into previous month
+  if (start < monthStart) {
+    start.setTime(monthStart.getTime());
+  }
+
   return {
     start: start.toISOString().slice(0, 19).replace('T', ' '),
     end: end.toISOString().slice(0, 19).replace('T', ' '),
   };
 }
-
-function getMonthStartEndDates(date = new Date()) {
-  const start = new Date(date.getFullYear(), date.getMonth(), 1);
+function getPreviousMonthStartToToday(date = new Date()) {
+  // Start of previous month
+  const start = new Date(date.getFullYear(), date.getMonth() - 1, 1);
   start.setHours(0, 0, 0, 0);
-  const end = new Date(date.getFullYear(), date.getMonth() + 1, 0);
+
+  // End = today (end of day)
+  const end = new Date(date);
   end.setHours(23, 59, 59, 999);
+
   return {
     start: start.toISOString().slice(0, 19).replace('T', ' '),
     end: end.toISOString().slice(0, 19).replace('T', ' '),
   };
 }
-
-function getYearStartEndDates(date = new Date()) {
-  const start = new Date(date.getFullYear(), 0, 1);
+function getPreviousYearStartToToday(date = new Date()) {
+  // Start of previous year
+  const start = new Date(date.getFullYear() - 1, 0, 1);
   start.setHours(0, 0, 0, 0);
-  const end = new Date(date.getFullYear(), 11, 31);
+
+  // End = today (end of day)
+  const end = new Date(date);
   end.setHours(23, 59, 59, 999);
+
   return {
     start: start.toISOString().slice(0, 19).replace('T', ' '),
     end: end.toISOString().slice(0, 19).replace('T', ' '),
@@ -376,8 +388,6 @@ async function processLocalBackupQueue() {
   const netInfo = await NetInfo.fetch();
   if (!netInfo.isConnected) return;
 
-  // for (const [type, localFolder] of Object.entries(LOCAL_BACKUP_FOLDERS)) {
-  //   if (type === 'images') continue; // Skip images
   const folderOrder = ['yearly', 'monthly', 'weekly', 'daily', 'images'];
   for (const type of folderOrder) {
     const localFolder = LOCAL_BACKUP_FOLDERS[type];
@@ -430,7 +440,6 @@ async function processLocalBackupQueue() {
         }[type] ?? [];
       for (const level of lowerLevels) {
         await deleteOldDriveBackups(level, 0); // Clear on Drive
-        await deleteOldLocalBackups(level, 0); // Ensure local is clean
       }
     }
   }
@@ -453,6 +462,80 @@ const retryOnFailure = async (fn, {maxRetries = 3, delayMs = 5000}) => {
   }
   throw lastError;
 };
+
+function getWeekKey(date = new Date()) {
+  const firstDay = new Date(date.getFullYear(), 0, 1);
+  const week = Math.ceil(
+    ((date - firstDay) / 86400000 + firstDay.getDay() + 1) / 7,
+  );
+  return `${date.getFullYear()}-W${week}`;
+}
+
+function getSpecialKey(type, date = new Date()) {
+  if (type === 'yearly') return `yearly-${date.getFullYear()}-01-01`;
+
+  if (type === 'monthly')
+    return `monthly-${date.getFullYear()}-${date.getMonth() + 1}`;
+
+  if (type === 'weekly') return `weekly-${getWeekKey(date)}`;
+
+  return null;
+}
+async function refreshSingleSpecialFlag() {
+  const todayKey = `${new Date().toISOString().slice(0, 10)}`;
+  const lastKey = await getSetting('LAST_SPECIAL_BACKUP_KEY')||null;
+
+  // new day → re-arm
+  if (!lastKey || !lastKey.includes(todayKey)) {
+    await setSetting('SPECIAL_BACKUP_ALLOWED', true);
+  }
+}
+
+const SPECIAL_RULES = [
+  {
+    type: 'yearly',
+    check: isStartOfYear,
+    rangeFn: getPreviousYearStartToToday,
+    clear: ['monthly', 'weekly', 'daily'],
+  },
+  {
+    type: 'monthly',
+    check: isStartOfMonth,
+    rangeFn: getPreviousMonthStartToToday,
+    clear: ['weekly', 'daily'],
+  },
+  {
+    type: 'weekly',
+    check: isStartOfWeek,
+    rangeFn: getPreviousWeekStartToToday,
+    clear: ['daily'],
+  },
+];
+
+async function decideSpecialBackup() {
+  await refreshSingleSpecialFlag();
+
+  const specialAllowed = await getSetting('SPECIAL_BACKUP_ALLOWED') ?? true;
+  const lastKey = await getSetting('LAST_SPECIAL_BACKUP_KEY') || null;
+
+  if (!specialAllowed) return null;
+
+  for (const rule of SPECIAL_RULES) {
+    if (!rule.check()) continue;
+
+    const key = getSpecialKey(rule.type);
+    if (key === lastKey) return null;
+
+    return {
+      type: rule.type,
+      key,
+      rangeFn: rule.rangeFn,
+      clear: rule.clear,
+    };
+  }
+
+  return null;
+}
 
 // Main performBackup function
 export const performBackup = async () => {
@@ -512,32 +595,25 @@ export const performBackup = async () => {
       }
     }
 
-    // Hierarchical backups (non-images)
-    let backupType = null;
-    let lowerLevelsToClear = [];
+    const decision = await decideSpecialBackup();
+
+    let backupType = 'daily';
     let data = null;
-    if (isEndOfYear()) {
-      const {start, end} = getYearStartEndDates();
+    let lowerLevelsToClear = [];
+    let specialKey = null;
+
+    if (decision) {
+      const {start, end} = decision.rangeFn();
       data = await exportDataBetweenDates(start, end);
-      backupType = 'yearly';
-      lowerLevelsToClear = ['monthly', 'weekly', 'daily'];
-    } else if (isEndOfMonth()) {
-      const {start, end} = getMonthStartEndDates();
-      data = await exportDataBetweenDates(start, end);
-      backupType = 'monthly';
-      lowerLevelsToClear = ['weekly', 'daily'];
-    } else if (isEndOfWeek()) {
-      const {start, end} = getWeekStartEndDates();
-      data = await exportDataBetweenDates(start, end);
-      backupType = 'weekly';
-      lowerLevelsToClear = ['daily'];
+
+      backupType = decision.type;
+      lowerLevelsToClear = decision.clear;
+      specialKey = decision.key;
     } else {
       data = await prepareIncrementalBackup(lastBackupTime);
-      backupType = 'daily';
-      lowerLevelsToClear = [];
     }
 
-    if (backupType && !isEmptyData(data)) {
+    if (backupType && data && !isEmptyData(data)) {
       const localFolder = LOCAL_BACKUP_FOLDERS[backupType];
       const filePath = `${localFolder}/${backupType}_${timestamp}.json`;
       await RNFetchBlob.fs.writeFile(filePath, JSON.stringify(data), 'utf8');
@@ -546,6 +622,11 @@ export const performBackup = async () => {
       for (const level of lowerLevelsToClear) {
         await deleteOldLocalBackups(level, 0);
         console.log(`Cleared local ${level} after ${backupType} backup`);
+      }
+
+      if (backupType !== 'daily' && specialKey) {
+        await setSetting('LAST_SPECIAL_BACKUP_KEY', specialKey);
+        await setSetting('SPECIAL_BACKUP_ALLOWED', false);
       }
 
       if (isConnected) {
@@ -608,22 +689,4 @@ export const performBackupTask = async () => {
   } catch (error) {
     console.error('[BackupTask] Failed:', error);
   }
-};
-
-// Configure background backup
-export const configureBackgroundBackup = () => {
-  BackgroundFetch.configure(
-    {
-      minimumFetchInterval: 60 * 24, // Daily
-      stopOnTerminate: false,
-      startOnBoot: true,
-    },
-    async taskId => {
-      await performBackupTask();
-      BackgroundFetch.finish(taskId);
-    },
-    error => {
-      console.error('[BackgroundFetch] Failed to configure:', error);
-    },
-  );
 };

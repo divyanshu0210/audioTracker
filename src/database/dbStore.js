@@ -8,12 +8,14 @@ const useDbStore = create((set, get) => ({
   currentUserId: null,
   backupInProgress: false,
   restoreInProgress: false,
+  checkingAvailableBackup: false,
   loading: false,
   inserting: false,
   setLoading: isLoading => set({loading: isLoading}),
   setInserting: inserting => set({inserting: inserting}),
   setBackupInProgress: val => set({backupInProgress: val}),
   setRestoreInProgress: val => set({restoreInProgress: val}),
+  setCheckingAvailableBackup: val => set({checkingAvailableBackup: val}),
 
   setDb: dbInstance => set({db: dbInstance}),
   setDbPath: dbPath => set({dbPath: dbPath}),
@@ -45,8 +47,6 @@ const useDbStore = create((set, get) => ({
   closeDb: () => {
     set({db: null, currentUserId: null});
   },
-  // Set backup progress state
-  setBackupInProgress: inProgress => set({backupInProgress: inProgress}),
 }));
 
 export default useDbStore;

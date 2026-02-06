@@ -193,6 +193,7 @@ function RootNavigator() {
 // 🔹 Main App (Tabs)
 function MainApp({route}) {
   const user = route.params?.user; // Get user data
+  const {checkingAvailableBackup} = useDbStore();
 
   console.log(route);
   return (
@@ -242,6 +243,12 @@ function MainApp({route}) {
       </Tab.Navigator>
 
       <GlobalBottomSheets />
+      {checkingAvailableBackup && (
+        <View style={styles.overlay}>
+          <ActivityIndicator size="large" color="#fff" />
+          <Text style={styles.loadingText}>Checking for backups..</Text>
+        </View>
+      )}
     </>
   );
 }

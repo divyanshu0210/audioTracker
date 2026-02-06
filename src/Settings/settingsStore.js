@@ -1,14 +1,20 @@
-import { create } from 'zustand';
-import { getAllSettings, setSetting } from "../database/settings";
+import {create} from 'zustand';
+import {getAllSettings, setSetting} from '../database/settings';
 
 const useSettingsStore = create((set, get) => ({
   settings: {
     TARGET_WATCH_TIME: 30,
     TARGET_NEW_WATCH_TIME: 30,
+
     BACKUP_ENABLED: true,
     BACKUP_TASK_SCHEDULED: true,
+
     LAST_BACKUP_TIME: null,
     LAST_BACKUP_LOCAL_TIME: null,
+
+    //special backup control
+    SPECIAL_BACKUP_ALLOWED: true,
+    LAST_SPECIAL_BACKUP_KEY: null,
     autoplay: true,
   },
 
@@ -16,20 +22,19 @@ const useSettingsStore = create((set, get) => ({
   initialize: async () => {
     try {
       const dbSettings = await new Promise((resolve, reject) => {
-        getAllSettings((settings) => {
+        getAllSettings(settings => {
           resolve(settings);
         });
       });
-  
-      const parsedSettings = { ...get().getDefaultSettings(), ...dbSettings };
-      console.log('paresed settings being set',parsedSettings)
-      set({ settings: parsedSettings });
+
+      const parsedSettings = {...get().getDefaultSettings(), ...dbSettings};
+      console.log('paresed settings being set', parsedSettings);
+      set({settings: parsedSettings});
       return parsedSettings; // <-- Return the merged settings
     } catch (error) {
-      console.error("Failed to initialize settings:", error);
+      console.error('Failed to initialize settings:', error);
     }
   },
-  
 
   getDefaultSettings: () => {
     return {
@@ -39,33 +44,38 @@ const useSettingsStore = create((set, get) => ({
       BACKUP_TASK_SCHEDULED: true,
       LAST_BACKUP_TIME: null,
       LAST_BACKUP_LOCAL_TIME: null,
+      SPECIAL_BACKUP_ALLOWED: true,
+      LAST_SPECIAL_BACKUP_KEY: null,
       autoplay: true,
     };
   },
 
   //to save settings to DB and update the store
-  updateSettings: (newSettings) => {
+  updateSettings: newSettings => {
     const currentSettings = get().settings;
-    const updatedSettings = { ...currentSettings, ...newSettings };
+    const updatedSettings = {...currentSettings, ...newSettings};
 
     // Update the store
-    set({ settings: updatedSettings });
+    set({settings: updatedSettings});
 
     // Persist to database
     Object.entries(newSettings).forEach(([key, value]) => {
       try {
         let storedValue;
-        
+
         if (value === null || value === undefined) {
           storedValue = null;
-        } 
+        }
         // Handle boolean values (convert to '1'/'0')
-        else if (key === "BACKUP_ENABLED" || 
-                key === "BACKUP_TASK_SCHEDULED" || 
-                key === "autoplay" || 
-                typeof value === 'boolean') {
+        else if (
+          key === 'BACKUP_ENABLED' ||
+          key === 'BACKUP_TASK_SCHEDULED' ||
+          key === 'SPECIAL_BACKUP_ALLOWED' ||
+          key === 'autoplay' ||
+          typeof value === 'boolean'
+        ) {
           storedValue = value ? '1' : '0';
-        } 
+        }
         // Handle arrays (convert to JSON)
         else if (Array.isArray(value)) {
           storedValue = JSON.stringify(value);

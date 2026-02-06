@@ -1,23 +1,24 @@
 // screens/ItemNotesScreen.js
 import React, {useEffect, useState} from 'react';
-import {
-  ActivityIndicator,
-  SafeAreaView,
-  StyleSheet,
-} from 'react-native';
+import {ActivityIndicator, SafeAreaView, StyleSheet} from 'react-native';
 import {fetchNotes} from '../database/R';
 import NotesListComponent from './notesListing/NotesListComponent';
 import {useAppState} from '../contexts/AppStateContext';
-import { ScreenTypes } from '../contexts/constants';
+import {ScreenTypes} from '../contexts/constants';
 
 const ItemNotesScreen = ({useSpecial}) => {
   const {activeItem, setNotesList} = useAppState();
   const [loading, setLoading] = useState(false);
 
-  const sourceId = activeItem?.sourceId;
-  const sourceType = activeItem?.sourceType;
+  let sourceId = activeItem?.sourceId;
+  let sourceType = activeItem?.sourceType;
 
   useEffect(() => {
+    console.log('Active Item changed:', activeItem);
+    if (sourceType === 'note') {
+      sourceId = activeItem?.item?.source_id;
+      sourceType = activeItem?.item?.source_type;
+    }
     if (sourceId && sourceType) {
       loadNotesForItem();
     }
@@ -25,6 +26,7 @@ const ItemNotesScreen = ({useSpecial}) => {
 
   const loadNotesForItem = async () => {
     setLoading(true);
+
     try {
       const notes = await fetchNotes({
         offset: 0,
@@ -45,7 +47,11 @@ const ItemNotesScreen = ({useSpecial}) => {
   return (
     <SafeAreaView style={styles.container}>
       {loading ? (
-        <ActivityIndicator size="small" color="#0000ff" style={{marginTop: 20}} />
+        <ActivityIndicator
+          size="small"
+          color="#0000ff"
+          style={{marginTop: 20}}
+        />
       ) : (
         <NotesListComponent
           loading={loading}

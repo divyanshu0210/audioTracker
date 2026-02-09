@@ -60,7 +60,6 @@ const SettingsScreen = () => {
       LAST_BACKUP_LOCAL_TIME: '1970-01-01 00:00:00',
     };
     updateSettings(updated);
-    await AsyncStorage.setItem('BACKUP_ENABLED', JSON.stringify(value));
     await AsyncStorage.removeItem(
       'BACKUP_TIMESTAMP_' + (await AsyncStorage.getItem('userId')),
     );

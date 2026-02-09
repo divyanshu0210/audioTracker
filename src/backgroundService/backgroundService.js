@@ -3,6 +3,8 @@ import useDbStore from '../database/dbStore';
 import {getSetting} from '../database/settings';
 import useSettingsStore from '../Settings/settingsStore';
 import {performBackupTask} from '../backupAdv/backupNew';
+import { AppState } from 'react-native';
+import {toggleAutoBackupEnabled } from './newBackgroundService';
 
 class AndroidBackgroundService {
   static userId = null;
@@ -58,7 +60,13 @@ class AndroidBackgroundService {
       console.log('i am running');
     }
     if (taskId === 'com.audiotracker.backup') {
-      await performBackupTask();
+      if(AppState.currentState === 'active'){
+        console.log('[BackgroundTask] Skipping Fetch backup (app active)');
+      }
+      else{
+        console.log('[BackgroundTask] Running Fetch backup');
+        await performBackupTask();
+      }
     }
   }
 
@@ -130,6 +138,7 @@ class AndroidBackgroundService {
 
   static toggleBackupTask(settings = {}) {
     this.scheduleBackupTask(settings);
+    toggleAutoBackupEnabled(settings?.BACKUP_ENABLED);
   }
 
   // In AndroidBackgroundService.js

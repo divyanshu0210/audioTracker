@@ -176,11 +176,11 @@ const YouTubePlayerComponent = forwardRef(
         } else if (data.state != undefined) {
           onIsPausedChange(data.state !== 'PLAYING');
         } else if (data.duration !== undefined) {
-          console.log('video duration on event',data.event, item?.ytube_id, data.duration);
+          console.log('video duration on event',data.event, item?.source_id, data.duration);
           durationRef.current = data.duration;
           updateDurationIfNotSet({
-            sourceType: 'youtube',
-            id: item?.ytube_id,
+            sourceType: 'youtube_video',
+            id: item?.source_id,
             duration: data.duration,
           });
         } else if (data.status !== undefined) {
@@ -240,7 +240,7 @@ const YouTubePlayerComponent = forwardRef(
         <WebView
           ref={webViewRef}
           source={{
-            uri: `https://www.youtube.com/embed/${item?.ytube_id || ''}?autoplay=1${pauseOnStart ? '&mute=1' : ''}${startTime ? `&start=${startTime}` : ''}`,
+            uri: `https://www.youtube.com/embed/${item?.source_id || ''}?autoplay=1${pauseOnStart ? '&mute=1' : ''}${startTime ? `&start=${startTime}` : ''}`,
             headers: {Referer: `https://com.youtube`},
           }}
           style={styles.webview}

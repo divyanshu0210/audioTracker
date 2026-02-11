@@ -4,13 +4,13 @@ import PlaylistThumbnail from '../components/PlaylistThumbnail';
 import {ItemTypes} from '../contexts/constants';
 
 export default function YouTubeItem({item}) {
-  const isPlaylist = item.type === 'playlist';
+  const isPlaylist = item.type === 'youtube_playlist';
   // const useInsideContext = item.extra === 'inside';
   // const screenType = useInsideContext ? 'in' : 'out';
 
   const thumbnailUri = isPlaylist
     ? {uri: item.thumbnail} || require('../assets/video-placeholder.png')
-    : {uri: `https://img.youtube.com/vi/${item.ytube_id}/mqdefault.jpg`};
+    : {uri: `https://img.youtube.com/vi/${item.source_id}/mqdefault.jpg`};
 
   return (
     <View style={styles.historyItem}>

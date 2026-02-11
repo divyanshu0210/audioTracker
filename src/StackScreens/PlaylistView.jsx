@@ -12,8 +12,8 @@ import {
 } from 'react-native';
 import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
 import {useAppState} from '../contexts/AppStateContext';
-import {getItemBySourceId,  saveVideoToDB} from '../database/C';
-import {loadVideosFromDB} from '../database/R';
+import {getItemBySourceId,  saveVideoToDB, upsertItem} from '../database/C';
+import {getChildrenByParent, loadVideosFromDB} from '../database/R';
 import BaseMediaListComponent from './BaseMediaListComponent';
 import {ItemTypes, ScreenTypes} from '../contexts/constants';
 
@@ -62,7 +62,13 @@ export default function PlaylistView() {
     if (!playListId) return [];
 
     console.log('Checking in database...');
-    const storedFiles = (await loadVideosFromDB(playListId)) || [];
+    const item = await getItemBySourceId(playListId, 'youtube_playlist');
+    if (!item) {
+      console.log('Playlist not found in DB:', playListId);
+      return [];
+    }
+    const storedFiles = (await getChildrenByParent(item.id, 'youtube_video')) || [];
+    // const storedFiles = (await loadVideosFromDB(item.id)) || [];
 
     if (storedFiles.length > 0) {
       console.log('Videos found in database:', storedFiles.length);
@@ -80,8 +86,8 @@ export default function PlaylistView() {
     if (!fetchedVideos || fetchedVideos.length === 0) {
       return [];
     }
-    const parentInternalId = await getItemBySourceId(playListId, 'youtube_playlist');
-    if (!parentInternalId) {
+    const parent = await getItemBySourceId(playListId, 'youtube_playlist');
+    if (!parent) {
       console.error('❌ Cannot insert videos: Playlist not found locally.');
       return [];
     }
@@ -89,10 +95,10 @@ export default function PlaylistView() {
     await Promise.all(
       fetchedVideos.map(async video => {
         const savedItem = await upsertItem({
-          source_id: video.ytube_id,
+          source_id: video.source_id,
           type: 'youtube_video',
           title: video.title,
-          parent_id: parentInternalId,
+          parent_id: parent.id,
           in_show: 1,
         });
 
@@ -152,10 +158,10 @@ export default function PlaylistView() {
 
         videos = videos.concat(
           response.data.items.map(item => ({
-            ytube_id: item.contentDetails.videoId,
+            source_id: item.contentDetails.videoId,
             title: item.snippet.title,
             channelTitle: item.snippet.channelTitle,
-            type: 'video',
+            type: 'youtube_video',
             parent_id: playlistId,
           })),
         );

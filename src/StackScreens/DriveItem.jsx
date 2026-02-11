@@ -37,7 +37,7 @@ const DriveItem = ({item,screen}) => {
       <View style={styles.historyItem}>
         <Text style={styles.folderText}>
           📂{' '}
-          {item.name !== 'Unknown Folder' ? item.name : 'Google Drive Folder'}
+          {item.title !== 'Unknown Folder' ? item.title : 'Google Drive Folder'}
         </Text>
         {/* {!useInsideContext && (
           // <ParentFolderMenu isIcon driveInfo={item} />
@@ -70,9 +70,9 @@ const DriveItem = ({item,screen}) => {
 
       <View style={styles.itemDetails}>
         <Text style={styles.title} numberOfLines={2}>
-          {item.name}
+          {item.title}
         </Text>
-        {item.source && <Text style={styles.channelText}>{item.source}</Text>}
+        {item?.source && <Text style={styles.channelText}>{item.source}</Text>}
       </View>
 
       {fileExists ? (

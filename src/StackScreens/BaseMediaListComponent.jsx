@@ -19,7 +19,7 @@ import {Button} from 'react-native-share';
 import NewAssignmentsBtn from '../components/buttons/NewAssignmentsBtn';
 
 export const getItemId = item =>
-  item.rowid || item.driveId || item.ytube_id || item.id.toString();
+  item.rowid || item.source_id || item.id.toString();
 
 const BaseMediaListComponent = ({
   mediaList,

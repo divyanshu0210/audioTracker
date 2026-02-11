@@ -11,6 +11,7 @@ import {
 import {
   fetchNotebooks,
   getAllDeviceFiles,
+  getChildrenByParent,
   getItemsByParent,
   loadYTItemsFromDB,
 } from '../database/R';
@@ -25,7 +26,13 @@ import useDbStore from '../database/dbStore';
 const Tab = createMaterialTopTabNavigator();
 
 const HomeTabs = () => {
-  const {setDriveLinksList, setItems, setDeviceFiles, setNotebooks,selectedCategory} = useAppState();
+  const {
+    setDriveLinksList,
+    setItems,
+    setDeviceFiles,
+    setNotebooks,
+    selectedCategory,
+  } = useAppState();
   const {inserting, restoreInProgress} = useDbStore();
 
   const [loading, setLoading] = useState(true);
@@ -53,7 +60,8 @@ const HomeTabs = () => {
     try {
       const files = selectedCategory
         ? await getDeviceFilesInCategory(selectedCategory)
-        : await getAllDeviceFiles();
+        : await getChildrenByParent(null, 'device_file');
+      // : await getAllDeviceFiles();
       setDeviceFiles(files || []);
     } catch (err) {
       console.error('Error loading files from DB:', err);
@@ -65,11 +73,14 @@ const HomeTabs = () => {
   const loadMainYTFromDB = async (loader = true) => {
     loader && setLoading(true);
     try {
-      const storedItems =
-        (selectedCategory
-          ? await getYouTubeItemsInCategory(selectedCategory)
-          : await loadYTItemsFromDB()) || [];
-      setItems(storedItems);
+      const storedItems = selectedCategory
+        ? await getYouTubeItemsInCategory(selectedCategory)
+        : await getChildrenByParent(null, [
+            'youtube_playlist',
+            'youtube_video',
+          ]);
+
+      setItems(storedItems || []);
     } catch (error) {
       console.error('Error loading folders from DB:', error);
     } finally {
@@ -82,8 +93,10 @@ const HomeTabs = () => {
     try {
       const storedItems = selectedCategory
         ? await getFileItemsInCategory(selectedCategory)
-        : await getItemsByParent(null);
-      setDriveLinksList(storedItems);
+        : await getChildrenByParent(null, ['drive_folder', 'drive_file']);
+
+      setDriveLinksList(storedItems || []);
+      console.log('Drive items loaded from DB:', storedItems );
     } catch (error) {
       console.error('Error loading folders from DB:', error);
     } finally {
@@ -160,19 +173,39 @@ const HomeTabs = () => {
             },
           }}>
           <Tab.Screen name="YouTube">
-            {() => renderTabContent(MainYouTubeView, {loading, onRefresh: loadMainYTFromDB})}
+            {() =>
+              renderTabContent(MainYouTubeView, {
+                loading,
+                onRefresh: loadMainYTFromDB,
+              })
+            }
           </Tab.Screen>
 
           <Tab.Screen name="Device">
-            {() => renderTabContent(DeviceFilesView, {loading, onRefresh: loadFilesFromDB})}
+            {() =>
+              renderTabContent(DeviceFilesView, {
+                loading,
+                onRefresh: loadFilesFromDB,
+              })
+            }
           </Tab.Screen>
 
           <Tab.Screen name="Drive">
-            {() => renderTabContent(DriveFilesView, {loading, onRefresh: loadDriveItemsfromDB})}
+            {() =>
+              renderTabContent(DriveFilesView, {
+                loading,
+                onRefresh: loadDriveItemsfromDB,
+              })
+            }
           </Tab.Screen>
 
           <Tab.Screen name="Notebooks">
-            {() => renderTabContent(NotebookScreen, {loading, onRefresh: loadNotebooks})}
+            {() =>
+              renderTabContent(NotebookScreen, {
+                loading,
+                onRefresh: loadNotebooks,
+              })
+            }
           </Tab.Screen>
 
           <Tab.Screen name={selectedCategory ? `Notes` : 'All Notes'}>

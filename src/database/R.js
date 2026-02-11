@@ -2,247 +2,150 @@ import {db, getDb} from './database';
 import {buildQuery} from './dbUtils';
 import {fastdb} from './FTSDatabase';
 
-export const getFolderStackFromDB = async driveId => {
+export const getFolderStackFromDB = async itemId => {
+  const fastdb = getDb();
+
   return new Promise((resolve, reject) => {
     const stack = [];
-    const fastdb = getDb();
+
     const traverseUp = currentId => {
       fastdb.transaction(tx => {
         tx.executeSql(
-          'SELECT drive_id, name, parent_id FROM folders WHERE drive_id = ?',
+          `
+          SELECT id, source_id, title, parent_id, type
+          FROM items
+          WHERE source_id = ?
+          AND deleted_at IS NULL
+          LIMIT 1;
+          `,
           [currentId],
           (_, results) => {
             if (results.rows.length > 0) {
-              const folder = results.rows.item(0);
-              stack.unshift({driveId: folder.drive_id, name: folder.name});
-              if (folder.parent_id) {
-                traverseUp(folder.parent_id);
+              const item = results.rows.item(0);
+
+              // Insert at beginning (root → child order)
+              stack.unshift({
+                id: item.id,
+                source_id: item.source_id,
+                title: item.title,
+                type: item.type,
+              });
+
+              if (item.parent_id) {
+                traverseUp(item.parent_id);
               } else {
-                resolve(stack); // Root reached
+                resolve(stack); // reached root
               }
             } else {
-              resolve(stack); // Folder not found in DB
+              resolve(stack); // not found
             }
           },
-          (_, error) => reject(error),
+          (_, error) => {
+            console.error('❌ Error fetching parent chain:', error);
+            reject(error);
+          },
         );
       });
     };
 
-    traverseUp(driveId);
+    traverseUp(itemId);
   });
 };
 
-export const getItemsByParent = (parentId = null) => {
-  console.log('Searching in database for parent_id:', parentId);
+export const getChildrenByParent = async (
+  parentId = null,
+  types = null,
+) => {
   const fastdb = getDb();
+
   return new Promise((resolve, reject) => {
     fastdb.transaction(tx => {
-      if (parentId === null) {
-        // Original query for root items
-        const query = `
-          SELECT * FROM (
-            SELECT drive_id AS driveId, name, parent_id AS parentId, 'application/vnd.google-apps.folder' AS mimeType, NULL AS file_path,out_show,in_show,NULL AS duration, created_at
-            FROM folders 
-            WHERE  out_show = 1 
-            UNION ALL
-            SELECT drive_id AS driveId, name, parent_id AS parentId, mimeType, file_path,out_show,in_show,duration, created_at 
-            FROM files 
-            WHERE  out_show = 1
-          ) 
-          ORDER BY datetime(created_at) DESC;
-        `;
+      const isRoot = parentId === null;
 
+      let typeArray = null;
+      if (types) {
+        typeArray = Array.isArray(types) ? types : [types];
+      }
+
+      const typeCondition = typeArray
+        ? `AND items.type IN (${typeArray.map(() => '?').join(',')})`
+        : '';
+
+      const baseParams = [];
+      if (!isRoot) baseParams.push(parentId);
+      if (typeArray) baseParams.push(...typeArray);
+
+      const selectQuery = `
+        SELECT
+          items.*,
+          youtube_meta.channel_title,
+          youtube_meta.thumbnail
+        FROM items
+        LEFT JOIN youtube_meta
+          ON youtube_meta.item_id = items.id
+        WHERE
+          ${
+            isRoot
+              ? 'items.out_show = 1'
+              : 'items.parent_id = ?'
+          }
+          ${typeCondition}
+          AND items.deleted_at IS NULL
+        ORDER BY datetime(items.created_at) DESC;
+      `;
+
+      if (!isRoot) {
+        // Going deep → update in_show
         tx.executeSql(
-          query,
-          [],
-          (_, results) => {
-            const rows = results.rows;
-            let items = [];
-            for (let i = 0; i < rows.length; i++) {
-              items.push(rows.item(i));
-            }
-            console.log('SQL Query Success:', items);
-            resolve(items);
-          },
-          (_, error) => {
-            console.error('Error fetching items:', error);
-            reject(error);
-          },
-        );
-      } else {
-        // For non-null parentId, first update deleted field to 0 for all items in this folder
-        tx.executeSql(
-          'UPDATE folders SET in_show = 1 WHERE parent_id = ?;',
-          [parentId],
+          `
+          UPDATE items
+          SET in_show = 1
+          WHERE parent_id = ?
+          ${typeCondition}
+          AND deleted_at IS NULL;
+          `,
+          baseParams,
           () => {
             tx.executeSql(
-              'UPDATE files SET in_show = 1 WHERE parent_id = ?;',
-              [parentId],
-              () => {
-                // After updating, fetch the items
-                const query = `
-                  SELECT * FROM (
-                    SELECT drive_id AS driveId, name, parent_id AS parentId, 'application/vnd.google-apps.folder' AS mimeType, NULL AS file_path,out_show,in_show,NULL AS duration, created_at
-                    FROM folders 
-                    WHERE parent_id = ? AND in_show=1
-                    UNION ALL
-                    SELECT drive_id AS driveId, name, parent_id AS parentId, mimeType, file_path,out_show,in_show,duration, created_at 
-                    FROM files 
-                    WHERE parent_id = ? AND in_show =1
-                  ) 
-                  ORDER BY datetime(created_at) DESC;
-                `;
+              selectQuery,
+              baseParams,
+              (_, results) => {
+                const items = [];
+                for (let i = 0; i < results.rows.length; i++) {
+                  items.push(results.rows.item(i));
+                }
 
-                tx.executeSql(
-                  query,
-                  [parentId, parentId],
-                  (_, results) => {
-                    const rows = results.rows;
-                    let items = [];
-                    for (let i = 0; i < rows.length; i++) {
-                      items.push(rows.item(i));
-                    }
-                    console.log('SQL Query Success:', items);
-                    resolve(items);
-                  },
-                  (_, error) => {
-                    console.error('Error fetching items:', error);
-                    reject(error);
-                  },
+                console.log(
+                  `📂 Loaded ${items.length} children (parentId: ${parentId})`,
                 );
+                resolve(items);
               },
-              (_, error) => {
-                console.error('Error updating deleted field in files:', error);
-                reject(error);
-              },
+              (_, error) => reject(error),
             );
           },
-          (_, error) => {
-            console.error('Error updating deleted field in folders:', error);
-            reject(error);
+          (_, error) => reject(error),
+        );
+      } else {
+        // Root → NO parent filtering, just out_show = 1
+        tx.executeSql(
+          selectQuery,
+          baseParams,
+          (_, results) => {
+            const items = [];
+            for (let i = 0; i < results.rows.length; i++) {
+              items.push(results.rows.item(i));
+            }
+
+            console.log(`🏠 Loaded ${items.length} visible root items`);
+            resolve(items);
           },
+          (_, error) => reject(error),
         );
       }
     });
   });
 };
 
-//for the main screen
-export const loadYTItemsFromDB = () => {
-  return new Promise((resolve, reject) => {
-    const fastdb = getDb();
-    fastdb.transaction(tx => {
-      tx.executeSql(
-        `
-        SELECT * FROM (
-          SELECT id, ytube_id, title,channel_title,thumbnail, 'playlist' AS type, NULL as parent_id, 0 AS in_show,out_show,NULL AS duration, created_at
-          FROM playlists WHERE out_show=1
-          UNION ALL
-          SELECT id, ytube_id, title,channel_title,NULL as thumbnail, 'video' AS type, NULL as parent_id,in_show,out_show,duration, created_at
-          FROM videos
-          WHERE out_show = 1
-        )
-        ORDER BY datetime(created_at) DESC;
-        `,
-        [],
-        (_, results) => {
-          const items = [];
-          for (let i = 0; i < results.rows.length; i++) {
-            items.push(results.rows.item(i));
-          }
-          console.log('SQL Query Success:', items);
-          resolve(items);
-        },
-        (_, error) => {
-          console.error('Error loading data:', error);
-          reject(error);
-        },
-      );
-    });
-  });
-};
-
-//inside videos
-//when playlist is click we emulate virtual fetching by deleted = 0
-export const loadVideosFromDB = playListId => {
-  const fastdb = getDb();
-  return new Promise((resolve, reject) => {
-    fastdb.transaction(tx => {
-      // Find the local database ID of the playlist
-      tx.executeSql(
-        'SELECT id FROM playlists WHERE ytube_id = ?;',
-        [playListId],
-        (_, {rows}) => {
-          if (rows.length > 0) {
-            const localPlaylistId = rows.item(0).id;
-
-            // First, update the deleted field to 0 for all videos in this playlist
-            tx.executeSql(
-              'UPDATE videos SET in_show = 1 WHERE parent_id = ?;',
-              [localPlaylistId],
-              () => {
-                // After updating, fetch the videos
-                tx.executeSql(
-                  "SELECT *,NULL as thumbnail, 'video' AS type FROM videos WHERE parent_id = ?;",
-                  [localPlaylistId],
-                  (_, results) => {
-                    const items = [];
-                    for (let i = 0; i < results.rows.length; i++) {
-                      items.push(results.rows.item(i));
-                    }
-                    console.log('SQL Query Success:', items);
-                    resolve(items);
-                  },
-                  (_, error) => {
-                    console.error('Error loading videos:', error);
-                    reject(error);
-                  },
-                );
-              },
-              (_, error) => {
-                console.error('Error updating deleted field:', error);
-                reject(error);
-              },
-            );
-          } else {
-            console.warn('Playlist not found for ytube_id:', playListId);
-            resolve([]); // Return an empty array if no playlist is found
-          }
-        },
-        (_, error) => {
-          console.error('Error finding playlist ID:', error);
-          reject(error);
-        },
-      );
-    });
-  });
-};
-
-// Get all device files with uuid as driveId
-// Get all device files with uuid as driveId, only if file_path is not null
-export const getAllDeviceFiles = () => {
-  const fastdb = getDb();
-  return new Promise((resolve, reject) => {
-    fastdb.transaction(tx => {
-      tx.executeSql(
-        `SELECT uuid AS driveId, name, mimeType, file_path, duration, created_at, 'device' as source_type 
-         FROM device_files 
-         WHERE file_path IS NOT NULL 
-         ORDER BY created_at DESC`,
-        [],
-        (_, {rows}) => {
-          console.log(`✅ Retrieved ${rows.length} device files from DB`);
-          resolve(rows._array);
-        },
-        (_, error) => {
-          console.error('❌ Error fetching device files from DB:', error);
-          reject(error);
-        },
-      );
-    });
-  });
-};
 // ------------------------------notes
 
 export const getAllNotesModifiedToday = () => {
@@ -474,7 +377,6 @@ export const fetchLatestWatchData = async videoId => {
 export const fetchLatestWatchDataAllFields = async videoId => {
   const fastdb = getDb();
   return new Promise((resolve, reject) => {
-
     fastdb.transaction(tx => {
       tx.executeSql(
         `SELECT * FROM video_watch_history 
@@ -485,20 +387,19 @@ export const fetchLatestWatchDataAllFields = async videoId => {
         (txObj, resultSet) => {
           if (resultSet.rows.length > 0) {
             const raw = resultSet.rows.item(0);
-            resolve({ ...raw }); // Ensures it's a plain object
+            resolve({...raw}); // Ensures it's a plain object
           } else {
             resolve(null); // No data found
           }
         },
         (txObj, error) => {
-          console.error("Error fetching latest watch data:", error);
+          console.error('Error fetching latest watch data:', error);
           reject(error);
-        }
+        },
       );
     });
   });
 };
-
 
 export const getWatchHistoryByDate = date => {
   const fastdb = getDb();
@@ -1028,92 +929,3 @@ export const searchNotes = (query, offset = 0, limit = 20) => {
   });
 };
 
-// Fetch folders based on multiple parameters and values, including handling NULL values
-export const getFoldersByParams = params => {
-  const fastdb = getDb();
-  return new Promise((resolve, reject) => {
-    fastdb.transaction(tx => {
-      const {query, queryParams} = buildQuery(
-        "SELECT drive_id as driveId, name,parent_id as parentId , 'application/vnd.google-apps.folder' AS mimeType,NULL AS file_path,created_at FROM folders",
-        params,
-      );
-
-      tx.executeSql(
-        query,
-        queryParams,
-        (_, results) => {
-          const rows = results.rows;
-          let folders = [];
-          for (let i = 0; i < rows.length; i++) {
-            folders.push(rows.item(i));
-          }
-          console.log(`Folders with conditions:`, params, results.rows._array);
-          resolve(folders);
-        },
-        error => {
-          console.error(
-            `Error fetching folders with conditions:`,
-            params,
-            error,
-          );
-          reject(error);
-        },
-      );
-    });
-  });
-};
-
-// Fetch files based on multiple parameters and values, including handling NULL values
-export const getFilesByParams = params => {
-  const fastdb = getDb();
-  return new Promise((resolve, reject) => {
-    fastdb.transaction(tx => {
-      const {query, queryParams} = buildQuery(
-        'SELECT drive_id as driveId, name,parent_id as parentId, mimeType, file_path,duration,created_at FROM files',
-        params,
-      );
-
-      tx.executeSql(
-        query,
-        queryParams,
-        (_, results) => {
-          const rows = results.rows;
-          let files = [];
-          for (let i = 0; i < rows.length; i++) {
-            files.push(rows.item(i));
-          }
-          console.log(`Files with conditions:`, params, results.rows._array);
-          resolve(files);
-        },
-        error => {
-          console.error(`Error fetching files with conditions:`, params, error);
-          reject(error);
-        },
-      );
-    });
-  });
-};
-
-const getVideoByYtubeId = ytubeId => {
-  const fastdb = getDb();
-  return new Promise((resolve, reject) => {
-    fastdb.transaction(tx => {
-      tx.executeSql(
-        "SELECT *, 'video' AS type FROM videos WHERE ytube_id = ?;",
-        [ytubeId],
-        (_, {rows}) => {
-          if (rows.length > 0) {
-            resolve(rows.item(0)); // Return the first matching video
-          } else {
-            console.warn('No video found for ytube_id:', ytubeId);
-            resolve(null); // Return null if no video is found
-          }
-        },
-        (_, error) => {
-          console.error('Error fetching video:', error);
-          reject(error);
-        },
-      );
-    });
-  });
-};

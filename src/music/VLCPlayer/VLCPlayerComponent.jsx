@@ -237,7 +237,7 @@ const VLCPlayerComponent = forwardRef(
               <Icon name="arrow-back" size={24} color="white" />
             </TouchableOpacity>
             <Text style={styles.title} numberOfLines={1}>
-              {item?.name || 'Media Player'}
+              {item?.title || 'Media Player'}
             </Text>
           </View>
         </Animated.View>
@@ -255,8 +255,8 @@ const VLCPlayerComponent = forwardRef(
               pauseOnStart&&setIsPaused(true); //this happens on first time play // so if pauseOnStart then turn pause true from here. 
               durationRef.current = event.duration;
               updateDurationIfNotSet({
-                sourceType: item.source_type === 'device' ? 'device' : 'drive',
-                id: item.driveId, 
+                sourceType: item.type,
+                id: item.source_id, 
                 duration: event.duration / 1000,
               });
             }

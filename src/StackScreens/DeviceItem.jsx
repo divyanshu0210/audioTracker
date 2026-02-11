@@ -27,7 +27,7 @@ const DeviceItem = ({item}) => {
 
       <View style={styles.itemDetails}>
         <Text style={styles.title} numberOfLines={2}>
-          {item.name}
+          {item.title}
         </Text>
         {item.source && <Text style={styles.channelText}>{item.source}</Text>}
       </View>

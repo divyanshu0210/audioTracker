@@ -104,13 +104,9 @@ const BacePlayer = () => {
 
   // Helper function to get item properties
   const getItemProperties = item => {
-    const TIME_FACTOR = item?.driveId ? 1000 : 1;
-    const source_type = item?.driveId
-      ? item.source_type === 'device'
-        ? 'device'
-        : 'drive'
-      : 'youtube';
-    const videoId = item?.driveId ? item.driveId : item?.ytube_id;
+    const TIME_FACTOR = item?.type!=='youtube_video' ? 1000 : 1;
+    const source_type = item?.type;
+    const videoId = item?.source_id;
     // setActiveItem(item);
     return {TIME_FACTOR, source_type, videoId};
   };
@@ -128,7 +124,7 @@ const BacePlayer = () => {
       console.log('vlc ', currentItem);
       setNotesList([]);
       const tempIsAudio =
-        source_type !== 'youtube' && isAudioFile(currentItem?.name);
+        source_type !== 'youtube_video' && isAudioFile(currentItem?.name);
       setIsAudio(tempIsAudio);
 
       if (tempIsAudio) {
@@ -269,7 +265,7 @@ const BacePlayer = () => {
 
     if (
       Math.abs(currentTime - lastTime) /
-        (TIME_FACTOR * (source_type !== 'youtube' ? 1 : playbackSpeed)) >
+        (TIME_FACTOR * (source_type !== 'youtube_video' ? 1 : playbackSpeed)) >
       9
     ) {
       console.log(
@@ -562,7 +558,7 @@ const BacePlayer = () => {
                   <ActivityIndicator size="large" color="#fff" />
                 </View>
               )}
-              {source_type === 'youtube' && isDataLoaded ? (
+              {source_type === 'youtube_video' && isDataLoaded ? (
                 <YouTubePlayerComponent
                   ref={playerRef}
                   item={currentItem}
@@ -645,13 +641,13 @@ const BacePlayer = () => {
                 noteId={activeNoteId}
                 key={activeNoteId || 'new-note'}
                 captureScreenshot={
-                  source_type === 'youtube'
+                  source_type === 'youtube_video'
                     ? playerRef.current?.captureScreenshot
                     : captureVLCScreenshot
                 }
                 showPlayerMinimized={showPlayerMinimized}
                 playerRef={playerRef}
-                {...(source_type === 'youtube'
+                {...(source_type === 'youtube_video'
                   ? {
                       webViewRef: playerRef.current?.webViewRef,
                       ytTime: playerRef.current?.getCurrentTime(),

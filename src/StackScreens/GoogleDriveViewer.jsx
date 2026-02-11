@@ -24,21 +24,29 @@ import {
   insertOrUpdateFolder,
   upsertItem,
 } from '../database/C';
-import {getItemsByParent} from '../database/R';
+import {getChildrenByParent, getItemsByParent} from '../database/R';
 import BaseMediaListComponent from './BaseMediaListComponent';
 import {ItemTypes, ScreenTypes} from '../contexts/constants';
 
-const fetchDriveItems = async (driveId, setData, setLoading) => {
-  if (!driveId) {
+const fetchDriveItems = async (source_id, setData, setLoading) => {
+  if (!source_id) {
     console.error('Error', 'Invalid Drive ID');
     return;
   }
-  console.log('parent_id', driveId);
+  console.log('parent_id', source_id);
   setLoading?.(true);
   try {
     // checkStoredData(fileId)
     console.log('checking in database');
-    const storedFiles = await getItemsByParent(driveId);
+    //const storedFiles = await getItemsByParent(driveId);
+    const item = getItemBySourceId(source_id, 'drive_folder');
+    if (!item) {
+      console.log('Parent folder not found in DB:', source_id);
+      setData([]);
+      setLoading?.(false);
+      return;
+    }
+    const storedFiles = await getChildrenByParent(item.id, 'drive_file');
     console.log(storedFiles);
     if (storedFiles.length > 0) {
       // setData(storedFiles);
@@ -50,11 +58,11 @@ const fetchDriveItems = async (driveId, setData, setLoading) => {
       console.log('not got in DB , fetching using API');
 
       const response = await axios.get(
-        `https://www.googleapis.com/drive/v3/files?q='${driveId}'+in+parents&key=${DRIVE_API_KEY}&fields=files(id,name,mimeType)`,
+        `https://www.googleapis.com/drive/v3/files?q='${source_id}'+in+parents&key=${DRIVE_API_KEY}&fields=files(id,name,mimeType)`,
       );
       const formattedData = response.data.files.map(file => ({
-        driveId: file.id, // Renaming id to driveId
-        name: file.name,
+        source_id: file.id, // Renaming id to driveId
+        title: file.name,
         mimeType: file.mimeType,
         out_show: 0,
         in_show: 1,
@@ -64,7 +72,7 @@ const fetchDriveItems = async (driveId, setData, setLoading) => {
       console.log('fetching done');
 
       //store new data into database
-      storeInDB(response.data.files, driveId);
+      storeInDB(response.data.files, source_id);
     }
   } catch (error) {
     Alert.alert('Error', 'Failed to fetch Google Drive data.');
@@ -142,8 +150,8 @@ const GoogleDriveViewer = () => {
 
   useFocusEffect(
     useCallback(() => {
-      if (driveInfo.driveId) {
-        fetchDriveItems(driveInfo.driveId, setData, setLoading);
+      if (driveInfo.source_id) {
+        fetchDriveItems(driveInfo.source_id, setData, setLoading);
         if (passedStack) {
           setFolderStack(passedStack);
         }
@@ -168,7 +176,7 @@ const GoogleDriveViewer = () => {
       const newStack = folderStack.slice(0, index + 1);
       setFolderStack(newStack);
       fetchDriveItems(
-        newStack[newStack.length - 1].driveId,
+        newStack[newStack.length - 1].source_id,
         setData,
         setLoading,
       );
@@ -197,12 +205,12 @@ const GoogleDriveViewer = () => {
             ref={breadcrumbListRef}
             horizontal
             data={folderStack}
-            keyExtractor={item => item.driveId}
+            keyExtractor={item => item.source_id}
             renderItem={({item, index}) => (
               <TouchableOpacity onPress={() => handleBreadcrumbPress(index)}>
                 <Text style={styles.breadcrumbs}>
                   {index > 0 ? ' / ' : ''}
-                  {item.name}
+                  {item.title}
                 </Text>
               </TouchableOpacity>
             )}

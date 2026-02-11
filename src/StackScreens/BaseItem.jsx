@@ -40,21 +40,20 @@ const BaseItem = ({type, item, isSelected, onSelect, onLongPress, screen}) => {
 
   const sourceId =
     item?.rowid ||
-    item?.driveId ||
-    item?.ytube_id ||
+    item.source_id ||
     (type === 'notebook' && item?.id?.toString());
 
   const handleYoutubePress = () => {
-    if (item.type === 'playlist') {
+    if (item.type === 'youtube_playlist') {
       navigation.navigate('PlaylistView', {
-        playListId: item.ytube_id,
+        playListId: item.source_id,
         playListInfo: item,
       });
     } else {
       const dataSource = screen === ScreenTypes.IN ? videos : items;
-      const videoItems = dataSource.filter(i => i.type !== 'playlist');
+      const videoItems = dataSource.filter(i => i.type !== 'youtube_playlist');
       const startingIndex = videoItems.findIndex(
-        i => i.ytube_id === item.ytube_id,
+        i => i.source_id === item.source_id,
       );
       navigation.navigate('BacePlayer', {
         items: videoItems,
@@ -66,7 +65,7 @@ const BaseItem = ({type, item, isSelected, onSelect, onLongPress, screen}) => {
   const handleDevicePress = () => {
     if (item.file_path && isAudioOrVideo(item.mimeType)) {
       const startingIndex = validDeviceFiles.findIndex(
-        f => f.driveId === item.driveId,
+        f => f.source_id === item.source_id,
       );
       navigation.navigate('BacePlayer', {
         items: validDeviceFiles,
@@ -80,10 +79,10 @@ const BaseItem = ({type, item, isSelected, onSelect, onLongPress, screen}) => {
     if (item.mimeType === 'application/vnd.google-apps.folder') {
       setFolderStack(prevStack => {
         const last = prevStack[prevStack.length - 1];
-        if (last && last.driveId === item.driveId) {
+        if (last && last.source_id === item.source_id) {
           return prevStack; // Prevent duplicate
         }
-        return [...prevStack, {driveId: item.driveId, name: item.name}];
+        return [...prevStack, {source_id: item.source_id, title: item.title}];
       });
       navigation.push('GoogleDriveViewer', {driveInfo: item});
     } else {
@@ -101,7 +100,7 @@ const BaseItem = ({type, item, isSelected, onSelect, onLongPress, screen}) => {
       const dataSource =
         screen === ScreenTypes.IN ? nonFolderFilesInside : nonFolderFiles;
       const startingIndex = dataSource.findIndex(
-        f => f.driveId === item.driveId,
+        f => f.source_id === item.source_id,
       );
 
       navigation.navigate('BacePlayer', {

@@ -480,6 +480,8 @@ export const handleFileProcessing = async (
       title: fileName,
       mimeType: mimeType,
       file_path: destPath,
+      out_show: 1,
+      in_show: 0,
     });
 
     console.log(`✅ Inserted ${fileName} into device_files table`);

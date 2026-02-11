@@ -1,4 +1,3 @@
-
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import useDbStore from './dbStore';
 import SQLite from 'react-native-sqlite-2';
@@ -84,14 +83,14 @@ export const initDatabase = async () => {
     // );
     tx.executeSql(
       `CREATE TABLE IF NOT EXISTS folders (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              drive_id TEXT UNIQUE,
-              name TEXT,
-              parent_id TEXT,
-                out_show INTEGER DEFAULT 0,
-               in_show INTEGER DEFAULT 0,
-              created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );`,
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                drive_id TEXT UNIQUE,
+                name TEXT,
+                parent_id TEXT,
+                  out_show INTEGER DEFAULT 0,
+                in_show INTEGER DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+              );`,
       [],
       () => console.log('Folders table created successfully'),
       error => console.error('Error creating folders table:', error),
@@ -202,17 +201,95 @@ export const initDatabase = async () => {
           error?.message || 'Unknown error',
         ),
     );
-    
+
     tx.executeSql('SELECT sqlite_version();', [], (_, result) => {
       console.log('SQLite Version:', result.rows.item(0));
     });
 
-      //   tx.executeSql(
-      //   `DROP TABLE IF EXISTS categories;`,
-      //   [],
-      //   () => console.log(" categories table dropped successfully"),
-      //   (_, error) => console.error("Error dropping categories table:", error?.message || "Unknown error")
-      // );
+    tx.executeSql(
+      `CREATE TABLE IF NOT EXISTS items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+      source_id TEXT,
+
+      type TEXT NOT NULL CHECK (
+        type IN (
+          'youtube_video',
+          'youtube_playlist',
+          'drive_file',
+          'drive_folder',
+          'device_file'
+        )
+      ),
+
+      title TEXT NOT NULL,
+      parent_id INTEGER,
+
+      mimeType TEXT,
+      file_path TEXT,
+
+      duration INTEGER DEFAULT 0,
+      fav INTEGER DEFAULT 0,
+      out_show INTEGER DEFAULT 0,
+      in_show INTEGER DEFAULT 0,
+
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      deleted_at TIMESTAMP DEFAULT NULL,
+
+      UNIQUE (type, source_id),
+      FOREIGN KEY (parent_id) REFERENCES items(id) ON DELETE CASCADE
+    );`,
+      [],
+      () => console.log('Items table created successfully'),
+      (_, error) =>
+        console.error(
+          'Error creating items table:',
+          error?.message || 'Unknown error',
+        ),
+    );
+
+    tx.executeSql(
+      `CREATE TABLE IF NOT EXISTS youtube_meta (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+    item_id INTEGER NOT NULL,
+
+    channel_title TEXT,
+    thumbnail TEXT,
+
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    UNIQUE (item_id),
+    FOREIGN KEY (item_id) REFERENCES items(id) ON DELETE CASCADE
+  );`,
+      [],
+      () => console.log('youtube_meta table created successfully'),
+      (_, error) =>
+        console.error(
+          'Error creating youtube_meta table:',
+          error?.message || 'Unknown error',
+        ),
+    );
+    tx.executeSql(
+      `CREATE INDEX IF NOT EXISTS idx_items_type_parent
+   ON items(type, parent_id);`,
+    );
+
+    tx.executeSql(
+      `CREATE INDEX IF NOT EXISTS idx_items_deleted_at
+   ON items(deleted_at);`,
+    );
+
+    tx.executeSql(
+      `CREATE INDEX IF NOT EXISTS idx_youtube_meta_item_id
+   ON youtube_meta(item_id);`,
+    );
+    //   tx.executeSql(
+    //   `DROP TABLE IF EXISTS categories;`,
+    //   [],
+    //   () => console.log(" categories table dropped successfully"),
+    //   (_, error) => console.error("Error dropping categories table:", error?.message || "Unknown error")
+    // );
 
     // Create categories table
     tx.executeSql(
@@ -247,7 +324,6 @@ export const initDatabase = async () => {
       () => console.log('Category_items table created successfully'),
       error => console.error('Error creating category_items table:', error),
     );
-
   });
 };
 

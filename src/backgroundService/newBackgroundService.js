@@ -8,7 +8,7 @@ import { getSetting } from '../database/settings';
 /* Constants                           */
 /* ---------------------------------- */
 
-const BACKUP_INTERVAL_MS = 1 * 60 * 1000; // 1 min (adjust)
+const BACKUP_INTERVAL_MS = 5 * 60 * 1000; 
 
 /* ---------------------------------- */
 /* Internal State                      */

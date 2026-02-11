@@ -18,7 +18,12 @@ import {
 } from 'react-native';
 import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
 import {useAppState} from '../contexts/AppStateContext';
-import {insertOrUpdateFile, insertOrUpdateFolder} from '../database/C';
+import {
+  getItemBySourceId,
+  insertOrUpdateFile,
+  insertOrUpdateFolder,
+  upsertItem,
+} from '../database/C';
 import {getItemsByParent} from '../database/R';
 import BaseMediaListComponent from './BaseMediaListComponent';
 import {ItemTypes, ScreenTypes} from '../contexts/constants';
@@ -69,30 +74,43 @@ const fetchDriveItems = async (driveId, setData, setLoading) => {
   }
 };
 
-const storeInDB = async (files, driveId) => {
-  console.log('storing in database', files);
+const storeInDB = async (files, driveSourceId) => {
+  console.log('📦 Storing in database', files);
+
   try {
+    // 🔽 Step 1: Get internal parent id
+    const parentItem = await getItemBySourceId(driveSourceId, 'drive_folder');
+
+    if (!parentItem) {
+      console.error('❌ Parent folder not found in DB:', driveSourceId);
+      return;
+    }
+
+    const parentInternalId = parentItem.id;
+
+    // 🔽 Step 2: Insert children
     for (const item of files) {
       try {
-        if (item.mimeType === 'application/vnd.google-apps.folder') {
-          await insertOrUpdateFolder(item.id, item.name, driveId, null, 1);
-        } else {
-          await insertOrUpdateFile(
-            item.id,
-            item.name,
-            driveId,
-            item.mimeType,
-            null,
-            null,
-            1,
-          );
-        }
-        console.log(`✅ Successfully stored: ${item.name}`);
+        const isFolder = item.mimeType === 'application/vnd.google-apps.folder';
+
+        await upsertItem({
+          source_id: item.id,
+          type: isFolder ? 'drive_folder' : 'drive_file',
+          title: item.name,
+          parent_id: parentInternalId, // ✅ internal id now
+          mimeType: item.mimeType,
+          file_path: null,
+          out_show: 0,
+          in_show: 1,
+        });
+
+        console.log(`✅ Stored: ${item.name}`);
       } catch (error) {
         console.error(`❌ Error storing ${item.name}:`, error);
       }
     }
-    console.log('✅ All items processed');
+
+    console.log('🟢 All Drive items processed');
   } catch (error) {
     console.error('❌ Error in storeInDB:', error);
   }

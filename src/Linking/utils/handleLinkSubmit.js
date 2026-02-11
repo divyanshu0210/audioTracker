@@ -9,6 +9,8 @@ import {
   insertDeviceFile,
   insertOrUpdateFolder,
   insertOrUpdateFile,
+  upsertItem,
+  upsertYoutubeMeta,
 } from '../../database/C';
 import RNFS from 'react-native-fs';
 import {NativeModules} from 'react-native';
@@ -120,17 +122,48 @@ export const fetchYTData = async (
           out_show: 1,
           in_show: 0,
         };
-        await saveMainScreenVideoToDB(newItem.ytube_id, newItem.title,newItem.channelTitle, () => {
-          setItems(prevItems => {
-            const filtered = prevItems.filter(
-              item => item.ytube_id !== newItem.ytube_id,
-            );
-            return [newItem, ...filtered];
-          });
-          if (selectedCategory != null) {
-            addItemToCategory(selectedCategory, newItem.ytube_id, 'youtube');
-          }
+        // await saveMainScreenVideoToDB(
+        //   newItem.ytube_id,
+        //   newItem.title,
+        //   newItem.channelTitle,
+        //   () => {
+        //     setItems(prevItems => {
+        //       const filtered = prevItems.filter(
+        //         item => item.ytube_id !== newItem.ytube_id,
+        //       );
+        //       return [newItem, ...filtered];
+        //     });
+        //     if (selectedCategory != null) {
+        //       addItemToCategory(selectedCategory, newItem.ytube_id, 'youtube');
+        //     }
+        //   },
+        // );
+
+        const savedItem = await upsertItem({
+          source_id: newItem.ytube_id,
+          type: 'youtube_video',
+          title: newItem.title,
+          parent_id: null, // main screen = no parent
+          out_show: 1,
         });
+        await upsertYoutubeMeta({
+          item_id: savedItem.id,
+          channel_title: newItem.channelTitle,
+          thumbnail: newItem.thumbnail ?? null,
+        });
+
+        // Update UI state
+        setItems(prevItems => {
+          const filtered = prevItems.filter(
+            item => item.source_id !== newItem.ytube_id,
+          );
+          return [savedItem, ...filtered];
+        });
+
+        // Category mapping
+        if (selectedCategory != null) {
+          addItemToCategory(selectedCategory, savedItem.id, 'youtube');
+        }
 
         navigation?.navigate('BacePlayer', {item: newItem});
         return;
@@ -145,9 +178,9 @@ export const fetchYTData = async (
             );
             return [playlist, ...filtered];
           });
-            if (selectedCategory != null) {
-          addItemToCategory(selectedCategory, extracted.id, 'youtube');
-        }
+          if (selectedCategory != null) {
+            addItemToCategory(selectedCategory, extracted.id, 'youtube');
+          }
           console.log('✅ Playlist found and updated in DB');
           console.log('UI updated');
         },
@@ -168,17 +201,54 @@ export const fetchYTData = async (
           type: 'playlist',
           parent_id: null,
         };
-        await savePlaylistToDB(newItem.ytube_id, newItem.title,newItem.thumbnail , newItem.channelTitle, () => {
-          setItems(prevItems => {
-            const filtered = prevItems.filter(
-              item => item.ytube_id !== newItem.ytube_id,
-            );
-            return [newItem, ...filtered];
-          });
-           if (selectedCategory != null) {
-            addItemToCategory(selectedCategory, newItem.ytube_id, 'youtube');
-          }
+        // await savePlaylistToDB(
+        //   newItem.ytube_id,
+        //   newItem.title,
+        //   newItem.thumbnail,
+        //   newItem.channelTitle,
+        //   () => {
+        //     setItems(prevItems => {
+        //       const filtered = prevItems.filter(
+        //         item => item.ytube_id !== newItem.ytube_id,
+        //       );
+        //       return [newItem, ...filtered];
+        //     });
+        //     if (selectedCategory != null) {
+        //       addItemToCategory(selectedCategory, newItem.ytube_id, 'youtube');
+        //     }
+        //   },
+        // );
+
+        const savedItem = await upsertItem({
+          source_id: newItem.ytube_id,
+          type: 'youtube_playlist',
+          title: newItem.title,
+          out_show: 1,
         });
+
+        // Upsert youtube_meta
+        await upsertYoutubeMeta({
+          item_id: savedItem.id,
+          channel_title: newItem.channelTitle,
+          thumbnail: newItem.thumbnail,
+        });
+
+        // Update UI state
+        setItems(prevItems => {
+          const filtered = prevItems.filter(
+            item => item.source_id !== newItem.ytube_id,
+          );
+          return [savedItem, ...filtered];
+        });
+
+        // Category mapping (updated type name!)
+        if (selectedCategory != null) {
+          addItemToCategory(
+            selectedCategory,
+            savedItem.id, // now use internal ID
+            'youtube', // hardcoded type for category mapping
+          );
+        }
       }
     }
   } catch (error) {
@@ -221,16 +291,26 @@ export const handleDriveLink = async (
     const isFolder = mimeType === 'application/vnd.google-apps.folder';
 
     if (isFolder) {
-      const {item} = await insertOrUpdateFolder(driveId, itemName, null, 1, 0);
+      // const {item} = await insertOrUpdateFolder(driveId, itemName, null, 1, 0);
+      const {item} = await upsertItem({
+        source_id: driveId,
+        type: 'drive_folder',
+        title: itemName,
+        parent_id: null,
+        mimeType: 'application/vnd.google-apps.folder',
+        out_show: 1,
+        in_show: 0,
+      });
+
       // Always update UI by removing existing and adding to top
       console.log(item);
       setDriveLinksList(prev => [
         item,
-        ...prev.filter(i => i.driveId !== driveId),
+        ...prev.filter(i => i.source_id !== driveId),
       ]);
 
-       if (selectedCategory != null) {
-        await addItemToCategory(selectedCategory, driveId, 'drive');
+      if (selectedCategory != null) {
+        await addItemToCategory(selectedCategory, item.id, 'drive');
       }
       // if (selectedCategory != null) {
       //   ToastAndroid.show(
@@ -239,30 +319,40 @@ export const handleDriveLink = async (
       //   );
       // }
     } else {
-      const {item} = await insertOrUpdateFile(
-        driveId,
-        itemName,
-        null,
-        mimeType,
-        null,
-        1,
-        0,
-      );
+      // const {item} = await insertOrUpdateFile(
+      //   driveId,
+      //   itemName,
+      //   null,
+      //   mimeType,
+      //   null,
+      //   1,
+      //   0,
+      // );
+      const {item} = await upsertItem({
+        source_id: driveId,
+        type: 'drive_file',
+        title: itemName,
+        parent_id: null,
+        mimeType: mimeType,
+        file_path: null,
+        out_show: 1,
+        in_show: 0,
+      });
 
       if (selectedCategory != null) {
-        await addItemToCategory(selectedCategory, driveId, 'drive');
+        await addItemToCategory(selectedCategory, item.id, 'drive');
       }
       console.log(item);
       // Always update UI by removing existing and adding to top
       setDriveLinksList(prev => [
         item,
-        ...prev.filter(i => i.driveId !== driveId),
+        ...prev.filter(i => i.source_id !== driveId),
       ]);
     }
 
     navigation?.navigate('HomeScreen', {screen: 'Drive'});
   } catch (error) {
-    console.log(error)
+    console.log(error);
     // console.error('Drive fetch error:', error);
     if (error.response?.status === 403 || error.response?.status === 404) {
       Alert.alert(
@@ -317,23 +407,15 @@ export const isAudioOrVideo = mimeType => {
 };
 
 export const isAudioFile = fileName => {
-  const audioExtensions = [
-    'mp3',
-    'wav',
-    'ogg',
-    'm4a',
-    'flac',
-    'aac',
-    'wma',
-  ];
+  const audioExtensions = ['mp3', 'wav', 'ogg', 'm4a', 'flac', 'aac', 'wma'];
   const ext = fileName.split('.').pop().toLowerCase();
   return audioExtensions.includes(ext);
 };
 
 export const extractFileId = url => {
-    const match = url.match(/[-\w]{25,}/);
-    return match ? match[0] : null;
-  };
+  const match = url.match(/[-\w]{25,}/);
+  return match ? match[0] : null;
+};
 
 const handleDeviceFileFromUri = async (
   uri,
@@ -391,7 +473,15 @@ export const handleFileProcessing = async (
   const uuid = generateUUID();
 
   try {
-    await insertDeviceFile(uuid, fileName, destPath, mimeType);
+    // await insertDeviceFile(uuid, fileName, destPath, mimeType);
+    await upsertItem({
+      source_id: uuid,
+      type: 'device_file',
+      title: fileName,
+      mimeType: mimeType,
+      file_path: destPath,
+    });
+
     console.log(`✅ Inserted ${fileName} into device_files table`);
   } catch (dbError) {
     console.error(`❌ DB insert failed for ${fileName}:`, dbError);

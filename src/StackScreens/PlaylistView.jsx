@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
 import {useAppState} from '../contexts/AppStateContext';
-import {saveVideoToDB} from '../database/C';
+import {getItemBySourceId,  saveVideoToDB} from '../database/C';
 import {loadVideosFromDB} from '../database/R';
 import BaseMediaListComponent from './BaseMediaListComponent';
 import {ItemTypes, ScreenTypes} from '../contexts/constants';
@@ -77,23 +77,51 @@ export default function PlaylistView() {
 
     console.log('Fetching from YouTube API...');
     const fetchedVideos = await fetchAllVideos(playListId);
-
-    if (fetchedVideos) {
-      await Promise.all(
-        fetchedVideos.map(video =>
-          saveVideoToDB(
-            video.ytube_id,
-            video.title,
-            video.channelTitle,
-            video.parent_id,
-          ),
-        ),
-      );
-      console.log('Fetched videos from API:', fetchedVideos.length);
-      return fetchedVideos;
+    if (!fetchedVideos || fetchedVideos.length === 0) {
+      return [];
+    }
+    const parentInternalId = await getItemBySourceId(playListId, 'youtube_playlist');
+    if (!parentInternalId) {
+      console.error('❌ Cannot insert videos: Playlist not found locally.');
+      return [];
     }
 
-    return [];
+    await Promise.all(
+      fetchedVideos.map(async video => {
+        const savedItem = await upsertItem({
+          source_id: video.ytube_id,
+          type: 'youtube_video',
+          title: video.title,
+          parent_id: parentInternalId,
+          in_show: 1,
+        });
+
+        // Optional but recommended
+        await upsertYoutubeMeta({
+          item_id: savedItem.id,
+          channel_title: video.channelTitle,
+          thumbnail: video.thumbnail ?? null,
+        });
+      }),
+    );
+
+    console.log('🟢 Stored videos:', fetchedVideos.length);
+
+    return fetchedVideos;
+    // if (fetchedVideos) {
+    //   await Promise.all(
+    //     fetchedVideos.map(video =>
+    //       saveVideoToDB(
+    //         video.ytube_id,
+    //         video.title,
+    //         video.channelTitle,
+    //         video.parent_id,
+    //       ),
+    //     ),
+    //   );
+    //   console.log('Fetched videos from API:', fetchedVideos.length);
+    //   return fetchedVideos;
+    // }
   };
 
   // Fetch videos from YouTube API

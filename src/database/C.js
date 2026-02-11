@@ -2,6 +2,170 @@
 
 import {getDb} from './database';
 
+export const upsertItem = ({
+  source_id,
+  type,
+  title,
+  parent_id = null,
+  mimeType = null,
+  file_path = null,
+  out_show = 0,
+  in_show = 0,
+  fav = 0,
+  duration = 0,
+}) => {
+  const fastdb = getDb();
+
+  console.log(`\n🟡 [UPSERT START]`, { source_id, type, title });
+
+  return new Promise((resolve, reject) => {
+    fastdb.transaction(tx => {
+      tx.executeSql(
+        `
+        INSERT INTO items (
+          source_id,
+          type,
+          title,
+          parent_id,
+          mimeType,
+          file_path,
+          out_show,
+          in_show,
+          fav,
+          duration
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(type, source_id)
+        DO UPDATE SET
+          title      = excluded.title,
+          parent_id  = COALESCE(excluded.parent_id, items.parent_id),
+          mimeType   = COALESCE(excluded.mimeType, items.mimeType),
+          file_path  = COALESCE(excluded.file_path, items.file_path),
+          out_show   = excluded.out_show,
+          in_show    = excluded.in_show,
+          fav        = excluded.fav,
+          duration   = excluded.duration,
+          created_at = CURRENT_TIMESTAMP
+        WHERE items.deleted_at IS NULL;
+        `,
+        [
+          source_id,
+          type,
+          title,
+          parent_id,
+          mimeType,
+          file_path,
+          out_show,
+          in_show,
+          fav,
+          duration,
+        ],
+        () => {
+          // 🔽 Immediately fetch the full row
+          tx.executeSql(
+            `
+            SELECT * FROM items
+            WHERE type = ? AND source_id = ? AND deleted_at IS NULL
+            LIMIT 1;
+            `,
+            [type, source_id],
+            (_, { rows }) => {
+              if (rows.length > 0) {
+                const fullRow = rows.item(0);
+
+                console.log(`🟢 [UPSERT SUCCESS - FULL ROW]`, fullRow);
+
+                resolve(fullRow);
+              } else {
+                console.warn('⚠️ UPSERT completed but row not found.');
+                resolve(null);
+              }
+            },
+            (_, error) => {
+              console.error('🔴 Failed to fetch row after upsert:', error);
+              reject(error);
+            },
+          );
+        },
+        (_, error) => {
+          console.error(`🔴 [UPSERT FAILED]`, error?.message || error);
+          reject(error);
+        },
+      );
+    });
+  });
+};
+
+export const upsertYoutubeMeta = ({
+  item_id,
+  channel_title,
+  thumbnail,
+}) => {
+  const fastdb = getDb();
+
+  return new Promise((resolve, reject) => {
+    fastdb.transaction(tx => {
+      tx.executeSql(
+        `
+        INSERT INTO youtube_meta (item_id, channel_title, thumbnail)
+        VALUES (?, ?, ?)
+        ON CONFLICT(item_id)
+        DO UPDATE SET
+          channel_title = excluded.channel_title,
+          thumbnail = excluded.thumbnail;
+        `,
+        [item_id, channel_title, thumbnail],
+        () => resolve(true),
+        (_, error) => reject(error),
+      );
+    });
+  });
+};
+
+export const getItemBySourceId = (source_id, type = null) => {
+  const fastdb = getDb();
+
+  return new Promise((resolve, reject) => {
+    fastdb.transaction(tx => {
+      let query = `
+        SELECT *
+        FROM items
+        WHERE source_id = ?
+        AND deleted_at IS NULL
+      `;
+
+      const params = [source_id];
+
+      if (type) {
+        query += ` AND type = ?`;
+        params.push(type);
+      }
+
+      query += ` LIMIT 1;`;
+
+      tx.executeSql(
+        query,
+        params,
+        (_, { rows }) => {
+          if (rows.length > 0) {
+            const item = rows.item(0);
+            console.log('🟢 Item found:', item);
+            resolve(item);
+          } else {
+            console.warn('⚠️ Item not found:', { source_id, type });
+            resolve(null);
+          }
+        },
+        (_, error) => {
+          console.error('🔴 getItemBySourceId error:', error);
+          reject(error);
+        },
+      );
+    });
+  });
+};
+
+
 export const insertOrUpdateFolder = async (
   driveId,
   name,
@@ -175,12 +339,18 @@ export const insertDeviceFile = (uuid, name, filePath, mimeType) => {
   });
 };
 
-export const savePlaylistToDB = (ytube_id, title,thumbnail,channelTitle,callback) => {
+export const savePlaylistToDB = (
+  ytube_id,
+  title,
+  thumbnail,
+  channelTitle,
+  callback,
+) => {
   const fastdb = getDb();
   fastdb.transaction(tx => {
     tx.executeSql(
       'INSERT INTO playlists (ytube_id, title, thumbnail, channel_title,out_show) VALUES (?,?,?, ?,1);',
-      [ytube_id, title,thumbnail, channelTitle],
+      [ytube_id, title, thumbnail, channelTitle],
       (_, result) => {
         console.log('Playlist saved! ID:', result.insertId);
         if (callback) callback();
@@ -189,12 +359,18 @@ export const savePlaylistToDB = (ytube_id, title,thumbnail,channelTitle,callback
     );
   });
 };
-export const saveMainScreenVideoToDB = (ytube_id, title,channelTitle, callback) => {
+
+export const saveMainScreenVideoToDB = (
+  ytube_id,
+  title,
+  channelTitle,
+  callback,
+) => {
   const fastdb = getDb();
   fastdb.transaction(tx => {
     tx.executeSql(
       'INSERT INTO videos (ytube_id, title,channel_title, parent_id,out_show) VALUES (?, ?,?, NULL, 1);',
-      [ytube_id, title,channelTitle],
+      [ytube_id, title, channelTitle],
       (_, result) => {
         callback();
         console.log('Video saved to main screen!', result.insertId);
@@ -204,7 +380,7 @@ export const saveMainScreenVideoToDB = (ytube_id, title,channelTitle, callback) 
   });
 };
 
-export const saveVideoToDB = (ytube_id, title,channelTitle, parent_id) => {
+export const saveVideoToDB = (ytube_id, title, channelTitle, parent_id) => {
   const fastdb = getDb();
 
   fastdb.transaction(tx => {
@@ -238,7 +414,7 @@ export const saveVideoToDB = (ytube_id, title,channelTitle, parent_id) => {
               // 3b. Video doesn't exist - insert it
               tx.executeSql(
                 'INSERT INTO videos (ytube_id, title,channel_title, parent_id, in_show) VALUES (?, ?,?, ?, 1);',
-                [ytube_id, title,channelTitle, parent_id_internal],
+                [ytube_id, title, channelTitle, parent_id_internal],
                 (_, result) =>
                   console.log('Video saved with ID:', result.insertId),
                 (_, error) => console.error('Insert error:', error),
@@ -252,7 +428,6 @@ export const saveVideoToDB = (ytube_id, title,channelTitle, parent_id) => {
     );
   });
 };
-
 
 export const createNewNoteinDB = (sourceId, sourceType) => {
   const fastdb = getDb();
@@ -366,7 +541,6 @@ export const moveNotesToDefaultNotebook = async notebookId => {
     });
   });
 };
-
 
 export const saveWatchProgress = async (
   videoId,

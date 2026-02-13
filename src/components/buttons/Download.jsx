@@ -4,7 +4,7 @@ import Ionicons from 'react-native-vector-icons/Ionicons';
 import RNFS from 'react-native-fs';
 import CircularProgress from 'react-native-circular-progress-indicator';
 import {DRIVE_API_KEY} from '@env';
-import {updateFilePath} from '../../database/U';
+import {updateFilePath, updateItemFields} from '../../database/U';
 import { useAppState } from '../../contexts/AppStateContext';
 
 export const DownloadButton = ({file}) => {
@@ -13,10 +13,10 @@ export const DownloadButton = ({file}) => {
   const {setDriveLinksList, setData} = useAppState();
   const currentDownloadJobId = useRef(null);
 
-  const getLocalFilePath = (driveId, fileName) => {
+  const getLocalFilePath = (sourceId, fileName) => {
     const sanitizedFileName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
-    const sanitizedDriveId = driveId.replace(/[^a-zA-Z0-9._-]/g, '_');
-    return `${RNFS.ExternalDirectoryPath}/${sanitizedDriveId}_${sanitizedFileName}`;
+    const sanitizedSourceId = sourceId.replace(/[^a-zA-Z0-9._-]/g, '_');
+    return `${RNFS.ExternalDirectoryPath}/${sanitizedSourceId}_${sanitizedFileName}`;
   };
 
   const isFileDownloaded = async filePath => {
@@ -26,29 +26,29 @@ export const DownloadButton = ({file}) => {
   const onDownloadComplete = (file, localPath) => {
     setData(prevData =>
       prevData.map(f =>
-        f.driveId === file.driveId ? {...f, file_path: localPath} : f,
+        f.source_id === file.source_id ? {...f, file_path: localPath} : f,
       ),
     );
     setDriveLinksList(prevData =>
       prevData.map(f =>
-        f.driveId === file.driveId ? {...f, file_path: localPath} : f,
+        f.source_id === file.source_id ? {...f, file_path: localPath} : f,
       ),
     );
   };
 
   const handleDownload = async file => {
-    const localPath = getLocalFilePath(file.driveId, file.name);
+    const localPath = getLocalFilePath(file.source_id, file.title);
     try {
-      setDownloadingFileId(file.driveId);
+      setDownloadingFileId(file.source_id);
       setProgress(0);
 
       const isDownloaded = await isFileDownloaded(localPath);
-      if (isDownloaded && localPath === file.filePath) {
+      if (isDownloaded && localPath === file.file_path) {
         Alert.alert('Already downloaded', `File is already at: ${localPath}`);
         return;
       }
 
-      const url = `https://www.googleapis.com/drive/v3/files/${file.driveId}?alt=media&key=${DRIVE_API_KEY}`;
+      const url = `https://www.googleapis.com/drive/v3/files/${file.source_id}?alt=media&key=${DRIVE_API_KEY}`;
 
       const downloadOptions = {
         fromUrl: url,
@@ -70,7 +70,7 @@ export const DownloadButton = ({file}) => {
       currentDownloadJobId.current = null;
 
       if (result.statusCode === 200) {
-        await updateFilePath(file.driveId, localPath);
+        await updateItemFields(file.id, {file_path: localPath});
         onDownloadComplete(file, localPath);
         Alert.alert('Download Complete', `File saved to: ${localPath}`);
       }
@@ -96,7 +96,7 @@ export const DownloadButton = ({file}) => {
     }
   };
 
-  const isDownloading = downloadingFileId === file.driveId;
+  const isDownloading = downloadingFileId === file.source_id;
 
   return (
     <TouchableOpacity

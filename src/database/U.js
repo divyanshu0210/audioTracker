@@ -1,75 +1,31 @@
+import { getFullItemByIdTx } from './C';
 import {db, getDb} from './database';
 import {fastdb} from './FTSDatabase';
 
-// Check & update playlist by ytube_id
-export const checkAndUpdateVideoByYtubeId = (ytube_id, callback) => {
+export const updateItemFields = (id, updates) => {
   const fastdb = getDb();
+
+  const keys = Object.keys(updates);
+
+  if (!keys.length) {
+    return Promise.resolve(null);
+  }
+
+  const setClause = keys.map(key => `${key} = ?`).join(', ');
+  const values = keys.map(key => updates[key]);
+
   return new Promise((resolve, reject) => {
     fastdb.transaction(tx => {
       tx.executeSql(
-        'SELECT title, parent_id,out_show,in_show FROM videos WHERE ytube_id = ?',
-        [ytube_id],
-        (_, results) => {
-          if (results.rows.length > 0) {
-            const row = results.rows.item(0);
-            tx.executeSql(
-              'UPDATE videos SET out_show = 1,created_at=CURRENT_TIMESTAMP WHERE ytube_id = ?',
-              [ytube_id],
-              () => {
-                const updatedItem = {
-                  ytube_id,
-                  title: row.title,
-                  type: 'video',
-                  parent_id: row.parent_id,
-                  out_show: 1,
-                  in_show: row.in_show,
-                };
-                if (callback) {
-                  callback(updatedItem);
-                }
-
-                resolve(updatedItem);
-              },
-              (_, error) => reject(error),
-            );
-          } else {
-            resolve(null); // Not found
-          }
-        },
-        (_, error) => reject(error),
-      );
-    });
-  });
-};
-
-export const checkAndUpdatePlaylistByYtubeId = (ytube_id, callback) => {
-  const fastdb = getDb();
-  return new Promise((resolve, reject) => {
-    fastdb.transaction(tx => {
-      tx.executeSql(
-        'SELECT title,out_show FROM playlists WHERE ytube_id = ?',
-        [ytube_id],
-        (_, results) => {
-          if (results.rows.length > 0) {
-            const row = results.rows.item(0);
-            tx.executeSql(
-              'UPDATE playlists SET out_show = 1,created_at=CURRENT_TIMESTAMP WHERE ytube_id = ?',
-              [ytube_id],
-              () => {
-                const updatedItem = {
-                  ytube_id,
-                  title: row.title,
-                  type: 'playlist',
-                  parent_id: null,
-                };
-                if (callback) callback(updatedItem);
-                resolve(updatedItem);
-              },
-              (_, error) => reject(error),
-            );
-          } else {
-            resolve(null); // Not found
-          }
+        `
+        UPDATE items
+        SET ${setClause}
+        WHERE id = ?;
+        `,
+        [...values, id],
+        async () => {
+          const fullItem = await getFullItemByIdTx(tx, id);
+          resolve(fullItem);
         },
         (_, error) => reject(error),
       );
@@ -161,6 +117,9 @@ export const updateDurationIfNotSet = ({sourceType, id, duration}) => {
     );
   });
 };
+
+
+
 export const updateWatchTimestampIfExists = videoId => {
   const today = new Date().toISOString().slice(0, 10); // 'YYYY-MM-DD'
   const fastdb = getDb();

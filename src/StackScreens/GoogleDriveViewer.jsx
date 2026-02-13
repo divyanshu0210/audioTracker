@@ -10,6 +10,7 @@ import {
   ActivityIndicator,
   Alert,
   FlatList,
+  InteractionManager,
   SafeAreaView,
   StyleSheet,
   Text,
@@ -18,109 +19,116 @@ import {
 } from 'react-native';
 import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
 import {useAppState} from '../contexts/AppStateContext';
-import {
-  getItemBySourceId,
-  insertOrUpdateFile,
-  insertOrUpdateFolder,
-  upsertItem,
-} from '../database/C';
-import {getChildrenByParent, getItemsByParent} from '../database/R';
+import {getItemBySourceId, upsertItem} from '../database/C';
+import {getChildrenByParent} from '../database/R';
 import BaseMediaListComponent from './BaseMediaListComponent';
 import {ItemTypes, ScreenTypes} from '../contexts/constants';
+import useAppStateStore from '../contexts/appStateStore';
 
-const fetchDriveItems = async (source_id, setData, setLoading) => {
+export const fetchDriveItems = async (
+  source_id,
+  getFolderFromCache,
+  setFolderCache,
+  setData,
+  setLoading,
+) => {
   if (!source_id) {
     console.error('Error', 'Invalid Drive ID');
     return;
   }
   console.log('parent_id', source_id);
-  setLoading?.(true);
+
   try {
-    // checkStoredData(fileId)
-    console.log('checking in database');
-    //const storedFiles = await getItemsByParent(driveId);
-    const item = getItemBySourceId(source_id, 'drive_folder');
-    if (!item) {
+    setLoading?.(true);
+    const cached = getFolderFromCache(source_id);
+    console.log('folderCache:', cached);
+    if (cached) {
+      console.log('Using cached memory data');
+      setData(cached);
+      setLoading?.(false);
+      return;
+    }
+    // ── First try database ────────────────────────────────────────
+    const parentItem = await getItemBySourceId(source_id, 'drive_folder');
+    if (!parentItem) {
       console.log('Parent folder not found in DB:', source_id);
       setData([]);
-      setLoading?.(false);
       return;
     }
-    const storedFiles = await getChildrenByParent(item.id, 'drive_file');
-    console.log(storedFiles);
+
+    const storedFiles = await getChildrenByParent(parentItem.id, [
+      'drive_file',
+      'drive_folder',
+    ]);
     if (storedFiles.length > 0) {
-      // setData(storedFiles);
-      setData(storedFiles);
-      setLoading?.(false);
-      console.log('Got files in database');
+      setData(storedFiles); // ← already correct shape
+      // ✅ Save to memory cache
+      setFolderCache(source_id, storedFiles);
+
+      console.log('Got files from database');
       return;
-    } else {
-      console.log('not got in DB , fetching using API');
-
-      const response = await axios.get(
-        `https://www.googleapis.com/drive/v3/files?q='${source_id}'+in+parents&key=${DRIVE_API_KEY}&fields=files(id,name,mimeType)`,
-      );
-      const formattedData = response.data.files.map(file => ({
-        source_id: file.id, // Renaming id to driveId
-        title: file.name,
-        mimeType: file.mimeType,
-        out_show: 0,
-        in_show: 1,
-      }));
-
-      setData(formattedData);
-      console.log('fetching done');
-
-      //store new data into database
-      storeInDB(response.data.files, source_id);
     }
+    // ── Not in DB → fetch from Google Drive API ───────────────────
+    console.log('Not found in DB, fetching via API...');
+    const response = await axios.get(
+      `https://www.googleapis.com/drive/v3/files?q='${source_id}'+in+parents&key=${DRIVE_API_KEY}&fields=files(id,name,mimeType)`,
+    );
+
+    const driveFiles = response.data.files;
+
+    if (!driveFiles?.length) {
+      setData([]);
+      console.log('Google Drive returned no files');
+      return;
+    }
+
+    // ── Store in DB and get back the created/upserted records ─────
+    console.log(`Storing ${driveFiles.length} new items...`);
+    const storedItems = await storeInDB(driveFiles, parentItem.id);
+    setData(storedItems);
+    // ✅ Cache API results too
+    setFolderCache(source_id, storedItems);
+
+    console.log('Fetch + store complete');
   } catch (error) {
+    console.error('Failed to fetch/store Google Drive data:', error);
     Alert.alert('Error', 'Failed to fetch Google Drive data.');
-    console.log('Failed to fetch Google Drive data.', error);
+    setData([]); // ← or keep previous data — your choice
   } finally {
     setLoading?.(false);
   }
 };
 
-const storeInDB = async (files, driveSourceId) => {
-  console.log('📦 Storing in database', files);
-
+const storeInDB = async (files, parentInternalId) => {
   try {
-    // 🔽 Step 1: Get internal parent id
-    const parentItem = await getItemBySourceId(driveSourceId, 'drive_folder');
+    const insertedItems = [];
 
-    if (!parentItem) {
-      console.error('❌ Parent folder not found in DB:', driveSourceId);
-      return;
-    }
-
-    const parentInternalId = parentItem.id;
-
-    // 🔽 Step 2: Insert children
-    for (const item of files) {
+    for (const file of files) {
       try {
-        const isFolder = item.mimeType === 'application/vnd.google-apps.folder';
+        const isFolder = file.mimeType === 'application/vnd.google-apps.folder';
 
-        await upsertItem({
-          source_id: item.id,
+        const inserted = await upsertItem({
+          source_id: file.id,
           type: isFolder ? 'drive_folder' : 'drive_file',
-          title: item.name,
-          parent_id: parentInternalId, // ✅ internal id now
-          mimeType: item.mimeType,
+          title: file.name,
+          parent_id: parentInternalId,
+          mimeType: file.mimeType,
           file_path: null,
           out_show: 0,
           in_show: 1,
         });
 
-        console.log(`✅ Stored: ${item.name}`);
-      } catch (error) {
-        console.error(`❌ Error storing ${item.name}:`, error);
+        insertedItems.push(inserted);
+        console.log(`✅ Stored: ${file.name}`);
+      } catch (err) {
+        console.error(`❌ Failed to store ${file.name}:`, err);
       }
     }
 
-    console.log('🟢 All Drive items processed');
+    return insertedItems;
   } catch (error) {
     console.error('❌ Error in storeInDB:', error);
+    return [];
   }
 };
 
@@ -129,15 +137,25 @@ const GoogleDriveViewer = () => {
   const route = useRoute();
 
   const {driveInfo, folderStack: passedStack} = route.params || {};
-  const [loading, setLoading] = useState(false);
+  const {loading, setLoading} = useAppStateStore();
   const breadcrumbListRef = useRef(null);
   const {data, setData, folderStack, setFolderStack} = useAppState();
+  const folderCache = useAppStateStore(state => state.folderCache);
+  const setFolderCache = useAppStateStore(state => state.setFolderCache);
+  const getFolderFromCache = useAppStateStore(
+    state => state.getFolderFromCache,
+  );
+  const isProgrammaticPop = useRef(false);
 
   useFocusEffect(
     React.useCallback(() => {
       const onBeforeRemove = e => {
+        if (isProgrammaticPop.current) {
+          isProgrammaticPop.current = false;
+          return;
+        }
         if (folderStack.length > 0) {
-          handleBackPress();
+          handleBackPress((navigate = false));
         }
       };
       const unsubscribe = navigation.addListener(
@@ -151,7 +169,13 @@ const GoogleDriveViewer = () => {
   useFocusEffect(
     useCallback(() => {
       if (driveInfo.source_id) {
-        fetchDriveItems(driveInfo.source_id, setData, setLoading);
+        fetchDriveItems(
+          driveInfo.source_id,
+          getFolderFromCache,
+          setFolderCache,
+          setData,
+          setLoading,
+        );
         if (passedStack) {
           setFolderStack(passedStack);
         }
@@ -165,55 +189,100 @@ const GoogleDriveViewer = () => {
     if (folderStack.length > 0) {
       console.log(folderStack);
       setTimeout(
-        () => breadcrumbListRef.current?.scrollToEnd({animated: true}),
+        () => breadcrumbListRef.current?.scrollToEnd({animated: false}),
         10,
       );
     }
   }, [folderStack]);
 
-  const handleBreadcrumbPress = index => {
-    if (index !== folderStack.length - 1) {
-      const newStack = folderStack.slice(0, index + 1);
-      setFolderStack(newStack);
-      fetchDriveItems(
-        newStack[newStack.length - 1].source_id,
-        setData,
-        setLoading,
-      );
+  const handleBreadcrumbClick = folderId => {
+    setLoading(true);
+
+    // Give React one frame to render loader
+    requestAnimationFrame(() => {
+      setTimeout(() => {
+        doNavigation(folderId);
+      }, 0);
+    });
+  };
+
+  const doNavigation = folderId => {
+    const state = navigation.getState();
+    const routes = state.routes;
+
+    const targetIndex = routes.findIndex(
+      r =>
+        r.name === 'GoogleDriveViewer' &&
+        r.params?.driveInfo?.source_id === folderId,
+    );
+
+    if (targetIndex !== -1) {
+      const popCount = routes.length - 1 - targetIndex;
+      isProgrammaticPop.current = true;
+
+      setFolderStack(prevStack => {
+        const indexInStack = prevStack.findIndex(f => f.source_id === folderId);
+        if (indexInStack === -1) return prevStack;
+        return prevStack.slice(0, indexInStack + 1);
+      });
+
+      navigation.pop(popCount);
     }
   };
 
-  const handleBackPress = () => {
+  const handleBackPress = (navigate = true) => {
     const newStack = [...folderStack];
     newStack.pop();
     setFolderStack(newStack);
+    if (navigate) {
+      navigation.goBack();
+    }
   };
 
   return (
     <SafeAreaView style={styles.container}>
       {folderStack.length > 0 && (
-        <View style={styles.breadcrumbsContainer}>
-          <TouchableOpacity
-            onPress={() => {
-              //  handleBackPress();
-              navigation.goBack();
-            }}
-            style={styles.iconButton}>
-            <MaterialIcons name="arrow-back" size={24} color="gray" />
+        <View style={styles.header}>
+          <TouchableOpacity onPress={handleBackPress} style={styles.backButton}>
+            <MaterialIcons name="arrow-back-ios-new" size={18} color="#222" />
           </TouchableOpacity>
+
           <FlatList
             ref={breadcrumbListRef}
             horizontal
+            showsHorizontalScrollIndicator={false}
             data={folderStack}
             keyExtractor={item => item.source_id}
-            renderItem={({item, index}) => (
-              <TouchableOpacity onPress={() => handleBreadcrumbPress(index)}>
-                <Text style={styles.breadcrumbs}>
-                  {index > 0 ? ' / ' : ''}
-                  {item.title}
-                </Text>
-              </TouchableOpacity>
-            )}
+            contentContainerStyle={styles.breadcrumbContent}
+            renderItem={({item, index}) => {
+              const isLast = index === folderStack.length - 1;
+
+              return (
+                <View style={styles.breadcrumbItem}>
+                  {index > 0 && (
+                    <MaterialIcons
+                      name="chevron-right"
+                      size={16}
+                      color="#bbb"
+                      style={{marginHorizontal: 4}}
+                    />
+                  )}
+
+                  <TouchableOpacity
+                    disabled={isLast}
+                    onPress={() => handleBreadcrumbClick(item.source_id)}>
+                    <Text
+                      style={[
+                        styles.breadcrumbText,
+                        isLast && styles.activeBreadcrumb,
+                      ]}
+                      numberOfLines={1}>
+                      {item.title}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              );
+            }}
           />
         </View>
       )}
@@ -244,28 +313,45 @@ const styles = StyleSheet.create({
   loader: {
     marginTop: 20,
   },
-  breadcrumbsContainer: {
+  header: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 12,
-    paddingVertical: 8,
-    backgroundColor: '#ffffff',
+    paddingVertical: 10,
+    backgroundColor: '#fafafa',
     borderBottomWidth: 1,
-    borderColor: '#e0e0e0',
-    elevation: 1,
-    shadowColor: '#000',
-    shadowOffset: {width: 0, height: 1},
-    shadowOpacity: 0.05,
-    shadowRadius: 1,
+    borderBottomColor: '#eee',
   },
-  iconButton: {
-    padding: 4,
-    paddingRight: 10,
+
+  backButton: {
+    height: 36,
+    width: 36,
+    borderRadius: 18,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#f0f0f0',
+    marginRight: 8,
   },
-  breadcrumbs: {
-    fontSize: 16,
+
+  breadcrumbContent: {
+    alignItems: 'center',
+    paddingRight: 20,
+  },
+
+  breadcrumbItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+
+  breadcrumbText: {
+    fontSize: 14,
+    color: '#666',
     fontWeight: '500',
-    color: '#555',
-    paddingHorizontal: 4,
+    maxWidth: 140,
+  },
+
+  activeBreadcrumb: {
+    color: '#111',
+    fontWeight: '700',
   },
 });

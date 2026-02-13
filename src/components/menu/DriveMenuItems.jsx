@@ -14,12 +14,11 @@ import CommonMenuItems from './CommonMenuItems';
 
 const DriveMenuItems = ({item, screen, hideMenu}) => {
   const navigation = useNavigation();
-
   const {setDriveLinksList, setDeviceFiles, setData} = useAppState();
 
-  console.log(item)
-  const isFolder = item?.mimeType === 'application/vnd.google-apps.folder';
-  const isDevice = item?.source_type === 'device';
+  console.log(item);
+  const isFolder = item.type === 'drive_folder';
+  const isDevice = item?.type === 'device_file';
 
   const handleDeleteConfirm = () => {
     const message = isFolder
@@ -45,9 +44,11 @@ const DriveMenuItems = ({item, screen, hideMenu}) => {
 
   const handleDeleteFolder = async () => {
     try {
-      await deleteFolderAndContents(item.driveId);
+      await deleteFolderAndContents(item.source_id);
       Alert.alert('Success', 'Folder and its contents deleted successfully.');
-      setDriveLinksList(prev => prev.filter(f => f.driveId !== item.driveId));
+      setDriveLinksList(prev =>
+        prev.filter(f => f.source_id !== item.source_id),
+      );
     } catch (error) {
       console.error('❌ Error deleting folder:', error);
     }
@@ -58,7 +59,8 @@ const DriveMenuItems = ({item, screen, hideMenu}) => {
       if (await RNFS.exists(item.file_path)) {
         await RNFS.unlink(item.file_path);
       }
-      await updateDeviceFilePath(item.driveId, null);
+      // await updateDeviceFilePath(item.id, null);
+      await updateItemFields(item.id, {file_path: null});
       handleLocalDelete(item);
     } catch (error) {
       Alert.alert('Delete failed');
@@ -71,12 +73,13 @@ const DriveMenuItems = ({item, screen, hideMenu}) => {
       if (await RNFS.exists(item.file_path)) {
         await RNFS.unlink(item.file_path);
       }
-      await updateFilePath(item.driveId, null);
+      // await updateFilePath(item.driveId, null);
+      await updateItemFields(item.id, {file_path: null});
       if (screen === 'out') {
-        await deleteDriveFileItemFromDB(item.driveId, screen);
+        await deleteDriveFileItemFromDB(item.source_id, screen);
       }
       //   handleLocalDelete(item);
-      setDeviceFiles(prev => prev.filter(f => f.driveId !== item.driveId));
+      setDeviceFiles(prev => prev.filter(f => f.id !== item.id));
     } catch (error) {
       Alert.alert('Delete failed');
       console.error('Delete failed:', error);
@@ -86,12 +89,12 @@ const DriveMenuItems = ({item, screen, hideMenu}) => {
   const handleLocalDelete = item => {
     if (screen === 'in') {
       setData(prev =>
-        prev.map(f =>
-          f.driveId === item.driveId ? {...f, file_path: null} : f,
-        ),
+        prev.map(f => (f.id === item.id ? {...f, file_path: null} : f)),
       );
     } else {
-      setDriveLinksList(prev => prev.filter(f => f.driveId !== item.driveId));
+      setDriveLinksList(prev =>
+        prev.filter(f => f.source_id !== item.source_id),
+      );
     }
   };
 
@@ -102,7 +105,7 @@ const DriveMenuItems = ({item, screen, hideMenu}) => {
           onPress={() => {
             hideMenu();
             navigation.navigate('GDriveFolderOverview', {
-              driveLink: item.driveId,
+              driveLink: item.source_id,
             });
           }}>
           <Text style={styles.menuItemText}>Overview</Text>

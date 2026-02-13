@@ -18,6 +18,7 @@ import FileViewer from 'react-native-file-viewer';
 import {ItemTypes, ScreenTypes} from '../contexts/constants';
 import BaseMenu from '../components/menu/BaseMenu';
 import NoteItem from '../notes/notesListing/NoteItem';
+import useAppStateStore from '../contexts/appStateStore';
 
 const BaseItem = ({type, item, isSelected, onSelect, onLongPress, screen}) => {
   const navigation = useNavigation();
@@ -33,6 +34,7 @@ const BaseItem = ({type, item, isSelected, onSelect, onLongPress, screen}) => {
     setActiveNoteId,
     setSelectedNote,
   } = useAppState();
+  const {setLoading} = useAppStateStore();
 
   const currentRoute = useNavigationState(
     state => state.routes[state.index].name,
@@ -77,14 +79,22 @@ const BaseItem = ({type, item, isSelected, onSelect, onLongPress, screen}) => {
   const handleDrivePress = () => {
     console.log(item);
     if (item.mimeType === 'application/vnd.google-apps.folder') {
-      setFolderStack(prevStack => {
-        const last = prevStack[prevStack.length - 1];
-        if (last && last.source_id === item.source_id) {
-          return prevStack; // Prevent duplicate
-        }
-        return [...prevStack, {source_id: item.source_id, title: item.title}];
+      setLoading(true);
+      requestAnimationFrame(() => {
+        setTimeout(() => {
+          setFolderStack(prevStack => {
+            const last = prevStack[prevStack.length - 1];
+            if (last && last.source_id === item.source_id) {
+              return prevStack; // Prevent duplicate
+            }
+            return [
+              ...prevStack,
+              {source_id: item.source_id, title: item.title},
+            ];
+          });
+          navigation.push('GoogleDriveViewer', {driveInfo: item});
+        }, 0);
       });
-      navigation.push('GoogleDriveViewer', {driveInfo: item});
     } else {
       handleDriveFilePress();
     }
@@ -187,7 +197,7 @@ const BaseItem = ({type, item, isSelected, onSelect, onLongPress, screen}) => {
 
   const renderItem = () => {
     const Component = typeConfigMap[type]?.Component;
-    return Component ? <Component item={item} screen={screen}/> : null;
+    return Component ? <Component item={item} screen={screen} /> : null;
   };
 
   const renderBaseMenu = () => {
@@ -209,10 +219,7 @@ const BaseItem = ({type, item, isSelected, onSelect, onLongPress, screen}) => {
     [ItemTypes.DRIVE]: {
       Component: DriveItem,
       onPress: handleDrivePress,
-      showMenu: (item, screen) => {
-        const isFolder = item.mimeType === 'application/vnd.google-apps.folder';
-        return isFolder ? screen !== ScreenTypes.IN : false;
-      },
+      showMenu: () => false,
     },
     [ItemTypes.NOTEBOOK]: {
       Component: NotebookItem,
@@ -248,15 +255,14 @@ const styles = StyleSheet.create({
   wrapper: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 10,
-    paddingLeft: 3,
+    minHeight: 56,
+    paddingVertical: 8,
     borderBottomWidth: 0.5,
     borderBottomColor: '#ccc',
+    // borderBottomColor: '#E5E7EB',
     backgroundColor: '#fff',
   },
   menuWrapper: {
-    // marginLeft: 'auto',
-    // paddingLeft: 8,
     justifyContent: 'center',
     alignItems: 'center',
   },

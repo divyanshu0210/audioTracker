@@ -8,13 +8,7 @@ import {
   getFileItemsInCategory,
   getYouTubeItemsInCategory,
 } from '../categories/catDB';
-import {
-  fetchNotebooks,
-  getAllDeviceFiles,
-  getChildrenByParent,
-  getItemsByParent,
-  loadYTItemsFromDB,
-} from '../database/R';
+import {fetchNotebooks, getChildrenByParent} from '../database/R';
 import AllNotesScreen from '../notes/AllNotesList';
 import DeviceFilesView from '../StackScreens/DeviceFilesView';
 import DriveFilesView from '../StackScreens/DriveFilesView';
@@ -96,7 +90,7 @@ const HomeTabs = () => {
         : await getChildrenByParent(null, ['drive_folder', 'drive_file']);
 
       setDriveLinksList(storedItems || []);
-      console.log('Drive items loaded from DB:', storedItems );
+      console.log('Drive items loaded from DB:', storedItems);
     } catch (error) {
       console.error('Error loading folders from DB:', error);
     } finally {

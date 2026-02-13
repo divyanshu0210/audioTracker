@@ -24,12 +24,12 @@ const YTMenuItems = ({item, screen, hideMenu}) => {
   const handleDelete = item => {
     console.log('removing from Ui', item);
     setItems(prevItems =>
-      prevItems.filter(item => item.ytube_id !== item.ytube_id),
+      prevItems.filter(item => item.source_id !== item.source_id),
     );
   };
   const handleDeleteYTItem = async item => {
     try {
-      await deleteYTItemFromDB(item.ytube_id, item.type);
+      await deleteYTItemFromDB(item.source_id, item.type);
       console.log('delete hoja');
       handleDelete(item);
       Alert.alert(`${item.title} deleted successfully`);
@@ -51,7 +51,7 @@ const YTMenuItems = ({item, screen, hideMenu}) => {
 
   return (
     <View>
-      {item.type === 'playlist' && (
+      {item.type === 'youtube_playlist' && (
         <>
           <MenuItem onPress={hideMenu}>
             <Text style={[styles.menuItemText, {color: '#999'}]}>Refresh</Text>
@@ -62,7 +62,7 @@ const YTMenuItems = ({item, screen, hideMenu}) => {
         </>
       )}
 
-      {item.type === 'video' && (
+      {item.type === 'youtube_video' && (
         <>{item.out_show === 1 && screen === 'out' && renderDelete()}</>
       )}
     </View>

@@ -205,7 +205,12 @@ export const initDatabase = async () => {
     tx.executeSql('SELECT sqlite_version();', [], (_, result) => {
       console.log('SQLite Version:', result.rows.item(0));
     });
-
+    //   tx.executeSql(
+    //   `DROP TABLE IF EXISTS items;`,
+    //   [],
+    //   () => console.log(" items table dropped successfully"),
+    //   (_, error) => console.error("Error dropping items table:", error?.message || "Unknown error")
+    // );
     tx.executeSql(
       `CREATE TABLE IF NOT EXISTS items (
       id INTEGER PRIMARY KEY AUTOINCREMENT,

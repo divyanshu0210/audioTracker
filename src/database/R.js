@@ -52,10 +52,7 @@ export const getFolderStackFromDB = async itemId => {
   });
 };
 
-export const getChildrenByParent = async (
-  parentId = null,
-  types = null,
-) => {
+export const getChildrenByParent = async (parentId = null, types = null) => {
   const fastdb = getDb();
 
   return new Promise((resolve, reject) => {
@@ -84,26 +81,24 @@ export const getChildrenByParent = async (
         LEFT JOIN youtube_meta
           ON youtube_meta.item_id = items.id
         WHERE
-          ${
-            isRoot
-              ? 'items.out_show = 1'
-              : 'items.parent_id = ?'
-          }
+          ${isRoot ? 'items.out_show = 1' : 'items.parent_id = ?'}
           ${typeCondition}
           AND items.deleted_at IS NULL
         ORDER BY datetime(items.created_at) DESC;
       `;
 
       if (!isRoot) {
-        // Going deep → update in_show
-        tx.executeSql(
-          `
+        const updateQuery = `
           UPDATE items
           SET in_show = 1
           WHERE parent_id = ?
           ${typeCondition}
           AND deleted_at IS NULL;
-          `,
+        `;
+
+        // Going deep → update in_show
+        tx.executeSql(
+          updateQuery,
           baseParams,
           () => {
             tx.executeSql(
@@ -928,4 +923,3 @@ export const searchNotes = (query, offset = 0, limit = 20) => {
     });
   });
 };
-

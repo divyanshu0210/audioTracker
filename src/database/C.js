@@ -5,18 +5,18 @@ import {getDb} from './database';
 export const upsertItem = ({
   source_id,
   type,
-  title,
+  title = null,
   parent_id = null,
   mimeType = null,
   file_path = null,
-  out_show = 0,
-  in_show = 0,
-  fav = 0,
-  duration = 0,
+  out_show = null,
+  in_show = null,
+  fav = null,
+  duration = null,
 }) => {
   const fastdb = getDb();
 
-  console.log(`\n🟡 [UPSERT START]`, { source_id, type, title });
+  console.log(`\n🟡 [UPSERT START]`, {source_id, type, title});
 
   return new Promise((resolve, reject) => {
     fastdb.transaction(tx => {
@@ -37,14 +37,14 @@ export const upsertItem = ({
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(type, source_id)
         DO UPDATE SET
-          title      = excluded.title,
+          title      = COALESCE(excluded.title, items.title),
           parent_id  = COALESCE(excluded.parent_id, items.parent_id),
           mimeType   = COALESCE(excluded.mimeType, items.mimeType),
           file_path  = COALESCE(excluded.file_path, items.file_path),
-          out_show   = excluded.out_show,
-          in_show    = excluded.in_show,
-          fav        = excluded.fav,
-          duration   = excluded.duration,
+          out_show   = COALESCE(excluded.out_show, items.out_show),
+          in_show    = COALESCE(excluded.in_show, items.in_show),
+          fav        = COALESCE(excluded.fav, items.fav),
+          duration   = COALESCE(excluded.duration, items.duration),
           created_at = CURRENT_TIMESTAMP
         WHERE items.deleted_at IS NULL;
         `,
@@ -69,13 +69,13 @@ export const upsertItem = ({
             LIMIT 1;
             `,
             [type, source_id],
-            (_, { rows }) => {
+            async (_, {rows}) => {
               if (rows.length > 0) {
-                const fullRow = rows.item(0);
+                const itemId = rows.item(0).id;
+                const fullItem = await getFullItemByIdTx(tx, itemId);
 
-                console.log(`🟢 [UPSERT SUCCESS - FULL ROW]`, fullRow);
-
-                resolve(fullRow);
+                console.log(`🟢 [UPSERT SUCCESS - FULL ENTITY]`, fullItem);
+                resolve(fullItem);
               } else {
                 console.warn('⚠️ UPSERT completed but row not found.');
                 resolve(null);
@@ -96,11 +96,7 @@ export const upsertItem = ({
   });
 };
 
-export const upsertYoutubeMeta = ({
-  item_id,
-  channel_title,
-  thumbnail,
-}) => {
+export const upsertYoutubeMeta = ({item_id, channel_title, thumbnail}) => {
   const fastdb = getDb();
 
   return new Promise((resolve, reject) => {
@@ -115,10 +111,37 @@ export const upsertYoutubeMeta = ({
           thumbnail = excluded.thumbnail;
         `,
         [item_id, channel_title, thumbnail],
-        () => resolve(true),
+        async () => {
+          const fullItem = await getFullItemByIdTx(tx, item_id);
+          resolve(fullItem);
+        },
         (_, error) => reject(error),
       );
     });
+  });
+};
+
+export const getFullItemByIdTx = (tx, itemId) => {
+  return new Promise((resolve, reject) => {
+    tx.executeSql(
+      `
+      SELECT
+        items.*,
+        youtube_meta.channel_title,
+        youtube_meta.thumbnail
+      FROM items
+      LEFT JOIN youtube_meta
+        ON youtube_meta.item_id = items.id
+      WHERE items.id = ?
+        AND items.deleted_at IS NULL
+      LIMIT 1;
+      `,
+      [itemId],
+      (_, {rows}) => {
+        resolve(rows.length ? rows.item(0) : null);
+      },
+      (_, error) => reject(error),
+    );
   });
 };
 
@@ -128,16 +151,22 @@ export const getItemBySourceId = (source_id, type = null) => {
   return new Promise((resolve, reject) => {
     fastdb.transaction(tx => {
       let query = `
-        SELECT *
+        SELECT
+          items.*,
+          youtube_meta.channel_title,
+          youtube_meta.thumbnail
         FROM items
-        WHERE source_id = ?
-        AND deleted_at IS NULL
+        LEFT JOIN youtube_meta
+          ON youtube_meta.item_id = items.id
+        WHERE
+          items.source_id = ?
+          AND items.deleted_at IS NULL
       `;
 
       const params = [source_id];
 
       if (type) {
-        query += ` AND type = ?`;
+        query += ` AND items.type = ?`;
         params.push(type);
       }
 
@@ -146,13 +175,13 @@ export const getItemBySourceId = (source_id, type = null) => {
       tx.executeSql(
         query,
         params,
-        (_, { rows }) => {
+        (_, {rows}) => {
           if (rows.length > 0) {
             const item = rows.item(0);
-            console.log('🟢 Item found:', item);
+            console.log('🟢 Full Item found:', item);
             resolve(item);
           } else {
-            console.warn('⚠️ Item not found:', { source_id, type });
+            console.warn('⚠️ Item not found:', {source_id, type});
             resolve(null);
           }
         },

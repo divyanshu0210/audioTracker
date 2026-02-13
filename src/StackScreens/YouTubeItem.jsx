@@ -5,11 +5,9 @@ import {ItemTypes} from '../contexts/constants';
 
 export default function YouTubeItem({item}) {
   const isPlaylist = item.type === 'youtube_playlist';
-  // const useInsideContext = item.extra === 'inside';
-  // const screenType = useInsideContext ? 'in' : 'out';
 
-  const thumbnailUri = isPlaylist
-    ? {uri: item.thumbnail} || require('../assets/video-placeholder.png')
+  const thumbnailUri = item.thumbnail
+    ? {uri: item.thumbnail}
     : {uri: `https://img.youtube.com/vi/${item.source_id}/mqdefault.jpg`};
 
   return (

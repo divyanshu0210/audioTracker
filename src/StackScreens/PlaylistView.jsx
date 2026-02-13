@@ -12,8 +12,8 @@ import {
 } from 'react-native';
 import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
 import {useAppState} from '../contexts/AppStateContext';
-import {getItemBySourceId,  saveVideoToDB, upsertItem} from '../database/C';
-import {getChildrenByParent, loadVideosFromDB} from '../database/R';
+import {getItemBySourceId, upsertItem, upsertYoutubeMeta} from '../database/C';
+import {getChildrenByParent} from '../database/R';
 import BaseMediaListComponent from './BaseMediaListComponent';
 import {ItemTypes, ScreenTypes} from '../contexts/constants';
 
@@ -67,7 +67,8 @@ export default function PlaylistView() {
       console.log('Playlist not found in DB:', playListId);
       return [];
     }
-    const storedFiles = (await getChildrenByParent(item.id, 'youtube_video')) || [];
+    const storedFiles =
+      (await getChildrenByParent(item.id, 'youtube_video')) || [];
     // const storedFiles = (await loadVideosFromDB(item.id)) || [];
 
     if (storedFiles.length > 0) {
@@ -86,48 +87,42 @@ export default function PlaylistView() {
     if (!fetchedVideos || fetchedVideos.length === 0) {
       return [];
     }
-    const parent = await getItemBySourceId(playListId, 'youtube_playlist');
-    if (!parent) {
+    const playlist = await getItemBySourceId(playListId, 'youtube_playlist');
+    if (!playlist) {
       console.error('❌ Cannot insert videos: Playlist not found locally.');
       return [];
     }
 
-    await Promise.all(
+    const storedItems = await Promise.all(
       fetchedVideos.map(async video => {
-        const savedItem = await upsertItem({
-          source_id: video.source_id,
-          type: 'youtube_video',
-          title: video.title,
-          parent_id: parent.id,
-          in_show: 1,
-        });
+        try {
+          const savedItem = await upsertItem({
+            source_id: video.source_id,
+            type: 'youtube_video',
+            title: video.title,
+            parent_id: playlist.id,
+            in_show: 1,
+          });
 
-        // Optional but recommended
-        await upsertYoutubeMeta({
-          item_id: savedItem.id,
-          channel_title: video.channelTitle,
-          thumbnail: video.thumbnail ?? null,
-        });
+          // Optional but recommended
+          const fullItem = await upsertYoutubeMeta({
+            item_id: savedItem.id,
+            channel_title: video.channelTitle,
+            thumbnail: video.thumbnail ?? null,
+          });
+          return fullItem;
+        } catch (err) {
+          console.error(
+            `Failed to store video ${video.title || video.source_id}:`,
+            err,
+          );
+          return null; // or continue without it — your choice
+        }
       }),
     );
-
-    console.log('🟢 Stored videos:', fetchedVideos.length);
-
-    return fetchedVideos;
-    // if (fetchedVideos) {
-    //   await Promise.all(
-    //     fetchedVideos.map(video =>
-    //       saveVideoToDB(
-    //         video.ytube_id,
-    //         video.title,
-    //         video.channelTitle,
-    //         video.parent_id,
-    //       ),
-    //     ),
-    //   );
-    //   console.log('Fetched videos from API:', fetchedVideos.length);
-    //   return fetchedVideos;
-    // }
+    const successfullyStored = storedItems.filter(Boolean);
+    console.log(`🟢 Successfully stored ${successfullyStored.length} videos`);
+    return successfullyStored;
   };
 
   // Fetch videos from YouTube API
@@ -161,6 +156,7 @@ export default function PlaylistView() {
             source_id: item.contentDetails.videoId,
             title: item.snippet.title,
             channelTitle: item.snippet.channelTitle,
+            thumbnail:`https://img.youtube.com/vi/${item.contentDetails.videoId}/mqdefault.jpg`,
             type: 'youtube_video',
             parent_id: playlistId,
           })),

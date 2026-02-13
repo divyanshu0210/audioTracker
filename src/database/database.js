@@ -202,15 +202,15 @@ export const initDatabase = async () => {
         ),
     );
 
-    tx.executeSql('SELECT sqlite_version();', [], (_, result) => {
-      console.log('SQLite Version:', result.rows.item(0));
-    });
-    //   tx.executeSql(
-    //   `DROP TABLE IF EXISTS items;`,
-    //   [],
-    //   () => console.log(" items table dropped successfully"),
-    //   (_, error) => console.error("Error dropping items table:", error?.message || "Unknown error")
-    // );
+      // tx.executeSql('SELECT sqlite_version();', [], (_, result) => {
+      //   console.log('SQLite Version:', result.rows.item(0));
+      // });
+      //   tx.executeSql(
+      //   `DROP TABLE IF EXISTS items;`,
+      //   [],
+      //   () => console.log(" items table dropped successfully"),
+      //   (_, error) => console.error("Error dropping items table:", error?.message || "Unknown error")
+      // );
     tx.executeSql(
       `CREATE TABLE IF NOT EXISTS items (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -235,8 +235,8 @@ export const initDatabase = async () => {
 
       duration INTEGER DEFAULT 0,
       fav INTEGER DEFAULT 0,
-      out_show INTEGER DEFAULT 0,
-      in_show INTEGER DEFAULT 0,
+      out_show INTEGER NOT NULL DEFAULT 0,
+      in_show INTEGER NOT NULL DEFAULT 0,
 
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       deleted_at TIMESTAMP DEFAULT NULL,

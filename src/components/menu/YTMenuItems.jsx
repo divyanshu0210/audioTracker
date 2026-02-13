@@ -5,7 +5,7 @@ import {useAppState} from '../../contexts/AppStateContext';
 import {deleteYTItemFromDB, softDeleteItem} from '../../database/D';
 
 const YTMenuItems = ({item, screen, hideMenu}) => {
-  const {setItems} = useAppState();
+  const {setItems,items} = useAppState();
 
   const confirmDelete = item => {
     Alert.alert(
@@ -24,15 +24,14 @@ const YTMenuItems = ({item, screen, hideMenu}) => {
   const handleDelete = item => {
     console.log('removing from Ui', item);
     setItems(prevItems =>
-      prevItems.filter(item => item.source_id !== item.source_id),
+      prevItems.filter(f => f.source_id !== item.source_id),
     );
   };
   const handleDeleteYTItem = async item => {
     try {
       await softDeleteItem(item.type, item.source_id);
-      console.log('delete hoja');
       handleDelete(item);
-      Alert.alert(`${item.title} deleted successfully`);
+      Alert.alert(`Deleted successfully`,`${item.title} `);
     } catch (error) {
       Alert.alert('Delete failed');
       console.error('Delete failed:', error);

@@ -5,13 +5,8 @@ import RNFS from 'react-native-fs';
 import {Menu, MenuDivider, MenuItem} from 'react-native-material-menu';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
 import {useAppState} from '../../contexts/AppStateContext';
-import {
-  deleteDriveFileItemFromDB,
-  deleteFolderAndContents,
-  softDeleteItem,
-} from '../../database/D';
+import {softDeleteItem} from '../../database/D';
 import {updateItemFields} from '../../database/U';
-import CommonMenuItems from './CommonMenuItems';
 
 const DriveMenuItems = ({item, screen, hideMenu}) => {
   const navigation = useNavigation();
@@ -45,7 +40,7 @@ const DriveMenuItems = ({item, screen, hideMenu}) => {
 
   const handleDeleteFolder = async () => {
     try {
-      await softDeleteItem(item.type, item, source_id);
+      await softDeleteItem(item.type, item.source_id);
       Alert.alert('Success', 'Folder and its contents deleted successfully.');
       setDriveLinksList(prev =>
         prev.filter(f => f.source_id !== item.source_id),
@@ -62,7 +57,7 @@ const DriveMenuItems = ({item, screen, hideMenu}) => {
       }
       await updateItemFields(item.id, {file_path: null});
       await softDeleteItem(item.type, item, source_id);
-       Alert.alert('Success', 'File deleted successfully.');
+      Alert.alert('Success', 'File deleted successfully.');
       setDeviceFiles(prev => prev.filter(f => f.source_id !== item.source_id));
     } catch (error) {
       Alert.alert('Delete failed');
@@ -79,35 +74,30 @@ const DriveMenuItems = ({item, screen, hideMenu}) => {
       if (screen === 'out') {
         await softDeleteItem(item.type, item, source_id);
       }
-        handleLocalDelete(item);
+      handleLocalDelete(item);
     } catch (error) {
       Alert.alert('Delete failed');
       console.error('Delete failed:', error);
     }
   };
 
-const handleLocalDelete = item => {
-  if (screen === 'in') {
-    setData(prev => {
-      const updated = prev.map(f =>
-        f.id === item.id
-          ? { ...f, file_path: null }
-          : f
-      );
+  const handleLocalDelete = item => {
+    if (screen === 'in') {
+      setData(prev => {
+        const updated = prev.map(f =>
+          f.id === item.id ? {...f, file_path: null} : f,
+        );
 
-      return [...updated]; // force new array reference
-    });
-  } else {
-    setDriveLinksList(prev => {
-      const updated = prev.filter(
-        f => f.source_id !== item.source_id
-      );
+        return [...updated]; // force new array reference
+      });
+    } else {
+      setDriveLinksList(prev => {
+        const updated = prev.filter(f => f.source_id !== item.source_id);
 
-      return [...updated]; // explicit new array
-    });
-  }
-};
-
+        return [...updated]; // explicit new array
+      });
+    }
+  };
 
   const renderFolderSpecificItems = () => (
     <>

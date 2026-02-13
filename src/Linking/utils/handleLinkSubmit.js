@@ -69,7 +69,7 @@ export const handleLinkSubmit = async (
       await fetchYTData(extracted, setItems, navigation, selectedCategory);
     }
   } finally {
-     console.log("Stopping loader...");
+    console.log('Stopping loader...');
     setInserting(false); // Move to finally block to ensure it always runs
   }
 };
@@ -187,9 +187,8 @@ export const handleDriveLink = async (
 ) => {
   try {
     const {accessToken} = await GoogleSignin.getTokens();
-    // const response = await axios.get(
-    //   `https://www.googleapis.com/drive/v3/files/${driveId}?fields=name,mimeType&key=${DRIVE_API_KEY}`,
-    // );
+
+    // Fetch basic metadata from Drive API
     const response = await axios.get(
       `https://www.googleapis.com/drive/v3/files/${driveId}?fields=name,mimeType`,
       {
@@ -198,62 +197,71 @@ export const handleDriveLink = async (
         },
       },
     );
+
     const itemName = response.data.name || 'Unknown';
     const mimeType = response.data.mimeType;
     const isFolder = mimeType === 'application/vnd.google-apps.folder';
+    const itemType = isFolder ? 'drive_folder' : 'drive_file';
 
-    if (isFolder) {
-      // const {item} = await insertOrUpdateFolder(driveId, itemName, null, 1, 0);
-      const fullItem = await upsertItem({
-        source_id: driveId,
-        type: 'drive_folder',
-        title: itemName,
-        parent_id: null,
-        mimeType: 'application/vnd.google-apps.folder',
+    // ────────────────────────────────────────────────
+    // 1. Check if item already exists in local DB
+    // ────────────────────────────────────────────────
+    const existingItem = await getItemBySourceId(driveId, itemType);
+
+    if (existingItem) {
+      // Just update visibility flag (and optionally touch updated_at if you have it)
+      const updatedItem = await updateItemFields(existingItem.id, {
         out_show: 1,
+        title: itemName, //sync name if it changed
       });
 
-      // Always update UI by removing existing and adding to top
-      console.log(fullItem);
-      
-      setDriveLinksList(prev => [
-        fullItem,
-        ...prev.filter(i => i.source_id !== driveId),
-      ]);
+      // Move to top: remove old entry → prepend updated one
+      setDriveLinksList(prev => {
+        const filtered = prev.filter(i => i.source_id !== driveId);
+        return [updatedItem, ...filtered];
+      });
 
       if (selectedCategory != null) {
-        await addItemToCategory(selectedCategory, fullItem.id, 'drive');
+        await addItemToCategory(selectedCategory, updatedItem.id, 'drive');
       }
+
+      console.log('✅ Drive item existed → updated out_show only');
     } else {
-      const fullItem = await upsertItem({
+      // ────────────────────────────────────────────────
+      // 2. New item → create in DB
+      // ────────────────────────────────────────────────
+      const savedItem = await upsertItem({
         source_id: driveId,
-        type: 'drive_file',
+        type: itemType,
         title: itemName,
         parent_id: null,
         mimeType: mimeType,
-        file_path: null,
+        file_path: null, // only relevant for files maybe
         out_show: 1,
       });
 
+      // Move to top
+      setDriveLinksList(prev => {
+        const filtered = prev.filter(i => i.source_id !== driveId);
+        return [savedItem, ...filtered];
+      });
+
       if (selectedCategory != null) {
-        await addItemToCategory(selectedCategory, fullItem.id, 'drive');
+        await addItemToCategory(selectedCategory, savedItem.id, 'drive');
       }
-      console.log(fullItem);
-      // Always update UI by removing existing and adding to top
-      setDriveLinksList(prev => [
-        fullItem,
-        ...prev.filter(i => i.source_id !== driveId),
-      ]);
+
+      console.log('✅ Created new drive', isFolder ? 'folder' : 'file');
     }
 
+    // Navigate (same for both existing & new)
     navigation?.navigate('HomeScreen', {screen: 'Drive'});
   } catch (error) {
-    console.log(error);
-    // console.error('Drive fetch error:', error);
+    console.error('Drive handle error:', error);
+
     if (error.response?.status === 403 || error.response?.status === 404) {
       Alert.alert(
         'Access Denied',
-        'You need permission to access this file. Request access or try with a different account.',
+        'You need permission to access this file/folder. Request access or try with a different account.',
         [
           {
             text: 'Request Access',

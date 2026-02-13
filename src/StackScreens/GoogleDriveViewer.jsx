@@ -27,6 +27,7 @@ import useAppStateStore from '../contexts/appStateStore';
 
 export const fetchDriveItems = async (
   source_id,
+  folderCache,
   getFolderFromCache,
   setFolderCache,
   setData,
@@ -40,8 +41,8 @@ export const fetchDriveItems = async (
 
   try {
     setLoading?.(true);
+    console.log('folderCache:', folderCache);
     const cached = getFolderFromCache(source_id);
-    console.log('folderCache:', cached);
     if (cached) {
       console.log('Using cached memory data');
       setData(cached);
@@ -114,7 +115,7 @@ const storeInDB = async (files, parentInternalId) => {
           parent_id: parentInternalId,
           mimeType: file.mimeType,
           file_path: null,
-          out_show: 0,
+          // out_show: 0,
           in_show: 1,
         });
 
@@ -171,6 +172,7 @@ const GoogleDriveViewer = () => {
       if (driveInfo.source_id) {
         fetchDriveItems(
           driveInfo.source_id,
+          folderCache,
           getFolderFromCache,
           setFolderCache,
           setData,

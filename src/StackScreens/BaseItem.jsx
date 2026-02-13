@@ -4,6 +4,7 @@ import {
   View,
   Image,
   Pressable,
+  Alert,
 } from 'react-native';
 import React, {useEffect, useState} from 'react';
 import {useNavigation, useNavigationState} from '@react-navigation/core';
@@ -42,7 +43,7 @@ const BaseItem = ({type, item, isSelected, onSelect, onLongPress, screen}) => {
 
   const sourceId =
     item?.rowid ||
-    item.source_id ||
+    item?.source_id ||
     (type === 'notebook' && item?.id?.toString());
 
   const handleYoutubePress = () => {
@@ -127,8 +128,8 @@ const BaseItem = ({type, item, isSelected, onSelect, onLongPress, screen}) => {
           // file opened successfully
         })
         .catch(error => {
-          console.error('Failed to open file:', error);
-          Alert.alert('Error', 'Could not open this file.');
+          // console.error('Failed to open file:', error);
+          Alert.alert('Could not open file.',"You do not have a proper app to view this file");
         });
     }
   };

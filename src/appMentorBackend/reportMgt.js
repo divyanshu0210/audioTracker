@@ -28,7 +28,7 @@ export async function uploadVideoReport(data) {
 
 export const saveDatatoBackend = async item => {
   try {
-    const videoId = item.driveId || item?.ytube_id;
+    const videoId = item.source_id;
     const userId = await AsyncStorage.getItem('userId');
     if (!userId || !videoId) {
       console.warn('Missing userId or videoId');
@@ -51,9 +51,7 @@ export const saveDatatoBackend = async item => {
   }
 };
 
-
-
-export const getWatchTimefromBackend= async (userId, startDate, endDate) => {
+export const getWatchTimefromBackend = async (userId, startDate, endDate) => {
   try {
     const response = await axios.get(`${BASE_URL}/report/monthly-watch-time/`, {
       params: {
@@ -63,14 +61,15 @@ export const getWatchTimefromBackend= async (userId, startDate, endDate) => {
       },
     });
 
-    return response.data; 
-
+    return response.data;
   } catch (error) {
-    console.error('Error fetching monthly watch time:', error.response?.data || error.message);
+    console.error(
+      'Error fetching monthly watch time:',
+      error.response?.data || error.message,
+    );
     return null;
   }
 };
-
 
 export const fetchWatchHistoryByDatefromBackend = async (date, userId) => {
   if (!date || !userId) {
@@ -78,9 +77,12 @@ export const fetchWatchHistoryByDatefromBackend = async (date, userId) => {
   }
 
   try {
-    const response = await axios.get(`${BASE_URL}/report/watch-history-by-date`, {
-      params: { date, userId },
-    });
+    const response = await axios.get(
+      `${BASE_URL}/report/watch-history-by-date`,
+      {
+        params: {date, userId},
+      },
+    );
     return response.data; // this will be an array of flat records
   } catch (error) {
     console.error('Error fetching watch history:', error);
@@ -88,16 +90,12 @@ export const fetchWatchHistoryByDatefromBackend = async (date, userId) => {
   }
 };
 
-
-
 function prepareVideoReportPayload(videoItem, watchData, userId) {
-  const isYouTube = !!videoItem.ytube_id;
+  const isYouTube = videoItem.type.startsWith("youtube");
 
   const videoPayload = {
-    videoId: isYouTube
-      ? videoItem.ytube_id
-      : videoItem.driveId || videoItem.id?.toString(),
-    name: isYouTube ? videoItem.title : videoItem.name,
+    videoId: videoItem.source_id || videoItem.id?.toString(),
+    name:  videoItem.title ,
     duration: Number(videoItem.duration || 0),
     type: isYouTube ? 'youtube' : 'drive',
     mimetype: isYouTube

@@ -4,7 +4,7 @@ export const groupItemsByDate = items => {
   const grouped = {};
 
   items.forEach(item => {
-    const createdAt = item.created_at;
+    const createdAt = item?.created_at;
     const dateKey = moment(createdAt).isSame(moment(), 'day')
       ? 'Today'
       : moment(createdAt).format('MMMM DD, YYYY');

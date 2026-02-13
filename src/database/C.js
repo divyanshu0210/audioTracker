@@ -45,8 +45,7 @@ export const upsertItem = ({
           in_show    = COALESCE(excluded.in_show, items.in_show),
           fav        = COALESCE(excluded.fav, items.fav),
           duration   = COALESCE(excluded.duration, items.duration),
-          created_at = CURRENT_TIMESTAMP
-        WHERE items.deleted_at IS NULL;
+          created_at = CURRENT_TIMESTAMP;
         `,
         [
           source_id,
@@ -65,7 +64,7 @@ export const upsertItem = ({
           tx.executeSql(
             `
             SELECT * FROM items
-            WHERE type = ? AND source_id = ? AND deleted_at IS NULL
+            WHERE type = ? AND source_id = ?
             LIMIT 1;
             `,
             [type, source_id],
@@ -133,7 +132,6 @@ export const getFullItemByIdTx = (tx, itemId) => {
       LEFT JOIN youtube_meta
         ON youtube_meta.item_id = items.id
       WHERE items.id = ?
-        AND items.deleted_at IS NULL
       LIMIT 1;
       `,
       [itemId],
@@ -160,7 +158,6 @@ export const getItemBySourceId = (source_id, type = null) => {
           ON youtube_meta.item_id = items.id
         WHERE
           items.source_id = ?
-          AND items.deleted_at IS NULL
       `;
 
       const params = [source_id];

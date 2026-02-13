@@ -1,9 +1,7 @@
 import React, {useEffect, useState} from 'react';
-import {Image, StyleSheet, Text, View} from 'react-native';
+import { StyleSheet, Text, View} from 'react-native';
 import RNFS from 'react-native-fs';
-import Foundation from 'react-native-vector-icons/Foundation';
 import {DownloadButton} from '../components/buttons/Download';
-import {getPlaceholderForMimeType} from '../music/utils';
 import BaseMenu from '../components/menu/BaseMenu';
 import {ItemTypes} from '../contexts/constants';
 import {useAppState} from '../contexts/AppStateContext';
@@ -13,8 +11,8 @@ const DriveItem = ({item, screen}) => {
   const [fileExists, setFileExists] = useState(false);
   const {driveLinksList, data} = useAppState();
 
-  const isFolder = item.mimeType === 'application/vnd.google-apps.folder';
-  const isVideo = item.mimeType?.startsWith('video/');
+  const isFolder = item?.mimeType === 'application/vnd.google-apps.folder';
+  const isVideo = item?.mimeType?.startsWith('video/');
 
   useEffect(() => {
     let mounted = true;

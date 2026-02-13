@@ -19,7 +19,7 @@ import Slider from '@react-native-community/slider';
 import Icon from 'react-native-vector-icons/MaterialIcons';
 import SkipIndicator from './SkipIndicator';
 import PlayerSettings from './PlayerSettings';
-import {updateDurationIfNotSet} from '../../database/U';
+import {updateItemFields} from '../../database/U';
 
 const {width: SCREEN_WIDTH} = Dimensions.get('window');
 const DOUBLE_PRESS_DELAY = 300;
@@ -254,11 +254,12 @@ const VLCPlayerComponent = forwardRef(
             if (event.duration > 0 && !durationRef.current) {
               pauseOnStart&&setIsPaused(true); //this happens on first time play // so if pauseOnStart then turn pause true from here. 
               durationRef.current = event.duration;
-              updateDurationIfNotSet({
-                sourceType: item.type,
-                id: item.source_id, 
-                duration: event.duration / 1000,
-              });
+              updateItemFields(item.id,{duration: event.duration / 1000,});
+              // updateDurationIfNotSet({
+              //   sourceType: item.type,
+              //   id: item.source_id, 
+              //   duration: event.duration / 1000,
+              // });
             }
           }}
           onOpen={() => {

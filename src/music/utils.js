@@ -1,3 +1,4 @@
+import { isAudioFile } from '../Linking/utils/handleLinkSubmit';
 
  export const getPlaceholderForMimeType = mimeType => {
   if (!mimeType) return require('../assets/video-placeholder.png');
@@ -10,14 +11,4 @@
 
   // Default fallback
   return require('../assets/video-placeholder.png');
-};
-
-export const getMediaType = mimeType => {
-  if (mimeType.startsWith('audio/')) {
-    return 0;
-  } else if (mimeType.startsWith('video/')) {
-    return 1;
-  } else {
-    return null;
-  }
 };

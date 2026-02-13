@@ -1,11 +1,11 @@
 import React, {useRef, useState} from 'react';
-import {Alert, TouchableOpacity, View} from 'react-native';
+import {ActivityIndicator, Alert, TouchableOpacity, View} from 'react-native';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import RNFS from 'react-native-fs';
 import CircularProgress from 'react-native-circular-progress-indicator';
 import {DRIVE_API_KEY} from '@env';
 import {updateFilePath, updateItemFields} from '../../database/U';
-import { useAppState } from '../../contexts/AppStateContext';
+import {useAppState} from '../../contexts/AppStateContext';
 
 export const DownloadButton = ({file}) => {
   const [downloadingFileId, setDownloadingFileId] = useState(null);
@@ -24,16 +24,18 @@ export const DownloadButton = ({file}) => {
   };
 
   const onDownloadComplete = (file, localPath) => {
-    setData(prevData =>
-      prevData.map(f =>
+    setData(prevData => {
+      const updated = prevData.map(f =>
         f.source_id === file.source_id ? {...f, file_path: localPath} : f,
-      ),
-    );
-    setDriveLinksList(prevData =>
-      prevData.map(f =>
+      );
+      return [...updated]; // force brand new array reference
+    });
+    setDriveLinksList(prevData => {
+      const updated = prevData.map(f =>
         f.source_id === file.source_id ? {...f, file_path: localPath} : f,
-      ),
-    );
+      );
+      return [...updated]; // force brand new array reference
+    });
   };
 
   const handleDownload = async file => {
@@ -59,18 +61,28 @@ export const DownloadButton = ({file}) => {
           console.log('Download started:', res);
         },
         progress: res => {
-          const percent = Math.round(
-            (res.bytesWritten / res.contentLength) * 100,
-          );
+          const total = Number(res.contentLength);
+          const written = Number(res.bytesWritten);
+          // If content length unknown (-1 or 0)
+          if (!total || total <= 0) {
+            // Show indeterminate progress (spinner mode)
+            setProgress(null);
+            return;
+          }
+          const percent = Math.min(100, Math.round((written / total) * 100));
           setProgress(percent);
         },
       };
 
       const result = await RNFS.downloadFile(downloadOptions).promise;
+      console.log('DOWNLOAD RESULT', result);
       currentDownloadJobId.current = null;
 
       if (result.statusCode === 200) {
-        await updateItemFields(file.id, {file_path: localPath});
+        setProgress(100);
+        const fullItem = await updateItemFields(file.id, {
+          file_path: localPath,
+        });
         onDownloadComplete(file, localPath);
         Alert.alert('Download Complete', `File saved to: ${localPath}`);
       }
@@ -98,27 +110,32 @@ export const DownloadButton = ({file}) => {
 
   const isDownloading = downloadingFileId === file.source_id;
 
-  return (
-    <TouchableOpacity
-      onPress={
-        isDownloading ? handleCancelDownload : () => handleDownload(file)
-      }
-      style={{
-        width: 30,
-        height: 30,
-
-        alignItems: 'center',
-        justifyContent: 'center',
-        // backgroundColor: '#000',
-      }}>
-      {isDownloading ? (
+ return (
+  <TouchableOpacity
+    onPress={
+      isDownloading
+        ? handleCancelDownload
+        : () => handleDownload(file)
+    }
+    style={{
+      width: 30,
+      height: 30,
+      alignItems: 'center',
+      justifyContent: 'center',
+    }}
+  >
+    {isDownloading ? (
+      progress === null ? (
+        <ActivityIndicator size="small" />
+      ) : (
         <View
           style={{
             width: 30,
             height: 30,
             justifyContent: 'center',
             alignItems: 'center',
-          }}>
+          }}
+        >
           <CircularProgress
             value={progress}
             radius={15}
@@ -129,21 +146,22 @@ export const DownloadButton = ({file}) => {
             inActiveStrokeWidth={4}
             activeStrokeWidth={4}
             maxValue={100}
-            title=""
           />
+
           <Ionicons
             name="close"
             size={22}
             color="#000"
             style={{
               position: 'absolute',
-              alignSelf: 'center',
             }}
           />
         </View>
-      ) : (
-        <Ionicons name="cloud-download" size={24} color="black" />
-      )}
-    </TouchableOpacity>
-  );
+      )
+    ) : (
+      <Ionicons name="cloud-download" size={24} color="black" />
+    )}
+  </TouchableOpacity>
+);
+
 };

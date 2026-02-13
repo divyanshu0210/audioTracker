@@ -1,8 +1,8 @@
 import React from 'react';
-import { Alert, StyleSheet, Text, View } from 'react-native';
-import { MenuDivider, MenuItem } from 'react-native-material-menu';
-import { useAppState } from '../../contexts/AppStateContext';
-import { deleteYTItemFromDB } from '../../database/D';
+import {Alert, StyleSheet, Text, View} from 'react-native';
+import {MenuDivider, MenuItem} from 'react-native-material-menu';
+import {useAppState} from '../../contexts/AppStateContext';
+import {deleteYTItemFromDB, softDeleteItem} from '../../database/D';
 
 const YTMenuItems = ({item, screen, hideMenu}) => {
   const {setItems} = useAppState();
@@ -29,7 +29,7 @@ const YTMenuItems = ({item, screen, hideMenu}) => {
   };
   const handleDeleteYTItem = async item => {
     try {
-      await deleteYTItemFromDB(item.source_id, item.type);
+      await softDeleteItem(item.type, item.source_id);
       console.log('delete hoja');
       handleDelete(item);
       Alert.alert(`${item.title} deleted successfully`);

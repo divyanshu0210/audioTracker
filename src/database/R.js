@@ -15,7 +15,6 @@ export const getFolderStackFromDB = async itemId => {
           SELECT id, source_id, title, parent_id, type
           FROM items
           WHERE source_id = ?
-          AND deleted_at IS NULL
           LIMIT 1;
           `,
           [currentId],
@@ -83,7 +82,6 @@ export const getChildrenByParent = async (parentId = null, types = null) => {
         WHERE
           ${isRoot ? 'items.out_show = 1' : 'items.parent_id = ?'}
           ${typeCondition}
-          AND items.deleted_at IS NULL
         ORDER BY datetime(items.created_at) DESC;
       `;
 
@@ -93,7 +91,6 @@ export const getChildrenByParent = async (parentId = null, types = null) => {
           SET in_show = 1
           WHERE parent_id = ?
           ${typeCondition}
-          AND deleted_at IS NULL;
         `;
 
         // Going deep → update in_show

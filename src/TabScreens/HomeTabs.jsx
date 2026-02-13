@@ -55,7 +55,6 @@ const HomeTabs = () => {
       const files = selectedCategory
         ? await getDeviceFilesInCategory(selectedCategory)
         : await getChildrenByParent(null, 'device_file');
-      // : await getAllDeviceFiles();
       setDeviceFiles(files || []);
     } catch (err) {
       console.error('Error loading files from DB:', err);

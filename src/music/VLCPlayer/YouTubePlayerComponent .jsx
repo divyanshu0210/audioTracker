@@ -15,11 +15,8 @@ import {
 } from 'react-native';
 import {WebView} from 'react-native-webview';
 import RNFS from 'react-native-fs';
-import {updateDurationIfNotSet} from '../../database/U.js';
-import {
-  getFullDOMHTML,
-  startTrackingTime,
-} from '../progressTrackingUtils.js';
+import {updateItemFields} from '../../database/U.js';
+import {getFullDOMHTML, startTrackingTime} from '../progressTrackingUtils.js';
 import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
 // const {PipModule} = NativeModules;
 
@@ -56,7 +53,6 @@ const YouTubePlayerComponent = forwardRef(
     useEffect(() => {
       console.log(startTime);
     }, [startTime]);
-
 
     const captureScreenshot = async () => {
       if (webViewRef.current && !isLoading) {
@@ -114,7 +110,7 @@ const YouTubePlayerComponent = forwardRef(
       }
     };
 
-    const pausePlayerOnStart =()=>{
+    const pausePlayerOnStart = () => {
       if (webViewRef?.current) {
         webViewRef.current.injectJavaScript(`
           (function() {
@@ -152,8 +148,7 @@ const YouTubePlayerComponent = forwardRef(
           })();
         `);
       }
-      
-    }
+    };
 
     const handleWebViewMessage = async event => {
       try {
@@ -176,13 +171,14 @@ const YouTubePlayerComponent = forwardRef(
         } else if (data.state != undefined) {
           onIsPausedChange(data.state !== 'PLAYING');
         } else if (data.duration !== undefined) {
-          console.log('video duration on event',data.event, item?.source_id, data.duration);
+          console.log(
+            'video duration on event',
+            data.event,
+            item?.source_id,
+            data.duration,
+          );
           durationRef.current = data.duration;
-          updateDurationIfNotSet({
-            sourceType: 'youtube_video',
-            id: item?.source_id,
-            duration: data.duration,
-          });
+          updateItemFields(item.id, {duration: data.duration});
         } else if (data.status !== undefined) {
           switch (data.status) {
             case 'SEEK_SUCCESS':
@@ -247,7 +243,7 @@ const YouTubePlayerComponent = forwardRef(
           javaScriptEnabled
           allowsFullscreenVideo
           allowsInlineMediaPlayback={true}
-          mediaPlaybackRequiresUserAction={false} 
+          mediaPlaybackRequiresUserAction={false}
           allowsPictureInPictureMediaPlayback
           domStorageEnabled
           originWhitelist={['*']}
@@ -256,9 +252,8 @@ const YouTubePlayerComponent = forwardRef(
             setIsLoading(false);
             startTrackingTime(webViewRef);
             getFullDOMHTML(webViewRef);
-            console.log('pauseOnStart',pauseOnStart)
-           pauseOnStart&& pausePlayerOnStart()
-            
+            console.log('pauseOnStart', pauseOnStart);
+            pauseOnStart && pausePlayerOnStart();
           }}
         />
       </View>
@@ -267,7 +262,7 @@ const YouTubePlayerComponent = forwardRef(
 );
 
 export default YouTubePlayerComponent;
- 
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -275,7 +270,7 @@ const styles = StyleSheet.create({
   },
   loaderContainer: {
     margin: 5,
-    height:'100%',
+    height: '100%',
     alignItems: 'center',
     justifyContent: 'center',
   },

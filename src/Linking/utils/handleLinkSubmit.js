@@ -49,7 +49,7 @@ export const handleLinkSubmit = async (
   const extracted = extractLinkType(inputLink);
   try {
     if (!extracted) {
-      handleDeviceFileFromUri(
+      await handleDeviceFileFromUri(
         inputLink,
         setDeviceFiles,
         navigation,
@@ -211,11 +211,11 @@ export const handleDriveLink = async (
         parent_id: null,
         mimeType: 'application/vnd.google-apps.folder',
         out_show: 1,
-        in_show: 0,
       });
 
       // Always update UI by removing existing and adding to top
       console.log(fullItem);
+      
       setDriveLinksList(prev => [
         fullItem,
         ...prev.filter(i => i.source_id !== driveId),
@@ -233,7 +233,6 @@ export const handleDriveLink = async (
         mimeType: mimeType,
         file_path: null,
         out_show: 1,
-        in_show: 0,
       });
 
       if (selectedCategory != null) {

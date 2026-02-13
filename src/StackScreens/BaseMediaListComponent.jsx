@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import {
   ActivityIndicator,
   SectionList,
@@ -19,7 +19,7 @@ import {Button} from 'react-native-share';
 import NewAssignmentsBtn from '../components/buttons/NewAssignmentsBtn';
 
 export const getItemId = item =>
-  item.rowid || item.source_id || item.id.toString();
+  item?.rowid || item?.source_id || item?.id.toString();
 
 const BaseMediaListComponent = ({
   mediaList,
@@ -35,6 +35,8 @@ const BaseMediaListComponent = ({
     useAppState();
 
   const navigation = useNavigation();
+
+  useEffect
 
   const isSelected = (id, type) =>
     selectedItems.some(i => i.id === id && i.type === type);
@@ -80,6 +82,8 @@ const BaseMediaListComponent = ({
     id: getItemId(item),
     type,
   }));
+
+
 
   return (
     <View style={styles.container}>

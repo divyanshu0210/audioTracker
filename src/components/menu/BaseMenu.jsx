@@ -15,7 +15,7 @@ const BaseMenu = ({item, type, screen}) => {
   const {setActiveItem, setSelectedNote} = useAppState();
   const sourceId =
     item?.rowid ||
-    item.source_id ||
+    item?.source_id ||
     (type === 'notebook' && item?.id);
 
   const hideMenu = () => setVisible(false);

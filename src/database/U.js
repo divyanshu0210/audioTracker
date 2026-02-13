@@ -23,8 +23,10 @@ export const updateItemFields = (id, updates) => {
         WHERE id = ?;
         `,
         [...values, id],
-        async () => {
+        async (result) => {
+           console.log('[updateItemFields] Rows affected:', result);
           const fullItem = await getFullItemByIdTx(tx, id);
+          console.log("")
           resolve(fullItem);
         },
         (_, error) => reject(error),
@@ -32,93 +34,6 @@ export const updateItemFields = (id, updates) => {
     });
   });
 };
-
-export const updateFolderName = (folderId, newName) => {
-  const fastdb = getDb();
-  fastdb.transaction(tx => {
-    tx.executeSql(
-      'UPDATE folders SET name = ? WHERE drive_id = ?;',
-      [newName, folderId],
-      () => console.log(`Folder ${folderId} updated to ${newName}`),
-      error => console.error('Error updating folder name:', error),
-    );
-  });
-};
-
-export const updateFilePath = (fileId, filePath) => {
-  const fastdb = getDb();
-  fastdb.transaction(tx => {
-    tx.executeSql(
-      'UPDATE files SET file_path = ? WHERE drive_id = ?;',
-      [filePath, fileId],
-      () => console.log(`File path updated for ${fileId}: ${filePath}`),
-      error => console.error('Error updating file path:', error),
-    );
-  });
-};
-
-export const updateDeviceFilePath = (fileId, filePath) => {
-  const fastdb = getDb();
-  fastdb.transaction(tx => {
-    tx.executeSql(
-      'UPDATE device_files SET file_path = ? WHERE uuid = ?;',
-      [filePath, fileId],
-      () => console.log(`✅ File path updated for ${fileId}: ${filePath}`),
-      error => console.error('❌ Error updating file path:', error),
-    );
-  });
-};
-
-export const updateDurationIfNotSet = ({sourceType, id, duration}) => {
-  const fastdb = getDb();
-  let table, idColumn;
-
-  switch (sourceType) {
-    case 'youtube':
-      table = 'videos';
-      idColumn = 'ytube_id';
-      break;
-    case 'device':
-      table = 'device_files';
-      idColumn = 'uuid';
-      break;
-    case 'drive':
-      table = 'files';
-      idColumn = 'drive_id';
-      break;
-    default:
-      console.error(`Unsupported sourceType: ${sourceType}`);
-      return;
-  }
-
-  const condition = 'AND (duration IS NULL OR duration = 0)';
-  const query = `
-    UPDATE ${table} 
-    SET duration = ? 
-    WHERE ${idColumn} = ? ${condition};
-  `;
-
-  fastdb.transaction(tx => {
-    tx.executeSql(
-      query,
-      [duration, id],
-      (_, result) => {
-        if (result.rowsAffected > 0) {
-          console.log(`Duration updated successfully for ${idColumn}: ${id}`);
-        } else {
-          console.log(
-            `Duration was already set or ${idColumn} not found: ${id}`,
-          );
-        }
-      },
-      (_, error) => {
-        console.error(`Error updating duration in ${table}:`, error);
-      },
-    );
-  });
-};
-
-
 
 export const updateWatchTimestampIfExists = videoId => {
   const today = new Date().toISOString().slice(0, 10); // 'YYYY-MM-DD'

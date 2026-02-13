@@ -1,14 +1,9 @@
 // components/DeviceFileItem.js
 import React from 'react';
-import {Image, StyleSheet, Text, View} from 'react-native';
-import Foundation from 'react-native-vector-icons/Foundation';
-import {getMediaType, getPlaceholderForMimeType} from '../music/utils';
-import {ItemTypes} from '../contexts/constants';
+import {StyleSheet, Text, View} from 'react-native';
 import {getFileIcon} from '../contexts/fileIconHelper';
 
 const DeviceItem = ({item}) => {
-  const mediaType = getMediaType(item.mimeType);
-
   return (
     <View style={styles.audioItem}>
       {getFileIcon(item.mimeType)}
@@ -17,7 +12,7 @@ const DeviceItem = ({item}) => {
         <Text style={styles.title} numberOfLines={2}>
           {item.title}
         </Text>
-        {item.source && <Text style={styles.channelText}>{item.source}</Text>}
+        {item.id && <Text style={styles.channelText}>{item.id}</Text>}
       </View>
 
       {/* {item.file_path && <BaseMenu item={item} screen="out" type={ItemTypes.DEVICE}/>} */}

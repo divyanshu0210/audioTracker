@@ -39,10 +39,8 @@ import {
 } from '../appMentorBackend/reportMgt';
 // const {PipModule} = NativeModules;
 
-const isAudioFile = fileName => {
-  const audioExtensions = ['mp3', 'wav', 'ogg', 'm4a', 'flac', 'aac', 'wma'];
-  const fileExtension = fileName?.split('.').pop()?.toLowerCase() || '';
-  return audioExtensions.includes(fileExtension);
+const isAudioFile = mimeType => {
+  return mimeType.startsWith('audio/');
 };
 
 const BacePlayer = () => {
@@ -104,7 +102,7 @@ const BacePlayer = () => {
 
   // Helper function to get item properties
   const getItemProperties = item => {
-    const TIME_FACTOR = item?.type!=='youtube_video' ? 1000 : 1;
+    const TIME_FACTOR = item?.type !== 'youtube_video' ? 1000 : 1;
     const source_type = item?.type;
     const videoId = item?.source_id;
     // setActiveItem(item);
@@ -121,10 +119,10 @@ const BacePlayer = () => {
   // Initialize player and load data
   useEffect(() => {
     if (currentItem) {
-      console.log('vlc ', currentItem);
+      console.log('bace player ', currentItem);
       setNotesList([]);
       const tempIsAudio =
-        source_type !== 'youtube_video' && isAudioFile(currentItem?.name);
+        source_type !== 'youtube_video' && isAudioFile(currentItem?.mimeType);
       setIsAudio(tempIsAudio);
 
       if (tempIsAudio) {
@@ -250,7 +248,6 @@ const BacePlayer = () => {
       subscription.remove();
     };
   }, []);
-
 
   // Handle time tracking
   useEffect(() => {

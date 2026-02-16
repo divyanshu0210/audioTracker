@@ -24,9 +24,8 @@ import {
   hasRestoreCheckCompleted,
 } from '../backupRestore/restoreManager';
 import {useAppState} from '../contexts/AppStateContext';
-import {initFTSDatabase} from '../database/FTSDatabase';
 import {initUserDatabase} from '../database/UserDatabaseInstance';
-import {initDatabase} from '../database/database';
+import {initDatabase, resetDatabase} from '../database/database';
 import useDbStore from '../database/dbStore';
 import {setupFCM} from '../appNotification/appFCMNotification/fcmNotificationService';
 import {initializeBackupSystem} from '../backupAdv/backupNew';
@@ -95,7 +94,6 @@ const GoogleLoginScreen = ({navigation}) => {
       const db = initDb(userInfo.user.id);
       // await resetDatabase()
       await initDatabase();
-      await initFTSDatabase();
       await initUserDatabase(userInfo.user.id);
 
       setUserInfo(userInfo.user);

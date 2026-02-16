@@ -168,122 +168,199 @@ export const getAllNotesModifiedToday = () => {
 export const fetchNotes = ({
   sourceId,
   sourceType,
-  fileType, // 'audio' or 'video'
+  fileType,          // 'audio' | 'video'
   searchQuery,
   date,
+  categoryId,        // ✅ NEW
   offset = 0,
   limit = 20,
   sortBy = 'n.created_at',
-  sortOrder = 'ASC',
+  sortOrder = 'DESC',
 } = {}) => {
   const fastdb = getDb();
+
   return new Promise((resolve, reject) => {
     fastdb.transaction(tx => {
-      let query = `SELECT 
-                      n.rowid, n.source_id, n.source_type,n.title as noteTitle, n.content, n.text_content, n.created_at,
-                      json_object(
-                        'id', COALESCE(v.id, f.id,d.id,nb.id),
-                        'title', v.title,
-                        'name', COALESCE(f.name,d.name,nb.name),
-                        'color',nb.color,
-                        'parent_id', v.parent_id,
-                        'parentId', f.parent_id,
-                        'out_show', v.out_show,
-                        'in_show', v.in_show,
-                        'fav', v.fav,
-                        'ytube_id', v.ytube_id,
-                        'driveId', COALESCE(f.drive_id,d.uuid),
-                        'mimeType',COALESCE(f.mimeType,d.mimeType),
-                        'file_path', COALESCE(f.file_path,d.file_path),
-                        'duration', COALESCE(f.duration,d.duration,v.duration),
-                        'created_at',  COALESCE(f.created_at,d.created_at,v.created_at)
-                      ) AS relatedItem
-                    FROM notes n
-                    LEFT JOIN videos v ON n.source_id = v.ytube_id AND n.source_type = 'youtube'
-                    LEFT JOIN files f ON n.source_id = f.drive_id AND n.source_type = 'drive'
-                    LEFT JOIN device_files d ON n.source_id = d.uuid AND n.source_type = 'device'
-                          LEFT JOIN notebooks nb ON n.source_id = nb.id`;
+      let query = `
+        SELECT 
+          n.rowid,
+          n.source_id,
+          n.source_type,
+          n.title          AS noteTitle,
+          n.content,
+          n.text_content,
+          n.created_at,
+          'note' AS type,
 
-      let params = [];
+          CASE 
+            WHEN n.source_type IN ('youtube', 'drive', 'device') 
+              THEN json_object(
+                'id', i.id,
+                'source_id', i.source_id,
+                'type', i.type,
+                'title', i.title,
+                'parent_id', i.parent_id,
+                'mimeType', i.mimeType,
+                'file_path', i.file_path,
+                'duration', i.duration,
+                'fav', i.fav,
+                'out_show', i.out_show,
+                'in_show', i.in_show,
+                'created_at', i.created_at,
+                'deleted_at', i.deleted_at
+              )
+
+            WHEN n.source_type = 'notebook'
+              THEN json_object(
+                'id', nb.id,
+                'title', nb.title,
+                'color', nb.color,
+                'created_at', nb.created_at
+              )
+
+            ELSE json('{}')
+          END AS relatedItem
+        FROM notes n
+      `;
+      const joins = [];
       const conditions = [];
+      const params = [];
 
-      // Apply filters dynamically
+      // ─────────────────────────────────────────
+      // JOIN items (youtube / drive / device)
+      // ─────────────────────────────────────────
+      joins.push(`
+        LEFT JOIN items i 
+          ON n.source_id = i.source_id
+          AND n.source_type IN ('youtube', 'drive', 'device')
+          AND (
+            (n.source_type = 'youtube' AND i.type = 'youtube_video')
+            OR (n.source_type = 'drive'   AND i.type = 'drive_file')
+            OR (n.source_type = 'device'  AND i.type = 'device_file')
+          )
+      `);
+
+      // ─────────────────────────────────────────
+      // JOIN notebooks
+      // ─────────────────────────────────────────
+      joins.push(`
+        LEFT JOIN notebooks nb
+          ON n.source_id = nb.id
+          AND n.source_type = 'notebook'
+      `);
+
+      // ─────────────────────────────────────────
+      // CATEGORY FILTER (optional)
+      // ─────────────────────────────────────────
+      if (categoryId !== undefined) {
+        joins.push(`
+          JOIN category_items ci
+            ON ci.item_id = n.rowid
+            AND ci.item_type = 'note'
+        `);
+
+        conditions.push(`ci.category_id = ?`);
+        params.push(categoryId);
+      }
+
+      // ─────────────────────────────────────────
+      // Source filters
+      // ─────────────────────────────────────────
       if (sourceId !== undefined) {
         conditions.push(`n.source_id = ?`);
         params.push(sourceId);
       }
+
       if (sourceType !== undefined) {
         conditions.push(`n.source_type = ?`);
         params.push(sourceType);
       }
-      // if (fileType && sourceType === 'drive') {
-      //   conditions.push(`f.mimeType LIKE ?`);
-      //   params.push(`${fileType}%`); // Match 'audio%' or 'video%'
-      // }
-      if (fileType) {
-        if (sourceType === 'drive') {
-          conditions.push(`f.mimeType LIKE ?`);
-          params.push(`${fileType}%`);
-        } else if (sourceType === 'device') {
-          conditions.push(`d.mimeType LIKE ?`);
-          params.push(`${fileType}%`);
-        }
+
+      // ─────────────────────────────────────────
+      // File type filter
+      // ─────────────────────────────────────────
+      if (fileType && ['audio', 'video'].includes(fileType)) {
+        conditions.push(`i.mimeType LIKE ?`);
+        params.push(`${fileType}%`);
       }
+
+      // ─────────────────────────────────────────
+      // FTS Search
+      // ─────────────────────────────────────────
       if (searchQuery) {
         conditions.push(`n.text_content MATCH ?`);
         params.push(`${searchQuery}*`);
       }
+
+      // ─────────────────────────────────────────
+      // Date filter
+      // ─────────────────────────────────────────
       if (date) {
         conditions.push(`DATE(n.created_at) = ?`);
         params.push(date);
       }
 
+      // Attach joins
+      query += joins.join('\n');
+
+      // Attach conditions
       if (conditions.length > 0) {
         query += ` WHERE ` + conditions.join(' AND ');
       }
 
-      // Ensure valid sorting column and order
-      // Default to 'n.created_at' if sortBy is falsy or invalid
-      const validSortBy = ['n.rowid', 'n.created_at'].includes(sortBy)
+      // ─────────────────────────────────────────
+      // Sorting
+      // ─────────────────────────────────────────
+      const validSortCols = [
+        'n.rowid',
+        'n.created_at',
+        'i.created_at',
+        'i.title',
+        'i.duration',
+        'nb.created_at',
+        'nb.title',
+      ];
+
+      const sortColumn = validSortCols.includes(sortBy)
         ? sortBy
         : 'n.created_at';
 
-      // Default to 'DESC' (latest first) if sortOrder is falsy or invalid
-      const validSortOrder = ['ASC', 'DESC'].includes(
-        (sortOrder || '').toUpperCase(),
-      )
+      const sortDir = ['ASC', 'DESC'].includes((sortOrder || '').toUpperCase())
         ? sortOrder.toUpperCase()
         : 'DESC';
 
-      query += ` ORDER BY ${validSortBy} ${validSortOrder} LIMIT ? OFFSET ?`;
+      query += `
+        ORDER BY ${sortColumn} ${sortDir}
+        LIMIT ? OFFSET ?
+      `;
+
       params.push(limit, offset);
 
-      // console.log('Query:', query);
-      // console.log('Params:', params);
-
+      // ─────────────────────────────────────────
+      // Execute
+      // ─────────────────────────────────────────
       tx.executeSql(
         query,
         params,
-        (_, result) => {
+        (_, { rows }) => {
           const notes = [];
-          for (let i = 0; i < result.rows.length; i++) {
-            const note = result.rows.item(i);
+
+          for (let i = 0; i < rows.length; i++) {
+            const note = rows.item(i);
+
             try {
-              note.content = note.content;
-              note.text_content = note.text_content;
-              note.relatedItem = JSON.parse(note.relatedItem);
-            } catch (error) {
-              console.error('Failed to parse note content:', error);
-              note.content = [];
-              note.text_content = {};
+              note.relatedItem = JSON.parse(note.relatedItem || '{}');
+            } catch {
               note.relatedItem = {};
             }
+
             notes.push(note);
           }
+
           resolve(notes);
         },
         (_, error) => {
-          console.error('Error fetching notes:', error);
+          console.error('fetchNotes failed:', error);
           reject(error);
         },
       );
@@ -291,11 +368,12 @@ export const fetchNotes = ({
   });
 };
 
+
 export const fetchNotebooks = callback => {
   const fastdb = getDb();
   fastdb.transaction(tx => {
     tx.executeSql(
-      'SELECT * FROM notebooks ORDER BY created_at DESC;',
+      'SELECT *, "notebook" AS type FROM notebooks ORDER BY created_at DESC;',
       [],
       (_, {rows}) => callback(rows._array), // Pass notebooks array to callback
       error => console.error('Error fetching notebooks:', error),
@@ -813,110 +891,3 @@ function mergeTimeIntervals(intervals) {
 
   return merged;
 }
-
-//unused
-export const fetchNotesBySource = (sourceId, sourceType) => {
-  const fastdb = getDb();
-  return new Promise((resolve, reject) => {
-    fastdb.transaction(tx => {
-      tx.executeSql(
-        `SELECT rowid, source_id, source_type, content,text_content, created_at 
-           FROM notes 
-           WHERE source_id = ? AND source_type = ? 
-           ORDER BY rowid ASC`, // Use rowid instead of id
-        [sourceId, sourceType],
-        (_, result) => {
-          const notes = [];
-          for (let i = 0; i < result.rows.length; i++) {
-            const note = result.rows.item(i);
-            try {
-              note.content = note.content; // Parse JSON content
-              note.text_content = note.text_content;
-            } catch (error) {
-              console.error('Failed to parse note content:', error);
-              note.content = []; // Fallback to empty array if parsing fails
-              note.text_content = {};
-            }
-            notes.push(note);
-          }
-          resolve(notes);
-        },
-        (_, error) => {
-          console.error('Error fetching notes:', error);
-          reject(error);
-        },
-      );
-    });
-  });
-};
-
-export const fetchPaginatedNotes = (offset = 0, limit = 20) => {
-  const fastdb = getDb();
-  return new Promise((resolve, reject) => {
-    fastdb.transaction(tx => {
-      tx.executeSql(
-        `SELECT rowid, source_id, source_type, content,text_content, created_at 
-           FROM notes 
-           ORDER BY rowid ASC 
-           LIMIT ? OFFSET ?`,
-        [limit, offset],
-        (_, result) => {
-          const notes = [];
-          for (let i = 0; i < result.rows.length; i++) {
-            const note = result.rows.item(i);
-            try {
-              note.content = note.content;
-              note.text_content = note.text_content;
-            } catch (error) {
-              console.error('Failed to parse note content:', error);
-              note.content = [];
-              note.text_content = {};
-            }
-            notes.push(note);
-          }
-          resolve(notes);
-        },
-        (_, error) => {
-          console.error('Error fetching paginated notes:', error);
-          reject(error);
-        },
-      );
-    });
-  });
-};
-
-export const searchNotes = (query, offset = 0, limit = 20) => {
-  const fastdb = getDb();
-  return new Promise((resolve, reject) => {
-    fastdb.transaction(tx => {
-      tx.executeSql(
-        `SELECT rowid, source_id, source_type, content,text_content, created_at 
-           FROM notes 
-           WHERE content MATCH ? 
-           ORDER BY rowid ASC
-           LIMIT ? OFFSET ?`, // Paginate search results
-        [`${query}*`, limit, offset],
-        (_, result) => {
-          const notes = [];
-          for (let i = 0; i < result.rows.length; i++) {
-            const note = result.rows.item(i);
-            try {
-              note.content = note.content; // Parse JSON content
-              note.text_content = note.text_content;
-            } catch (error) {
-              console.error('Failed to parse note content:', error);
-              note.content = []; // Fallback to empty array if parsing fails
-              note.text_content = {};
-            }
-            notes.push(note);
-          }
-          resolve(notes);
-        },
-        (_, error) => {
-          console.error('Error searching notes:', error);
-          reject(error);
-        },
-      );
-    });
-  });
-};

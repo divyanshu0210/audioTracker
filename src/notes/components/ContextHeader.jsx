@@ -27,14 +27,7 @@ const ContextHeader = ({style, showHeaderButtons = true}) => {
   const sourceType = activeItem?.sourceType;
   const item = activeItem?.item;
 
-  const title =
-    sourceType === 'youtube'
-      ? item?.title
-      : sourceType === 'drive' || sourceType === 'device'
-        ? item?.name
-        : sourceType === 'notebook'
-          ? item?.name
-          : 'Related Notes';
+  const title = item?.title || 'Related Notes';
 
   const subtitle = sourceTypeLabels[sourceType] || '';
 

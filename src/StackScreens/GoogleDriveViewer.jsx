@@ -42,13 +42,13 @@ export const fetchDriveItems = async (
   try {
     setLoading?.(true);
     console.log('folderCache:', folderCache);
-    const cached = getFolderFromCache(source_id);
-    if (cached) {
-      console.log('Using cached memory data');
-      setData(cached);
-      setLoading?.(false);
-      return;
-    }
+    // const cached = getFolderFromCache(source_id);
+    // if (cached) {
+    //   console.log('Using cached memory data');
+    //   setData(cached);
+    //   setLoading?.(false);
+    //   return;
+    // }
     // ── First try database ────────────────────────────────────────
     const parentItem = await getItemBySourceId(source_id, 'drive_folder');
     if (!parentItem) {

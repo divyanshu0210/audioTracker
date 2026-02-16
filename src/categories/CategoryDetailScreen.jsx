@@ -12,18 +12,13 @@ import MainYouTubeView from '../StackScreens/MainYouTubeView';
 import DeviceFilesView from '../StackScreens/DeviceFilesView';
 import DriveFilesView from '../StackScreens/DriveFilesView';
 import React, {useCallback, useEffect, useState} from 'react';
-import {
-  fetchNotebooksInCategory,
-  fetchNotesInCategory,
-  getDeviceFilesInCategory,
-  getFileItemsInCategory,
-  getYouTubeItemsInCategory,
-} from './catDB';
+import {getCategoryData} from './catDB';
 import NotesListComponent from '../notes/notesListing/NotesListComponent';
 import NotebookScreen from '../StackScreens/NoteBook/NoteBookScreen';
 import {useFocusEffect} from '@react-navigation/core';
 import AllNotesScreen from '../notes/AllNotesList';
 import CategoryList from './CategoryList';
+import { fetchNotes } from '../database/R';
 
 const Tab = createMaterialTopTabNavigator();
 
@@ -55,7 +50,7 @@ const CategoryDetailScreen = ({navigation, route}) => {
     }, []),
   );
 
-  const emailMatch =  item.name.match(/\(([^)]+)\)/);
+  const emailMatch = item.name.match(/\(([^)]+)\)/);
   const hasEmail = !!emailMatch;
   const displayName = hasEmail
     ? item.name.replace(/\s*\([^)]+\)/, '')
@@ -68,7 +63,7 @@ const CategoryDetailScreen = ({navigation, route}) => {
         <View style={{flexDirection: 'column'}}>
           <Text style={{marginRight: 8, color: '#000', fontSize: 20}}>
             {displayName || 'Files'}{' '}
-          </Text>  
+          </Text>
           <Text style={{marginRight: 8, color: '#777', fontSize: 12}}>
             {email || ''}
           </Text>
@@ -80,30 +75,35 @@ const CategoryDetailScreen = ({navigation, route}) => {
   // Function to load category data
   const loadCategoryData = React.useCallback(() => {
     setLoading(true);
-    getYouTubeItemsInCategory(item.id)
+    getCategoryData(item.id, ['youtube_video', 'youtube_playlist'])
       .then(data => {
         console.log('YouTube Items:', data);
         setItems(data);
       })
       .catch(error => console.error('Error loading YouTube items:', error));
 
-    getFileItemsInCategory(item.id)
+    getCategoryData(item.id, ['drive_folder', 'drive_file'])
       .then(data => {
         console.log('File Items:', data);
         setDriveLinksList(data);
       })
       .catch(error => console.error('Error loading File items:', error));
 
-    getDeviceFilesInCategory(item.id)
+    getCategoryData(item.id, ['device_file'])
       .then(data => {
         console.log('Device Files:', data);
         setDeviceFiles(data);
       })
       .catch(error => console.error('Error loading Device Files:', error));
 
-    fetchNotebooksInCategory(item.id, setNotebooks);
+    getCategoryData(item.id, ['notebook'])
+      .then(data => {
+        console.log('Notebook Items:', data);
+        setNotebooks(data);
+      })
+      .catch(error => console.error('Error loading Notebook items:', error));
 
-    fetchNotesInCategory(item.id)
+    fetchNotes({categoryId: item.id})
       .then(data => {
         console.log('Notes:', data);
         setMainNotesList(data);

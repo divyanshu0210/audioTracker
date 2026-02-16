@@ -115,22 +115,22 @@ const HomeFABBtn = () => {
   const handleAddNoteButton = async () => {
     setInserting(true);
     try {
-      const notebookId = await getOrCreateDefaultNotebookId();
+      const defaultNotebookId = await getOrCreateDefaultNotebookId();
       fetchNotebooks(setNotebooks);
 
-      const newNoteId = await createNewNote(String(notebookId), 'notebook');
+      const newNoteId = await createNewNote(String(defaultNotebookId), 'notebook');
       if (newNoteId) {
         setActiveNoteId(newNoteId);
         const newNoteObject = {
           rowid: newNoteId,
-          source_id: String(notebookId),
+          source_id: String(defaultNotebookId),
           source_type: 'notebook',
           noteTitle: '', // You can fetch title if needed
           content: '', // Empty content initially
           text_content: {title: ''},
           created_at: new Date().toISOString(),
           relatedItem: {
-            name: 'Default Notebook', // If you fetched notebook name
+            title: 'Default Notebook', // If you fetched notebook name
           },
         };
         setNotesList(prev => [newNoteObject, ...prev]);

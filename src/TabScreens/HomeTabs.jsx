@@ -2,12 +2,7 @@ import React, {useEffect, useRef, useCallback, useState} from 'react';
 import {Animated, StyleSheet, View} from 'react-native';
 import {createMaterialTopTabNavigator} from '@react-navigation/material-top-tabs';
 import {Provider} from 'react-native-paper';
-import {
-  fetchNotebooksInCategory,
-  getDeviceFilesInCategory,
-  getFileItemsInCategory,
-  getYouTubeItemsInCategory,
-} from '../categories/catDB';
+import {getCategoryData} from '../categories/catDB';
 import {fetchNotebooks, getChildrenByParent} from '../database/R';
 import AllNotesScreen from '../notes/AllNotesList';
 import DeviceFilesView from '../StackScreens/DeviceFilesView';
@@ -53,7 +48,7 @@ const HomeTabs = () => {
     loader && setLoading(true);
     try {
       const files = selectedCategory
-        ? await getDeviceFilesInCategory(selectedCategory)
+        ? await getCategoryData(selectedCategory, ['device_file'])
         : await getChildrenByParent(null, 'device_file');
       setDeviceFiles(files || []);
     } catch (err) {
@@ -67,7 +62,10 @@ const HomeTabs = () => {
     loader && setLoading(true);
     try {
       const storedItems = selectedCategory
-        ? await getYouTubeItemsInCategory(selectedCategory)
+        ? await getCategoryData(selectedCategory, [
+            'youtube_video',
+            'youtube_playlist',
+          ])
         : await getChildrenByParent(null, [
             'youtube_playlist',
             'youtube_video',
@@ -85,7 +83,10 @@ const HomeTabs = () => {
     loader && setLoading(true);
     try {
       const storedItems = selectedCategory
-        ? await getFileItemsInCategory(selectedCategory)
+        ? await getCategoryData(selectedCategory, [
+            'drive_folder',
+            'drive_file',
+          ])
         : await getChildrenByParent(null, ['drive_folder', 'drive_file']);
 
       setDriveLinksList(storedItems || []);
@@ -100,9 +101,10 @@ const HomeTabs = () => {
   const loadNotebooks = async (loader = true) => {
     loader && setLoading(true);
     try {
-      selectedCategory
-        ? fetchNotebooksInCategory(selectedCategory, setNotebooks)
-        : fetchNotebooks(setNotebooks);
+      const storedItems = selectedCategory
+        ? await getCategoryData(selectedCategory, ['notebook'])
+        : await fetchNotebooks(setNotebooks);
+      setNotebooks(storedItems || []);
     } catch (error) {
       console.error('Error fetching notebooks:', error);
     } finally {

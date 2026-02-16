@@ -1,6 +1,4 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import useDbStore from './dbStore';
-import SQLite from 'react-native-sqlite-2';
 
 // Helper function to get db from store with error handling
 export const getDb = () => {
@@ -16,16 +14,12 @@ export const getDb = () => {
 export const resetDatabase = async () => {
   const fastdb = getDb();
   const tables = [
-    'folders',
-    'files',
-    'videos',
-    'playlists',
-    'device_files',
+    'items',
+    'youtube_meta',
     'notes',
     'notebooks',
     'settings',
     'video_watch_history',
-    'richNotes',
     'images',
     'categories',
     'category_items',
@@ -61,7 +55,6 @@ export const initDatabase = async () => {
     tx.executeSql('PRAGMA database_list;', [], (_, result) => {
       const dbPath = result.rows.item(0).file;
       useDbStore.getState().setDbPath(dbPath);
-
       console.log('📂 Database Location:', dbPath);
     });
 
@@ -74,143 +67,10 @@ export const initDatabase = async () => {
       () => console.log('Settings table created successfully'),
       error => console.error('Error creating Settings table:', error),
     );
+    // tx.executeSql('SELECT sqlite_version();', [], (_, result) => {
+    //   console.log('SQLite Version:', result.rows.item(0));
+    // });
 
-    // tx.executeSql(
-    //   "DROP TABLE IF EXISTS folders;",
-    //   [],
-    //   () => console.log("folders table dropped successfully"),
-    //   (_, error) => console.error("Error dropping folders table:", error?.message || "Unknown error")
-    // );
-    tx.executeSql(
-      `CREATE TABLE IF NOT EXISTS folders (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                drive_id TEXT UNIQUE,
-                name TEXT,
-                parent_id TEXT,
-                  out_show INTEGER DEFAULT 0,
-                in_show INTEGER DEFAULT 0,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-              );`,
-      [],
-      () => console.log('Folders table created successfully'),
-      error => console.error('Error creating folders table:', error),
-    );
-
-    // tx.executeSql(
-    //   "DROP TABLE IF EXISTS files;",
-    //   [],
-    //   () => console.log("files table dropped successfully"),
-    //   (_, error) => console.error("Error dropping files table:", error?.message || "Unknown error")
-    // );
-
-    tx.executeSql(
-      `CREATE TABLE IF NOT EXISTS files (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              drive_id TEXT UNIQUE,
-              name TEXT,
-              parent_id TEXT,
-              mimeType TEXT,
-               file_path TEXT, 
-                   out_show INTEGER DEFAULT 0,
-               in_show INTEGER DEFAULT 0,
-                  duration INTEGER DEFAULT 0,
-                   
-              created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );`,
-      [],
-      () => console.log('Files table created successfully'),
-      error => console.error('Error creating files table:', error),
-    );
-
-    //   tx.executeSql(
-    //   "DROP TABLE IF EXISTS device_files;",
-    //   [],
-    //   () => console.log("device_files table dropped successfully"),
-    //   (_, error) => console.error("Error dropping device_files table:", error?.message || "Unknown error")
-    // );
-
-    tx.executeSql(
-      `CREATE TABLE IF NOT EXISTS device_files (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              uuid TEXT UNIQUE NOT NULL,
-              name TEXT NOT NULL,
-              file_path TEXT,
-              mimeType TEXT NOT NULL,
-              duration INTEGER DEFAULT 0, 
-              created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);`,
-      [],
-      () => console.log('device_files table created successfully'),
-      error => console.error('Error creating device_files table:', error),
-    );
-    //    tx.executeSql(
-    //   `ALTER TABLE files ADD COLUMN duration INTEGER DEFAULT 0;`,
-    //   [],
-    //   () => console.log("Column 'duration' added successfully."),
-    //   (_, error) => console.error("Error adding column 'duration':", error)
-    // );
-
-    // tx.executeSql(
-    //   "DROP TABLE IF EXISTS videos;",
-    //   [],
-    //   () => console.log("Videos table dropped successfully"),
-    //   (_, error) => console.error("Error dropping videos table:", error?.message || "Unknown error")
-    // );
-
-    // tx.executeSql(
-    //   "DROP TABLE IF EXISTS playlists;",
-    //   [],
-    //   () => console.log("playlist table dropped successfully"),
-    //   (_, error) => console.error("Error dropping playlist table:", error?.message || "Unknown error")
-    // );
-
-    tx.executeSql(
-      `CREATE TABLE IF NOT EXISTS playlists (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-        ytube_id TEXT UNIQUE,
-        title TEXT NOT NULL,
-        thumbnail TEXT,
-        channel_title TEXT,
-        out_show INTEGER DEFAULT 0,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      );`,
-      [],
-      () => console.log('Playlist table created successfully'),
-      error => console.error('Error creating playlist table:', error),
-    );
-
-    tx.executeSql(
-      `CREATE TABLE IF NOT EXISTS videos (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        ytube_id TEXT UNIQUE,
-        title TEXT,
-        channel_title TEXT,
-        parent_id INTEGER,
-        out_show INTEGER DEFAULT 0,
-        in_show INTEGER DEFAULT 0,  
-        fav INTEGER DEFAULT 0, 
-         duration INTEGER DEFAULT 0,
-         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,          
-        FOREIGN KEY (parent_id) REFERENCES playlists(id) ON DELETE CASCADE
-    );`,
-      [],
-      () => console.log('Videos table created successfully'),
-      (_, error) =>
-        console.error(
-          'Error creating videos table:',
-          error?.message || 'Unknown error',
-        ),
-    );
-
-      // tx.executeSql('SELECT sqlite_version();', [], (_, result) => {
-      //   console.log('SQLite Version:', result.rows.item(0));
-      // });
-      //   tx.executeSql(
-      //   `DROP TABLE IF EXISTS items;`,
-      //   [],
-      //   () => console.log(" items table dropped successfully"),
-      //   (_, error) => console.error("Error dropping items table:", error?.message || "Unknown error")
-      // );
     tx.executeSql(
       `CREATE TABLE IF NOT EXISTS items (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -275,6 +135,7 @@ export const initDatabase = async () => {
           error?.message || 'Unknown error',
         ),
     );
+
     tx.executeSql(
       `CREATE INDEX IF NOT EXISTS idx_items_type_parent
    ON items(type, parent_id);`,
@@ -289,14 +150,73 @@ export const initDatabase = async () => {
       `CREATE INDEX IF NOT EXISTS idx_youtube_meta_item_id
    ON youtube_meta(item_id);`,
     );
-    //   tx.executeSql(
-    //   `DROP TABLE IF EXISTS categories;`,
-    //   [],
-    //   () => console.log(" categories table dropped successfully"),
-    //   (_, error) => console.error("Error dropping categories table:", error?.message || "Unknown error")
-    // );
 
-    // Create categories table
+    // ---------------------------------------- FTS5 for notes
+
+    
+    tx.executeSql(
+      `CREATE TABLE IF NOT EXISTS images (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        note_rowid INTEGER,
+        image_data TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );`,
+      [],
+      () => console.log('images table created successfully'),
+      error => console.error('Error creating images table:', error),
+    );
+
+    tx.executeSql(
+      `CREATE VIRTUAL TABLE IF NOT EXISTS notes USING fts5(
+            source_id,
+            source_type UNINDEXED,
+            title,
+            content,
+            text_content,  
+            created_at UNINDEXED,
+            tokenize='porter'
+        );`,
+      [],
+      () => console.log('fast Notes table created successfully'),
+      error => console.error('Error creating fast Notes table:', error),
+    );
+
+    tx.executeSql(
+      `CREATE TABLE IF NOT EXISTS notebooks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, 
+            title TEXT, 
+            color TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+          );`,
+      [],
+      () => console.log('notebooks table created successfully'),
+      error => console.error('Error creating notebooks table:', error),
+    );
+
+    // ---------------------------------------- report
+
+    tx.executeSql(
+      `CREATE TABLE IF NOT EXISTS video_watch_history (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          videoId TEXT NOT NULL,
+          watchedIntervals TEXT NOT NULL, -- JSON format to store intervals like [[10, 12], [11, 15]]
+          todayIntervals TEXT NOT NULL, -- JSON format to store intervals like [[10, 12], [11, 15]]
+          date TEXT NOT NULL DEFAULT (DATE('now')), -- Stores the date in YYYY-MM-DD format
+           lastWatchedAt TEXT NOT NULL DEFAULT (DATETIME('now')), -- Full timestamp
+           lastWatchTime INTEGER NOT NULL DEFAULT 0,  
+          watchTimePerDay INTEGER NOT NULL DEFAULT 0, -- Total watch time in seconds per day
+          newWatchTimePerDay INTEGER NOT NULL DEFAULT 0, -- Total new watch time in seconds per day
+          unfltrdWatchTimePerDay INTEGER NOT NULL DEFAULT 0, -- Total infltrd watch time in seconds per day
+          UNIQUE(videoId, date) -- ✅ Ensures uniqueness for ON CONFLICT to work
+      );`,
+      [],
+      () => console.log('Video watch history table created successfully'),
+      error =>
+        console.error('Error creating video watch history table:', error),
+    );
+
+
+    // Create categories table 
     tx.executeSql(
       `CREATE TABLE IF NOT EXISTS categories (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -308,19 +228,13 @@ export const initDatabase = async () => {
       () => console.log('Categories table created successfully'),
       error => console.error('Error creating categories table:', error),
     );
-    // tx.executeSql(
-    //     `DROP TABLE IF EXISTS category_items;`,
-    //     [],
-    //     () => console.log(" category_items table dropped successfully"),
-    //     (_, error) => console.error("Error dropping category_items table:", error?.message || "Unknown error")
-    //   );
-    // Create category_items junction table
+
     tx.executeSql(
       `CREATE TABLE IF NOT EXISTS category_items (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         category_id INTEGER NOT NULL,
         item_id TEXT NOT NULL, 
-        item_type TEXT NOT NULL CHECK(item_type IN ('youtube','notebook', 'drive', 'device', 'note')),
+        item_type TEXT NOT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE CASCADE,
         UNIQUE(category_id, item_id, item_type)  
@@ -332,4 +246,3 @@ export const initDatabase = async () => {
   });
 };
 
-// ----------------notes

@@ -191,45 +191,14 @@ export const getItemBySourceId = (source_id, type = null) => {
   });
 };
 
-export const createNewNoteinDB = (sourceId, sourceType) => {
-  const fastdb = getDb();
-  return new Promise((resolve, reject) => {
-    fastdb.transaction(tx => {
-      const createdAt = new Date()
-        .toISOString()
-        .replace('T', ' ')
-        .split('.')[0]; // Format: YYYY-MM-DD HH:mm:ss
+// ----------------------------------------------------
 
-      tx.executeSql(
-        `INSERT INTO notes (source_id, source_type,title, content, text_content, created_at) VALUES (?, ?, ?, ?,?, ?);`,
-        [sourceId, sourceType, '', '', '', createdAt], // Include created_at timestamp
-        (_, result) => {
-          // Fetch the rowid of the last inserted note
-          tx.executeSql(
-            `SELECT rowid FROM notes WHERE source_id = ? AND source_type = ? ORDER BY rowid DESC LIMIT 1;`,
-            [sourceId, sourceType],
-            (_, res) => {
-              if (res.rows.length > 0) {
-                resolve(res.rows.item(0).rowid); // Return latest note's rowid
-              } else {
-                reject(new Error("Failed to retrieve inserted note's rowid."));
-              }
-            },
-            (_, error) => reject(error),
-          );
-        },
-        (_, error) => reject(error), // Reject on insertion failure
-      );
-    });
-  });
-};
-
-export const addNotebook = (name, color, callback) => {
+export const addNotebook = (title, color, callback) => {
   const fastdb = getDb();
   fastdb.transaction(tx => {
     tx.executeSql(
-      'INSERT INTO notebooks (name, color) VALUES (?, ?);',
-      [name, color],
+      'INSERT INTO notebooks (title, color) VALUES (?, ?);',
+      [title, color],
       (_, result) => {
         console.log('Notebook saved! ID:', result.insertId);
         if (callback) callback(); // Call fetchNotebooks after adding
@@ -246,7 +215,7 @@ export const getOrCreateDefaultNotebookId = async () => {
     fastdb.transaction(tx => {
       // Step 1: Check if a notebook with the name "Default Notebook" exists
       tx.executeSql(
-        `SELECT id FROM notebooks WHERE name = ? LIMIT 1;`,
+        `SELECT id FROM notebooks WHERE title = ? LIMIT 1;`,
         ['Default Notebook'],
         (_, result) => {
           if (result.rows.length > 0) {
@@ -256,7 +225,7 @@ export const getOrCreateDefaultNotebookId = async () => {
           } else {
             // Step 2: Create it and return the new id
             tx.executeSql(
-              `INSERT INTO notebooks (name, color) VALUES (?, ?);`,
+              `INSERT INTO notebooks (title, color) VALUES (?, ?);`,
               ['Default Notebook', '#3B82F6'],
               (_, insertResult) => {
                 const newId = insertResult.insertId;

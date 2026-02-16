@@ -40,7 +40,7 @@ const AssignScreen = () => {
 
         // Add each video to this mentee's category
         for (const video of selectedItems) {
-          await addItemToCategory(categoryId, video.id, video.type);
+          await addItemToCategory(categoryId, video.id, video.subtype || video.type);
         }
       } catch (catErr) {
         console.error(

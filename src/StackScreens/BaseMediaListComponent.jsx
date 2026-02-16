@@ -14,12 +14,10 @@ import Fontisto from 'react-native-vector-icons/Fontisto';
 import {useAppState} from '../contexts/AppStateContext';
 import {useNavigation} from '@react-navigation/core';
 import {ScreenTypes} from '../contexts/constants';
-import useMentorMenteeStore from '../appMentor/useMentorMenteeStore';
-import {Button} from 'react-native-share';
 import NewAssignmentsBtn from '../components/buttons/NewAssignmentsBtn';
 
-export const getItemId = item =>
-  item?.rowid || item?.source_id || item?.id.toString();
+export const getItemId = (item) =>
+  item?.rowid || item?.source_id || item?.id?.toString();
 
 const BaseMediaListComponent = ({
   mediaList,
@@ -31,21 +29,21 @@ const BaseMediaListComponent = ({
   type,
   screen = ScreenTypes.MAIN,
 }) => {
-  const {selectedItems, setSelectedItems, selectionMode, setSelectionMode} =
+  const { selectedItems, setSelectedItems, selectionMode, setSelectionMode } =
     useAppState();
 
   const navigation = useNavigation();
 
-  useEffect
+  const isSelected = (id, listType) =>
+    selectedItems.some(
+      (i) => i.id === id && i.type === listType
+    );
 
-  const isSelected = (id, type) =>
-    selectedItems.some(i => i.id === id && i.type === type);
-
-  const toggleSelection = (id, type) => {
-    setSelectedItems(prev =>
-      prev.some(i => i.id === id && i.type === type)
-        ? prev.filter(i => !(i.id === id && i.type === type))
-        : [...prev, {id, type}],
+  const toggleSelection = (id, listType, subtype) => {
+    setSelectedItems((prev) =>
+      prev.some((i) => i.id === id && i.type === listType)
+        ? prev.filter((i) => !(i.id === id && i.type === listType))
+        : [...prev, { id, type: listType, subtype }],
     );
   };
 
@@ -56,20 +54,26 @@ const BaseMediaListComponent = ({
 
   const handleForward = () => {
     console.log('Selected Items:', selectedItems);
-    navigation.navigate('AssignScreen', {selectedItems});
+    navigation.navigate('AssignScreen', { selectedItems });
   };
 
-  const renderItem = ({item}) => {
+  const renderItem = ({ item }) => {
     const id = getItemId(item);
+    const subtype = item.type; // ← real media/assignment type from data
+
     return (
       <BaseItem
         item={item}
-        type={type}
+        type={type}           // list type
         isSelected={selectionMode && isSelected(id, type)}
-        onSelect={selectionMode ? toggleSelection : undefined}
+        onSelect={
+          selectionMode
+            ? () => toggleSelection(id, type, subtype)
+            : undefined
+        }
         onLongPress={() => {
           if (!selectionMode) {
-            setSelectedItems([{id, type}]);
+            setSelectedItems([{ id, type, subtype }]);
             setSelectionMode(true);
           }
         }}
@@ -78,12 +82,12 @@ const BaseMediaListComponent = ({
     );
   };
 
-  const allItems = mediaList.map(item => ({
+  // All items in *this* list (used for Select All / Unselect All)
+  const allItemsInThisList = mediaList.map((item) => ({
     id: getItemId(item),
-    type,
+    type,                    // ← the prop type (screen/list type)
+    subtype: item.type,      // ← actual item type
   }));
-
-
 
   return (
     <View style={styles.container}>
@@ -93,29 +97,32 @@ const BaseMediaListComponent = ({
             <Text style={styles.headerTitle}>{selectedItems.length}</Text>
             <TouchableOpacity
               onPress={() => {
-                const currentSelected = selectedItems.filter(
-                  i => i.type === type,
+                const currentSelectedOfThisType = selectedItems.filter(
+                  (i) => i.type === type
                 );
                 const isAllSelected =
-                  currentSelected.length === allItems.length;
+                  currentSelectedOfThisType.length === allItemsInThisList.length;
 
                 if (isAllSelected) {
-                  // Unselect only items of this type
-                  setSelectedItems(prev => prev.filter(i => i.type !== type));
-                } else {
-                  // Add missing items of this type only
-                  const newItems = allItems.filter(
-                    ai =>
-                      !selectedItems.some(
-                        si => si.id === ai.id && si.type === ai.type,
-                      ),
+                  // Unselect only items belonging to this list type
+                  setSelectedItems((prev) =>
+                    prev.filter((i) => i.type !== type)
                   );
-                  setSelectedItems(prev => [...prev, ...newItems]);
+                } else {
+                  // Add missing items of this list type
+                  const newItems = allItemsInThisList.filter(
+                    (ai) =>
+                      !selectedItems.some(
+                        (si) => si.id === ai.id && si.type === ai.type
+                      )
+                  );
+                  setSelectedItems((prev) => [...prev, ...newItems]);
                 }
-              }}>
+              }}
+            >
               <Text style={styles.headerButton}>
-                {selectedItems.filter(i => i.type === type).length ===
-                allItems.length
+                {selectedItems.filter((i) => i.type === type).length ===
+                allItemsInThisList.length
                   ? 'Unselect All'
                   : 'Select All'}
               </Text>
@@ -129,7 +136,8 @@ const BaseMediaListComponent = ({
 
             <TouchableOpacity
               onPress={cancelSelection}
-              style={styles.iconButton}>
+              style={styles.iconButton}
+            >
               <Ionicons name="close-circle-outline" size={26} color="#007AFF" />
             </TouchableOpacity>
           </View>
@@ -142,11 +150,13 @@ const BaseMediaListComponent = ({
         sections={groupItemsByDate(mediaList)}
         keyExtractor={item => getItemId(item)}
         renderItem={renderItem}
-        renderSectionHeader={({section: {title}}) => (
+        renderSectionHeader={({ section: { title } }) => (
           <Text style={styles.sectionHeader}>{title}</Text>
         )}
-        contentContainerStyle={{padding: 10}}
-        ListEmptyComponent={<Text style={styles.emptyText}>{emptyText}</Text>}
+        contentContainerStyle={{ padding: 10 }}
+        ListEmptyComponent={
+          <Text style={styles.emptyText}>{emptyText}</Text>
+        }
         ListFooterComponent={
           loadingMore ? (
             <ActivityIndicator size="small" color="#007AFF" />
@@ -154,9 +164,7 @@ const BaseMediaListComponent = ({
         }
         onRefresh={onRefresh}
         refreshing={loading}
-        onEndReached={() => {
-          onEndReached?.();
-        }}
+        onEndReached={() => onEndReached?.()}
         onEndReachedThreshold={0.5}
       />
     </View>

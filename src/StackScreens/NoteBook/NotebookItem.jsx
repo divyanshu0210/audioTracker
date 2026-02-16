@@ -17,7 +17,7 @@ const NotebookItem = ({item}) => {
         style={{marginRight: 8}}
       />
       <View style={styles.notebookInfo}>
-        <Text style={styles.notebookTitle}>{item.name}</Text>
+        <Text style={styles.notebookTitle}>{item.title}</Text>
         <Text style={styles.notebookDate}>
           Created at: {new Date(item.created_at).toLocaleString()}
         </Text>

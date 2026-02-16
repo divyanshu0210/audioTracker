@@ -49,7 +49,7 @@ const NoteInfoBottomMenu = forwardRef(({  }, ref) => {
                 <>
                   <Text style={styles.label}>Source Name:</Text>
                   <Text style={styles.content}>
-                    {selectedNote.relatedItem?.name || selectedNote.relatedItem?.title}
+                    {selectedNote.relatedItem?.title}
                   </Text>
                 </>
         

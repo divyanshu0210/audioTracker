@@ -7,7 +7,6 @@ import {
 import NotesListComponent from './notesListing/NotesListComponent';
 import {useAppState} from '../contexts/AppStateContext';
 import {ScreenTypes} from '../contexts/constants';
-import { fetchNotesInCategory } from '../categories/catDB';
 import { fetchNotes } from '../database/R';
 
 const AllNotesScreen = () => {
@@ -29,7 +28,7 @@ const AllNotesScreen = () => {
       let notes = [];
 
       if (selectedCategory) {
-        notes = await fetchNotesInCategory(selectedCategory);
+        notes = await fetchNotes({categoryId: selectedCategory});
       } else {
         notes = await fetchNotes({
           offset: 0,

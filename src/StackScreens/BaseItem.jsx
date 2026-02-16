@@ -183,7 +183,7 @@ const BaseItem = ({type, item, isSelected, onSelect, onLongPress, screen}) => {
   const handlePress = () => {
     setActiveItem({
       sourceId: sourceId,
-      sourceType: type,
+      sourceType: item?.type || type,
       item: item,
     });
 

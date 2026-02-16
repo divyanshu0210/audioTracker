@@ -1,8 +1,7 @@
-import React, { memo } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import React, {memo} from 'react';
+import {StyleSheet, Text, View} from 'react-native';
 import Entypo from 'react-native-vector-icons/Entypo';
 import FontAwesome from 'react-native-vector-icons/FontAwesome';
-
 
 const NoteItem = ({item}) => {
   const previewText = getPreviewText(item);
@@ -28,14 +27,8 @@ const NoteItem = ({item}) => {
           <Text style={styles.noteTitle}>{item.noteTitle}</Text>
           <Text style={styles.noteText}>{previewText}</Text>
           {item.relatedItem && (
-            <Text style={styles.note}>
-              {item.source_type === 'notebook'
-                ? `Notebook: ${relatedItem.name}`
-                : item.source_type === 'youtube'
-                  ? `YouTube: ${relatedItem?.title}`
-                  : item.source_type === 'device'
-                    ? `Device File: ${relatedItem?.name}`
-                    : `Drive File: ${relatedItem?.name}`}
+            <Text style={styles.note} numberOfLines={1}>
+              {`${item.source_type}: ${relatedItem?.title}`}
             </Text>
           )}
         </View>
@@ -84,5 +77,11 @@ const styles = StyleSheet.create({
   },
   noteText: {fontSize: 14, color: '#777'},
   noteTitle: {fontSize: 16, color: '#000'},
-  note: {fontSize: 11, color: '#666', marginTop: 2, width: 300},
+  note: {
+    fontSize: 11,
+    color: '#666',
+    marginTop: 2,
+    width: 300,
+    textTransform: 'capitalize',
+  },
 });

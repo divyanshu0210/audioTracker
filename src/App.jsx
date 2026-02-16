@@ -304,7 +304,6 @@ export default function App() {
 
   // useEffect(() => {
   //   // resetDatabase();
-  //   // initFTSDatabase();
   //   // initDatabase();
 
   // }, []);

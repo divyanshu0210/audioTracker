@@ -25,7 +25,7 @@ const BaseMenu = ({item, type, screen}) => {
     showMenu();
     setActiveItem({
       sourceId: sourceId,
-      sourceType: type,
+      sourceType: item?.type || type,
       item:item
     });
     if (type === 'note') {

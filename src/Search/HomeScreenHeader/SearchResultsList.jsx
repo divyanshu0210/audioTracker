@@ -102,7 +102,7 @@ const SearchResultsList = ({
 
     setActiveItem({
       sourceId: getItemId(item),
-      sourceType: typeToMainType[item.source_type],
+      sourceType: item?.type || typeToMainType[item.source_type],
       item: item,
     });
 

@@ -87,7 +87,6 @@ export const getChildrenByParent = async (parentId = null, types = null) => {
     });
   });
 };
-
 // ------------------------------notes
 
 export const getAllNotesModifiedToday = () => {
@@ -426,38 +425,19 @@ export const getWatchHistoryByDate = date => {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
       return reject(new Error('Invalid date format. Expected YYYY-MM-DD.'));
     }
-
     // Ensure the date is valid
     const parsedDate = new Date(date);
     if (isNaN(parsedDate.getTime())) {
       return reject(new Error('Invalid date value.'));
     }
-
     fastdb.transaction(tx => {
       tx.executeSql(
-        `SELECT vwh.*, 
-                v.title AS title,
-                COALESCE(f.name, d.name) AS name,
-                COALESCE(f.file_path, d.file_path) AS file_path,
-                CASE 
-                  WHEN v.title IS NOT NULL THEN 'youtube'
-                  WHEN f.name IS NOT NULL THEN 'drive'
-                  WHEN d.name IS NOT NULL THEN 'device'
-                  ELSE NULL 
-                END AS source_type,
-                CASE 
-                  WHEN v.title IS NOT NULL THEN vwh.videoId
-                  WHEN f.name IS NOT NULL THEN vwh.videoId
-                  WHEN d.name IS NOT NULL THEN vwh.videoId
-                  ELSE NULL
-                END AS resolved_videoId,
-                COALESCE(v.title, f.name, d.name) AS videoNameInfo,
-                COALESCE(v.duration, f.duration, d.duration) AS duration
-         FROM video_watch_history vwh
-         LEFT JOIN videos v ON vwh.videoId = v.ytube_id
-         LEFT JOIN files f ON vwh.videoId = f.drive_id
-         LEFT JOIN device_files d ON vwh.videoId = d.uuid
-         WHERE vwh.date = ?
+        `SELECT vwh.*,
+        i.* 
+        FROM video_watch_history vwh
+          LEFT JOIN items i 
+          ON vwh.videoId = i.source_id
+          WHERE vwh.date = ?
            ORDER BY datetime(vwh.lastWatchedAt) DESC;`, // <-- Added this line
         [date],
         (_, result) => {
@@ -474,29 +454,7 @@ export const getWatchHistoryByDate = date => {
               record.watchedIntervals = [];
               record.todayIntervals = [];
             }
-
-            const normalizedRecord = {
-              ...record,
-              sourceDetails: null,
-            };
-
-            if (record.source_type === 'youtube') {
-              normalizedRecord.sourceDetails = {
-                ytube_id: record.resolved_videoId,
-                title: record.title,
-                duration: record.duration,
-              };
-            } else if (['drive', 'device'].includes(record.source_type)) {
-              normalizedRecord.sourceDetails = {
-                driveId: record.resolved_videoId,
-                name: record.name,
-                file_path: record.file_path,
-                source_type: record.source_type,
-                duration: record.duration,
-              };
-            }
-
-            history.push(normalizedRecord);
+            history.push(record);
           }
           resolve(history);
         },
@@ -511,76 +469,43 @@ export const getWatchHistoryByDate = date => {
 
 export const getRecentlyWatchedVideos = () => {
   const fastdb = getDb();
+
   return new Promise((resolve, reject) => {
     fastdb.transaction(tx => {
       tx.executeSql(
-        `SELECT vwh.*, 
-                v.title AS title,
-                COALESCE(f.name, d.name) AS name,
-                COALESCE(f.file_path, d.file_path) AS file_path,
-                CASE 
-                  WHEN v.title IS NOT NULL THEN 'youtube'
-                  WHEN f.name IS NOT NULL THEN 'drive'
-                  WHEN d.name IS NOT NULL THEN 'device'
-                  ELSE NULL 
-                END AS source_type,
-                CASE 
-                  WHEN v.title IS NOT NULL THEN vwh.videoId
-                  WHEN f.name IS NOT NULL THEN vwh.videoId
-                  WHEN d.name IS NOT NULL THEN vwh.videoId
-                  ELSE NULL
-                END AS resolved_videoId,
-                COALESCE(v.title, f.name, d.name) AS videoNameInfo,
-                COALESCE(v.duration, f.duration, d.duration) AS duration
-         FROM video_watch_history vwh
-         LEFT JOIN videos v ON vwh.videoId = v.ytube_id
-         LEFT JOIN files f ON vwh.videoId = f.drive_id
-         LEFT JOIN device_files d ON vwh.videoId = d.uuid
-         WHERE vwh.lastWatchedAt = (
-           SELECT MAX(lastWatchedAt) 
-           FROM video_watch_history 
-           WHERE videoId = vwh.videoId
-         )
-         ORDER BY datetime(vwh.lastWatchedAt) DESC
-         LIMIT 12;`,
+        `
+        SELECT 
+          vwh.*,
+          i.*
+        FROM video_watch_history vwh
+        LEFT JOIN items i 
+          ON vwh.videoId = i.source_id
+        WHERE vwh.lastWatchedAt = (
+          SELECT MAX(lastWatchedAt)
+          FROM video_watch_history
+          WHERE videoId = vwh.videoId
+        )
+        ORDER BY datetime(vwh.lastWatchedAt) DESC
+        LIMIT 12;
+        `,
         [],
         (_, result) => {
           const history = [];
+
           for (let i = 0; i < result.rows.length; i++) {
             const record = result.rows.item(i);
+
             try {
               record.watchedIntervals = JSON.parse(
                 record.watchedIntervals || '[]',
               );
               record.todayIntervals = JSON.parse(record.todayIntervals || '[]');
             } catch (error) {
-              console.error('Failed to parse intervals:', error);
+              console.error('JSON parse error:', error);
               record.watchedIntervals = [];
               record.todayIntervals = [];
             }
-
-            const normalizedRecord = {
-              ...record,
-              sourceDetails: null,
-            };
-
-            if (record.source_type === 'youtube') {
-              normalizedRecord.sourceDetails = {
-                ytube_id: record.resolved_videoId,
-                title: record.title,
-                duration: record.duration,
-              };
-            } else if (['drive', 'device'].includes(record.source_type)) {
-              normalizedRecord.sourceDetails = {
-                driveId: record.resolved_videoId,
-                name: record.name,
-                file_path: record.file_path,
-                source_type: record.source_type,
-                duration: record.duration,
-              };
-            }
-
-            history.push(normalizedRecord);
+            history.push(record);
           }
           resolve(history);
         },

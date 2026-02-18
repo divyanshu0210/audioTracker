@@ -1,11 +1,9 @@
 import {StyleSheet, Text, View} from 'react-native';
 import React, {useEffect, useState} from 'react';
 import {useIsFocused, useNavigation} from '@react-navigation/native'; // Import the hook
-import HistoryComponent from '../categories/HistoryComponent';
-import CategoryPreview from '../categories/CategoryPreview';
 import Profile from '../categories/Profile';
-import Ionicons from 'react-native-vector-icons/Ionicons';
-import BottomRightButton from '../components/buttons/BottomRightButton';
+import HistoryComponent from '../history/HistoryComponent';
+import CategoryPreview from '../categories/CategoryPreview';
 
 const ProfileTab = () => {
 

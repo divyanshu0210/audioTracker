@@ -4,15 +4,12 @@ import {
   Text,
   SectionList,
   StyleSheet,
-  TouchableOpacity,
-  Image,
   ActivityIndicator,
 } from 'react-native';
-import {useNavigation} from '@react-navigation/native';
-import {getWatchHistoryByDate} from '../database/R';
+import {HistoryItem} from './HistoryCard';
+import { getWatchHistoryByDate } from '../database/R';
 
 const FullHistoryScreen = () => {
-  const navigation = useNavigation();
   const [sections, setSections] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -63,36 +60,8 @@ const FullHistoryScreen = () => {
     loadHistory();
   }, []);
 
-  const renderItem = ({item}) => (
-    <TouchableOpacity
-      style={styles.historyItem}
-      onPress={() =>
-        navigation.navigate('BacePlayer', {item: item.sourceDetails})
-      }>
-      <Image
-        source={
-          item.source_type === 'youtube'
-            ? {
-                uri: `https://img.youtube.com/vi/${item.resolved_videoId}/mqdefault.jpg`,
-              }
-            : require('../assets/video-placeholder.png')
-        }
-        style={styles.thumbnail}
-      />
-      <View style={styles.itemDetails}>
-        <Text style={styles.title} numberOfLines={2}>
-          {item.videoNameInfo}
-        </Text>
-        <Text style={styles.time}>
-          Watched{' '}
-          {formatSeconds(
-            item.watchedIntervals.reduce((s, [st, en]) => s + (en - st), 0),
-          )}{' '}
-          / {formatSeconds(item.duration)}
-        </Text>
-        <Text style={styles.date}>{formatDate(item.date)}</Text>
-      </View>
-    </TouchableOpacity>
+  const renderItem = ({item, index}) => (
+    <HistoryItem key={`${item.videoId}-${index}`} item={item} variant="list" />
   );
 
   if (loading) {
@@ -141,11 +110,6 @@ const formatDate = dateString => {
   }
 };
 
-const formatSeconds = seconds => {
-  const mins = Math.floor(seconds / 60);
-  const secs = Math.floor(seconds % 60);
-  return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
-};
 
 const styles = StyleSheet.create({
   listContainer: {
@@ -174,35 +138,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     marginTop: 10,
     borderRadius: 4,
-    color:'#555'
-  },
-  historyItem: {
-    flexDirection: 'row',
-    marginVertical: 8,
-    gap: 10,
-  },
-  thumbnail: {
-    width: 100,
-    height: 60,
-    borderRadius: 6,
-  },
-  itemDetails: {
-    flex: 1, // <--- allow text to wrap properly
-    justifyContent: 'center',
-  },
-  title: {
-    fontWeight: '600',
-    fontSize: 14,
-    color:'#444'
-  },
-  time: {
-    color: '#666',
-    fontSize: 12,
-  },
-  date: {
-    color: '#999',
-    fontSize: 12,
+    color: '#555',
   },
 });
+
 
 export default FullHistoryScreen;

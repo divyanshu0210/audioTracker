@@ -15,7 +15,6 @@ import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityI
 import GoogleLoginScreen from './auth/GoogleLoginScreen';
 import CategoryDetailScreen from './categories/CategoryDetailScreen';
 import CategoryScreen from './categories/CategoryScreen';
-import FullHistoryScreen from './categories/FullHistoryScreen';
 import Profile from './categories/Profile';
 import AddNotebookBottomSheet from './components/bottomsheets/AddNotebookBottomSheet';
 import NoteInfoBottomMenu from './components/bottomsheets/NoteInfoBottomMenu';
@@ -52,6 +51,7 @@ import {BottomSheetModalProvider} from '@gorhom/bottom-sheet';
 import {GlobalBottomSheets} from './components/bottomsheets/GlobalBottomSheets';
 import MainHeader from './components/headers/MainHeader';
 import SearchWrapper from './Search/SearchWrapper';
+import FullHistoryScreen from './history/FullHistoryScreen';
 
 const Stack = createStackNavigator();
 const Tab = createBottomTabNavigator();

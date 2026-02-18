@@ -18,9 +18,9 @@ const NotebookItem = ({item}) => {
       />
       <View style={styles.notebookInfo}>
         <Text style={styles.notebookTitle}>{item.title}</Text>
-        <Text style={styles.notebookDate}>
+        {/* <Text style={styles.notebookDate}>
           Created at: {new Date(item.created_at).toLocaleString()}
-        </Text>
+        </Text> */}
       </View>
       {/* <BaseMenu item={item} type={ItemTypes.NOTEBOOK}/> */}
     </View>

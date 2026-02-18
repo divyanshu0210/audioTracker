@@ -1,9 +1,7 @@
 import React, {useState} from 'react';
 import {View, TouchableOpacity, StyleSheet,Image} from 'react-native';
-import SearchResultsList from './SearchResultsList';
 import NotificationButton from '../../appNotification/components/NotificationButton';
 import MentorMenteeDrawer from '../../appMentor/MentorMenteeDrawer';
-import HeaderControls from './HeaderControls';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import {useNavigation} from '@react-navigation/core';
@@ -45,6 +43,7 @@ const MainHeader = ({}) => {
                   onPress={() => {
                     navigation.navigate('SearchWrapper', {
                       initialSearchActive: true,
+                      mode: 'all',
                     });
                   }}
                   style={styles.iconButton}>

@@ -29,7 +29,6 @@ import NotesListScreen from './notes/NotesListScreen';
 import NotesSectionWithBack from './notes/NotesSectionWithBack';
 import RichTextEditor from './notes/richEditor/RichTextEditor';
 import DayReport from './report/DayReport';
-import SearchScreen from './Search/SearchScreen/SearchScreen';
 import SettingsScreen from './Settings/Settings';
 import DeviceFilesView from './StackScreens/DeviceFilesView';
 import GDriveFolderOverview from './StackScreens/GDriveFolderOverview';
@@ -102,7 +101,6 @@ function RootNavigator() {
           component={DayReport}
           options={{headerShown: false}}
         />
-        <Stack.Screen name="SearchScreen" component={SearchScreen} />
         <Stack.Screen
           name="NotesSectionWithBack"
           component={NotesSectionWithBack}

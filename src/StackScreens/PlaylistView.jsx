@@ -16,12 +16,13 @@ import {getItemBySourceId, upsertItem, upsertYoutubeMeta} from '../database/C';
 import {getChildrenByParent} from '../database/R';
 import BaseMediaListComponent from './BaseMediaListComponent';
 import {ItemTypes, ScreenTypes} from '../contexts/constants';
+import AppHeader from '../components/headers/AppHeader';
 
 export default function PlaylistView() {
   const navigation = useNavigation();
   const route = useRoute();
   const {playListId, playListInfo} = route.params;
-  const {videos, setVideos, selectionMode} = useAppState();
+  const {videos, setVideos} = useAppState();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false); // NEW state for refresh button
 
@@ -156,7 +157,7 @@ export default function PlaylistView() {
             source_id: item.contentDetails.videoId,
             title: item.snippet.title,
             channelTitle: item.snippet.channelTitle,
-            thumbnail:`https://img.youtube.com/vi/${item.contentDetails.videoId}/mqdefault.jpg`,
+            thumbnail: `https://img.youtube.com/vi/${item.contentDetails.videoId}/mqdefault.jpg`,
             type: 'youtube_video',
             parent_id: playlistId,
           })),
@@ -198,34 +199,28 @@ export default function PlaylistView() {
 
   return (
     <View style={{flex: 1}}>
-      {!selectionMode && (
-        <View style={styles.header}>
-          <TouchableOpacity
-            onPress={() => navigation.goBack()}
-            style={styles.iconButton}>
-            <MaterialIcons name="arrow-back" size={24} color="#000" />
-          </TouchableOpacity>
-
-          <View style={{width: '85%'}}>
-            <Text style={styles.listTitle} ellipsizeMode="tail">
-              {playListInfo.title}
-            </Text>
-          </View>
-
-          <View style={styles.rightHeaderButton}>
-            {refreshing ? (
-              <ActivityIndicator size="small" color="#000" />
-            ) : (
-              <TouchableOpacity
-                onPress={refreshVideos}
-                disabled={loading || refreshing}
-                style={{padding: 8}}>
-                <MaterialIcons name="refresh" size={24} color="#000" />
-              </TouchableOpacity>
-            )}
-          </View>
-        </View>
-      )}
+      <AppHeader
+        title={playListInfo.title}
+        enableSearch
+        searchParams={{
+          initialSearchActive: true,
+          mode: 'items',
+          sourceId: playListInfo.id,
+          initialActiveFilters:['youtube_video','youtube_playlist']
+        }}
+        rightComponent={
+          refreshing ? (
+            <ActivityIndicator size="small" />
+          ) : (
+            <TouchableOpacity
+              onPress={refreshVideos}
+              disabled={loading || refreshing}
+              style={{padding: 8}}>
+              <MaterialIcons name="refresh" size={24} color="#000" />
+            </TouchableOpacity>
+          )
+        }
+      />
 
       {loading ? (
         <View style={{flex: 1, justifyContent: 'center', alignItems: 'center'}}>
@@ -244,31 +239,3 @@ export default function PlaylistView() {
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderBottomWidth: 1,
-    borderColor: '#ddd',
-  },
-  rightHeaderButton: {
-    marginLeft: 'auto',
-  },
-  listTitle: {
-    color: '#000',
-    fontSize: 17,
-    fontWeight: 'bold',
-    paddingHorizontal: 10,
-  },
-  iconButton: {
-    paddingVertical: 16,
-    backgroundColor: '#f1f1f1',
-  },
-  listContainer: {
-    padding: 10,
-    marginBottom: 10,
-  },
-});

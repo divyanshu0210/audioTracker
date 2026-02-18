@@ -13,7 +13,7 @@ import Ionicons from 'react-native-vector-icons/Ionicons';
 import Fontisto from 'react-native-vector-icons/Fontisto';
 import {useAppState} from '../contexts/AppStateContext';
 import {useNavigation} from '@react-navigation/core';
-import {ScreenTypes} from '../contexts/constants';
+import {convertTypetoItemType, ScreenTypes} from '../contexts/constants';
 import NewAssignmentsBtn from '../components/buttons/NewAssignmentsBtn';
 
 export const getItemId = (item) =>
@@ -26,7 +26,7 @@ const BaseMediaListComponent = ({
   onEndReached,
   loading,
   loadingMore,
-  type,
+  type=null,
   screen = ScreenTypes.MAIN,
 }) => {
   const { selectedItems, setSelectedItems, selectionMode, setSelectionMode } =
@@ -60,11 +60,10 @@ const BaseMediaListComponent = ({
   const renderItem = ({ item }) => {
     const id = getItemId(item);
     const subtype = item.type; // ← real media/assignment type from data
-
     return (
       <BaseItem
         item={item}
-        type={type}           // list type
+        type={type?type: convertTypetoItemType(item.type)}           // list type
         isSelected={selectionMode && isSelected(id, type)}
         onSelect={
           selectionMode
@@ -166,6 +165,7 @@ const BaseMediaListComponent = ({
         refreshing={loading}
         onEndReached={() => onEndReached?.()}
         onEndReachedThreshold={0.5}
+        style={{flex: 1}}
       />
     </View>
   );

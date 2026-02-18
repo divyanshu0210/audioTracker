@@ -1,55 +1,5 @@
-import {db, getDb} from './database';
-import {buildQuery} from './dbUtils';
-import {fastdb} from './FTSDatabase';
-
-export const getFolderStackFromDB = async itemId => {
-  const fastdb = getDb();
-
-  return new Promise((resolve, reject) => {
-    const stack = [];
-
-    const traverseUp = currentId => {
-      fastdb.transaction(tx => {
-        tx.executeSql(
-          `
-          SELECT id, source_id, title, parent_id, type
-          FROM items
-          WHERE source_id = ?
-          LIMIT 1;
-          `,
-          [currentId],
-          (_, results) => {
-            if (results.rows.length > 0) {
-              const item = results.rows.item(0);
-
-              // Insert at beginning (root → child order)
-              stack.unshift({
-                id: item.id,
-                source_id: item.source_id,
-                title: item.title,
-                type: item.type,
-              });
-
-              if (item.parent_id) {
-                traverseUp(item.parent_id);
-              } else {
-                resolve(stack); // reached root
-              }
-            } else {
-              resolve(stack); // not found
-            }
-          },
-          (_, error) => {
-            console.error('❌ Error fetching parent chain:', error);
-            reject(error);
-          },
-        );
-      });
-    };
-
-    traverseUp(itemId);
-  });
-};
+import {ITEM_TYPES_THAT_USE_ITEMS_TABLE} from '../contexts/constants';
+import {getDb} from './database';
 
 export const getChildrenByParent = async (parentId = null, types = null) => {
   const fastdb = getDb();
@@ -168,10 +118,10 @@ export const getAllNotesModifiedToday = () => {
 export const fetchNotes = ({
   sourceId,
   sourceType,
-  fileType,          // 'audio' | 'video'
+  fileType, // 'audio' | 'video'
   searchQuery,
   date,
-  categoryId,        // ✅ NEW
+  categoryId, // ✅ NEW
   offset = 0,
   limit = 20,
   sortBy = 'n.created_at',
@@ -181,6 +131,9 @@ export const fetchNotes = ({
 
   return new Promise((resolve, reject) => {
     fastdb.transaction(tx => {
+      const itemsTypesList = ITEM_TYPES_THAT_USE_ITEMS_TABLE.map(
+        t => `'${t}'`,
+      ).join(', ');
       let query = `
         SELECT 
           n.rowid,
@@ -193,7 +146,7 @@ export const fetchNotes = ({
           'note' AS type,
 
           CASE 
-            WHEN n.source_type IN ('youtube', 'drive', 'device') 
+            WHEN n.source_type IN (${itemsTypesList})
               THEN json_object(
                 'id', i.id,
                 'source_id', i.source_id,
@@ -232,12 +185,8 @@ export const fetchNotes = ({
       joins.push(`
         LEFT JOIN items i 
           ON n.source_id = i.source_id
-          AND n.source_type IN ('youtube', 'drive', 'device')
-          AND (
-            (n.source_type = 'youtube' AND i.type = 'youtube_video')
-            OR (n.source_type = 'drive'   AND i.type = 'drive_file')
-            OR (n.source_type = 'device'  AND i.type = 'device_file')
-          )
+          AND n.source_type IN (${itemsTypesList})
+          AND n.source_type = i.type
       `);
 
       // ─────────────────────────────────────────
@@ -342,7 +291,7 @@ export const fetchNotes = ({
       tx.executeSql(
         query,
         params,
-        (_, { rows }) => {
+        (_, {rows}) => {
           const notes = [];
 
           for (let i = 0; i < rows.length; i++) {
@@ -367,7 +316,6 @@ export const fetchNotes = ({
     });
   });
 };
-
 
 export const fetchNotebooks = callback => {
   const fastdb = getDb();

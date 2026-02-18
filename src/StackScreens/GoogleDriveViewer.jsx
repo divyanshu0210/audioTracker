@@ -24,6 +24,7 @@ import {getChildrenByParent} from '../database/R';
 import BaseMediaListComponent from './BaseMediaListComponent';
 import {ItemTypes, ScreenTypes} from '../contexts/constants';
 import useAppStateStore from '../contexts/appStateStore';
+import AppHeader from '../components/headers/AppHeader';
 
 export const fetchDriveItems = async (
   source_id,
@@ -243,51 +244,21 @@ const GoogleDriveViewer = () => {
 
   return (
     <SafeAreaView style={styles.container}>
-      {folderStack.length > 0 && (
-        <View style={styles.header}>
-          <TouchableOpacity onPress={handleBackPress} style={styles.backButton}>
-            <MaterialIcons name="arrow-back-ios-new" size={18} color="#222" />
-          </TouchableOpacity>
-
-          <FlatList
-            ref={breadcrumbListRef}
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            data={folderStack}
-            keyExtractor={item => item.source_id}
-            contentContainerStyle={styles.breadcrumbContent}
-            renderItem={({item, index}) => {
-              const isLast = index === folderStack.length - 1;
-
-              return (
-                <View style={styles.breadcrumbItem}>
-                  {index > 0 && (
-                    <MaterialIcons
-                      name="chevron-right"
-                      size={16}
-                      color="#bbb"
-                      style={{marginHorizontal: 4}}
-                    />
-                  )}
-
-                  <TouchableOpacity
-                    disabled={isLast}
-                    onPress={() => handleBreadcrumbClick(item.source_id)}>
-                    <Text
-                      style={[
-                        styles.breadcrumbText,
-                        isLast && styles.activeBreadcrumb,
-                      ]}
-                      numberOfLines={1}>
-                      {item.title}
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-              );
-            }}
-          />
-        </View>
-      )}
+      <AppHeader
+        breadcrumbs={folderStack.map(f => ({
+          id: f.source_id,
+          title: f.title,
+        }))}
+        onBreadcrumbPress={handleBreadcrumbClick}
+        onBackPress={handleBackPress}
+        enableSearch
+        searchParams={{
+          initialSearchActive: true,
+          mode: 'items',
+          sourceId: driveInfo.id,
+          initialActiveFilters:['drive_file','drive_folder']
+        }}
+      />
 
       {loading ? (
         <ActivityIndicator size="large" color="#0000ff" style={styles.loader} />
@@ -314,46 +285,5 @@ const styles = StyleSheet.create({
   },
   loader: {
     marginTop: 20,
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    backgroundColor: '#fafafa',
-    borderBottomWidth: 1,
-    borderBottomColor: '#eee',
-  },
-
-  backButton: {
-    height: 36,
-    width: 36,
-    borderRadius: 18,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#f0f0f0',
-    marginRight: 8,
-  },
-
-  breadcrumbContent: {
-    alignItems: 'center',
-    paddingRight: 20,
-  },
-
-  breadcrumbItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-
-  breadcrumbText: {
-    fontSize: 14,
-    color: '#666',
-    fontWeight: '500',
-    maxWidth: 140,
-  },
-
-  activeBreadcrumb: {
-    color: '#111',
-    fontWeight: '700',
   },
 });

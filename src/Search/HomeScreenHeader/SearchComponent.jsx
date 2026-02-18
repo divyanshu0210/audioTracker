@@ -1,4 +1,5 @@
-import React, { useEffect, useRef, useState } from 'react';
+// components/SearchComponent.js
+import React, {useEffect, useRef, useState} from 'react';
 import {
   Animated,
   StyleSheet,
@@ -7,17 +8,18 @@ import {
   View,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
-import { fetchNotes } from '../../database/R.js';
-import { searchAllTables } from './searchUtils.js';
-import { useNavigation } from '@react-navigation/core';
+import {fetchNotes} from '../../database/R';
+import {searchAllTables} from './searchUtils';
 
 const NOTE_FILTER_TO_SOURCE_TYPE = {
-  youtube_notes: 'youtube',
-  drive_notes: 'drive',
+  youtube_notes: 'youtube_video',
+  drive_notes: 'drive_file',
   notebook_notes: 'notebook',
+  device_notes: 'device_file',
 };
 
 const SearchComponent = ({
+  mode = 'all',
   showSearch,
   setShowSearch,
   setResults,
@@ -28,12 +30,13 @@ const SearchComponent = ({
   activeNoteFilters,
   setActiveNoteFilters,
   setShowNoteFilters,
+  sourceId,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const widthAnim = useRef(new Animated.Value(0)).current;
   const inputRef = useRef(null);
-  const navigation = useNavigation();
 
+  // 🔵 Animation Logic (UNCHANGED)
   useEffect(() => {
     const toValue = showSearch ? 1 : 0;
 
@@ -44,111 +47,100 @@ const SearchComponent = ({
     }).start();
 
     if (showSearch) {
-      setTimeout(() => {
-        inputRef.current?.focus();
-      }, 100);
+      setTimeout(() => inputRef.current?.focus(), 100);
     } else {
       setSearchQuery('');
       setResults([]);
+      setNoteResults([]);
       setActiveFilters(['all']);
       setActiveNoteFilters(['all_notes']);
       setShowNoteFilters(false);
     }
   }, [showSearch]);
 
+  // 🔵 Debounce + Mode-aware Search
   useEffect(() => {
     const trimmed = searchQuery.trim();
-    setShowNoteFilters(activeFilters.includes('notes'));
 
-    if (!trimmed) {
+    if (mode === 'all') {
+      setShowNoteFilters(activeFilters.includes('notes'));
+    } else if (mode === 'notes') {
+      setShowNoteFilters(true);
+    } else {
+      setShowNoteFilters(false);
+    }
+
+    if (!trimmed && mode === 'all') {
       setResults([]);
       setNoteResults([]);
       return;
     }
 
-    const delayDebounce = setTimeout(() => {
-      if (searchQuery.trim()) {
-        handleSearch(searchQuery, activeFilters, activeNoteFilters);
-      } else {
-        setResults([]);
-      }
+    const delay = setTimeout(() => {
+      handleSearch(trimmed);
     }, 300);
 
-    return () => clearTimeout(delayDebounce);
-  }, [searchQuery, activeFilters, activeNoteFilters]);
+    return () => clearTimeout(delay);
+  }, [searchQuery, activeFilters, activeNoteFilters, mode]);
 
-  const handleSearch = async (
-    text,
-    filters = activeFilters,
-    noteFilters = activeNoteFilters,
-  ) => {
+  const handleSearch = async text => {
     setLoadingSearch(true);
-    const trimmedText = text.trim();
-    if (!trimmedText) {
-      setNoteResults([]);
-      setResults([]);
-      return;
-    }
 
     try {
-      const noteData = [];
-      const otherData = [];
+      if (mode === 'items') {
+        const data = await searchAllTables(text, activeFilters,sourceId);
+        setResults(data);
+        setNoteResults([]);
+      } else if (mode === 'notes') {
+        const notes = await searchNotes(text);
+        setResults([]);
+        setNoteResults(notes);
+      } else {
+        const [items, notes] = await Promise.all([
+          searchAllTables(text, activeFilters,sourceId),
+          searchNotes(text),
+        ]);
 
-      const promises = [];
-
-      const nonNoteFilters = filters.filter(
-        f => f !== 'notes' && !f.includes('_notes'),
-      );
-      if (nonNoteFilters.length > 0 || filters.includes('all')) {
-        promises.push(
-          searchAllTables(trimmedText, filters).then(data => {
-            otherData.push(...data);
-          }),
-        );
+        setResults(items);
+        setNoteResults(notes);
       }
-
-      if (
-        filters.includes('all') ||
-        filters.includes('notes') ||
-        filters.some(f => f.includes('_notes'))
-      ) {
-        const relevantNoteFilters =
-          filters.includes('all') || noteFilters.includes('all_notes')
-            ? ['youtube_notes', 'drive_notes', 'notebook_notes']
-            : noteFilters;
-
-        for (const noteKey of relevantNoteFilters) {
-          const sourceType = NOTE_FILTER_TO_SOURCE_TYPE[noteKey];
-          if (!sourceType) continue;
-
-          const params = {
-            offset: 0,
-            limit: 20,
-            sortBy: 'created_at',
-            sortOrder: 'DESC',
-            sourceType,
-            searchQuery: trimmedText,
-          };
-
-          promises.push(
-            fetchNotes(params).then(results => {
-              noteData.push(...results);
-            }),
-          );
-        }
-      }
-
-      await Promise.all(promises);
-
-      setNoteResults(noteData);
-      setResults(otherData);
     } catch (err) {
       console.error('Search failed:', err);
-      setNoteResults([]);
       setResults([]);
+      setNoteResults([]);
     } finally {
       setLoadingSearch(false);
     }
+  };
+
+  const searchNotes = async text => {
+    const filters = activeNoteFilters.includes('all_notes')
+      ? Object.keys(NOTE_FILTER_TO_SOURCE_TYPE)
+      : activeNoteFilters;
+
+    const noteData = [];
+
+    for (const key of filters) {
+      const sourceType = NOTE_FILTER_TO_SOURCE_TYPE[key];
+      if (!sourceType) continue;
+      const params = {
+        offset: 0,
+        limit: 20,
+        sortBy: 'n.created_at',
+        sortOrder: 'DESC',
+        sourceType,
+        searchQuery: text,
+      };
+      if (sourceId != null) {
+        // checks for both null and undefined
+        params.sourceId = sourceId;
+      }
+      const results = await fetchNotes(params);
+
+      noteData.push(...results);
+    }
+
+    return noteData;
   };
 
   const animatedWidth = widthAnim.interpolate({
@@ -156,32 +148,22 @@ const SearchComponent = ({
     outputRange: ['0%', '100%'],
   });
 
-  const animatedStyle = {
-    width: animatedWidth,
-    opacity: widthAnim,
-  };
-
   return (
     <View style={styles.container}>
       <View style={styles.row}>
-        <Animated.View style={[styles.searchBar, animatedStyle]}>
+        <Animated.View
+          style={[
+            styles.searchBar,
+            {width: animatedWidth, opacity: widthAnim},
+          ]}>
           <View style={styles.searchInputContainer}>
-            <Icon
-              name="search"
-              size={20}
-              color="#666"
-              style={styles.searchIcon}
-            />
+            <Icon name="search" size={20} color="#666" />
             <TextInput
               ref={inputRef}
               value={searchQuery}
-              onChangeText={text => setSearchQuery(text)}
-              placeholder="Search notes, files, videos..."
-              placeholderTextColor="#999"
+              onChangeText={setSearchQuery}
+              placeholder="Search..."
               style={styles.input}
-              autoCorrect={false}
-              autoCapitalize="none"
-              accessibilityLabel="Search input"
             />
             {searchQuery ? (
               <TouchableOpacity onPress={() => setSearchQuery('')}>
@@ -190,23 +172,6 @@ const SearchComponent = ({
             ) : null}
           </View>
         </Animated.View>
-
-        {/* <TouchableOpacity
-          style={styles.searchBtn}
-          onPress={() => {
-            setShowSearch(!showSearch);
-            navigation.goBack();
-          }}
-          activeOpacity={0.7}
-          accessibilityLabel={showSearch ? 'Close search' : 'Open search'}
-          accessibilityRole="button"
-        >
-          <Icon
-            name={showSearch ? 'close' : 'search'}
-            size={20}
-            color="#333"
-          />
-        </TouchableOpacity> */}
       </View>
     </View>
   );
@@ -234,7 +199,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#e0e0e0',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
+    shadowOffset: {width: 0, height: 2},
     shadowOpacity: 0.15,
     shadowRadius: 4,
     elevation: 4,
@@ -265,7 +230,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#e0e0e0',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
+    shadowOffset: {width: 0, height: 2},
     shadowOpacity: 0.15,
     shadowRadius: 4,
     elevation: 4,

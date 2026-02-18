@@ -94,7 +94,7 @@ export const fetchYTData = async (
       });
 
       if (selectedCategory != null) {
-        addItemToCategory(selectedCategory, updatedItem.id, updatedItem.type);
+        addItemToCategory(selectedCategory, updatedItem.source_id, updatedItem.type);
       }
 
       if (type === 'youtube_video') {
@@ -134,7 +134,7 @@ export const fetchYTData = async (
       });
 
       if (selectedCategory != null) {
-        addItemToCategory(selectedCategory, fullItem.id, fullItem.type);
+        addItemToCategory(selectedCategory, fullItem.source_id, fullItem.type);
       }
 
       navigation?.navigate('BacePlayer', {item: fullItem});
@@ -166,7 +166,7 @@ export const fetchYTData = async (
       });
 
       if (selectedCategory != null) {
-        addItemToCategory(selectedCategory, fullItem.id, fullItem.type);
+        addItemToCategory(selectedCategory, fullItem.source_id, fullItem.type);
       }
     }
   } catch (error) {
@@ -222,7 +222,7 @@ export const handleDriveLink = async (
       });
 
       if (selectedCategory != null) {
-        await addItemToCategory(selectedCategory, updatedItem.id, updatedItem.type);
+        await addItemToCategory(selectedCategory, updatedItem.source_id, updatedItem.type);
       }
 
       console.log('✅ Drive item existed → updated out_show only');
@@ -247,7 +247,7 @@ export const handleDriveLink = async (
       });
 
       if (selectedCategory != null) {
-        await addItemToCategory(selectedCategory, savedItem.id, savedItem.type);
+        await addItemToCategory(selectedCategory, savedItem.source_id, savedItem.type);
       }
 
       console.log('✅ Created new drive', isFolder ? 'folder' : 'file');
@@ -389,7 +389,7 @@ export const handleFileProcessing = async (
     });
 
     if (selectedCategory != null) {
-      await addItemToCategory(selectedCategory, fullItem.id, fullItem.type);
+      await addItemToCategory(selectedCategory, fullItem.source_id, fullItem.type);
     }
     setDeviceFiles(prev => [fullItem, ...prev]);
 

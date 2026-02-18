@@ -3,9 +3,10 @@ import {View, StyleSheet} from 'react-native';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
 import FontAwesome from 'react-native-vector-icons/FontAwesome';
 import Foundation from 'react-native-vector-icons/Foundation';
+import Entypo from 'react-native-vector-icons/Entypo'
 
-export const getFileIcon = (mimeType, size = 22) => {
-  const type = mimeType?.toLowerCase() || '';
+export const getFileIcon = (input, size = 22) => {
+  const type = input?.toLowerCase() || '';
 
   let IconComponent = MaterialCommunityIcons;
   let iconName = 'file-outline';
@@ -95,6 +96,46 @@ export const getFileIcon = (mimeType, size = 22) => {
     iconName = 'folder-o';
     bgColor = '#FFF8E1';
     iconColor = '#F4B400';
+  }
+
+  // ────────────────────────────────────────────────
+  // YouTube (video, playlist, shorts, etc.)
+  // ────────────────────────────────────────────────
+  else if (type.startsWith('youtube_')) {
+    IconComponent = FontAwesome; // or Entypo if you prefer
+    iconName = 'youtube-play';
+    bgColor = '#FFEEEE'; // light red tint
+    iconColor = '#FF0000'; // classic YouTube red
+  }
+
+  // ────────────────────────────────────────────────
+  // Google Drive (file, folder, doc, sheet, etc.)
+  // ────────────────────────────────────────────────
+  else if (type.startsWith('drive_')) {
+    IconComponent = Entypo;
+    iconName = 'google-drive';
+    bgColor = '#FFF8E1'; // light yellow/orange tint
+    iconColor = '#F4B400'; // Drive yellow-orange
+  }
+
+  // ────────────────────────────────────────────────
+  // Device / local files
+  // ────────────────────────────────────────────────
+  else if (type.startsWith('device_')) {
+    IconComponent = FontAwesome;
+    iconName = 'mobile'; // or 'mobile-phone' if you prefer
+    bgColor = '#E6F4EA'; // soft green tint
+    iconColor = '#1E7D34'; // green
+  }
+
+  // ────────────────────────────────────────────────
+  // Notebook (if you want a special case)
+  // ────────────────────────────────────────────────
+  else if (type === 'notebook') {
+    IconComponent = MaterialCommunityIcons;
+    iconName = 'notebook-outline'; // nice notebook icon
+    bgColor = '#E8F0FE';
+    iconColor = '#1A73E8'; // blue-ish
   }
 
   return (

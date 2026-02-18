@@ -54,6 +54,10 @@ const BaseItem = ({type, item, isSelected, onSelect, onLongPress, screen}) => {
       });
     } else {
       const dataSource = screen === ScreenTypes.IN ? videos : items;
+      if (screen==='search' || !dataSource || dataSource.length === 0) {
+        navigation.navigate('BacePlayer', {item});
+        return;
+      }
       const videoItems = dataSource.filter(i => i.type !== 'youtube_playlist');
       const startingIndex = videoItems.findIndex(
         i => i.source_id === item.source_id,
@@ -110,6 +114,10 @@ const BaseItem = ({type, item, isSelected, onSelect, onLongPress, screen}) => {
       console.log(`'trying to play'${item}`);
       const dataSource =
         screen === ScreenTypes.IN ? nonFolderFilesInside : nonFolderFiles;
+      if (screen==='search' || !dataSource || dataSource.length === 0) {
+        navigation.navigate('BacePlayer', {item});
+        return;
+      }
       const startingIndex = dataSource.findIndex(
         f => f.source_id === item.source_id,
       );
@@ -129,7 +137,10 @@ const BaseItem = ({type, item, isSelected, onSelect, onLongPress, screen}) => {
         })
         .catch(error => {
           // console.error('Failed to open file:', error);
-          Alert.alert('Could not open file.',"You do not have a proper app to view this file");
+          Alert.alert(
+            'Could not open file.',
+            'You do not have a proper app to view this file',
+          );
         });
     }
   };

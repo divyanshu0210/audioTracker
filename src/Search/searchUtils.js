@@ -1,4 +1,4 @@
-import {getDb} from '../../database/database';
+import { getDb } from "../database/database";
 
 export const searchAllTables = (query, filters = ['all'], parentId = null) => {
   const fastdb = getDb();

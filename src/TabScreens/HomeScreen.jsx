@@ -2,7 +2,6 @@
 import React, {useEffect, useRef, useState, useCallback} from 'react';
 import {SafeAreaView, StyleSheet, View} from 'react-native';
 import {Provider} from 'react-native-paper';
-import SearchWrapper from '../Search/HomeScreenHeader/SearchWrapper';
 import HomeFABBtn from '../components/buttons/HomeFABBtn';
 import {useAppState} from '../contexts/AppStateContext';
 import useMentorMenteeStore from '../appMentor/useMentorMenteeStore';
@@ -14,7 +13,6 @@ import {
 import {isAssignmentPending} from '../appMentorBackend/assignmentsMgt';
 import {BASE_URL} from '../appMentorBackend/userMgt';
 import HomeTabs from './HomeTabs';
-import MainHeader from '../Search/HomeScreenHeader/MainHeader';
 
 const HomeScreen = () => {
   const {setCategories, setSelectedCategory, userInfo} = useAppState();

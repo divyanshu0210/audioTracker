@@ -5,7 +5,7 @@ import AddNewNoteBtn from '../../components/buttons/AddNewNoteBtn';
 import PlusButtonLayout from '../../components/buttons/PlusButtonLayout ';
 import {useAppState} from '../../contexts/AppStateContext';
 import ItemNotesScreen from '../../notes/ItemNotesList';
-import ContextHeader from '../../notes/components/ContextHeader';
+import ContextHeader from '../../components/headers/ContextHeader';
 
 export default function NotebookNotesScreen() {
   const navigation= useNavigation();

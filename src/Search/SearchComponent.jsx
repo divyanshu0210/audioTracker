@@ -8,8 +8,8 @@ import {
   View,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
-import {fetchNotes} from '../../database/R';
-import {searchAllTables} from './searchUtils';
+import { fetchNotes } from '../database/R';
+import { searchAllTables } from './searchUtils';
 
 const NOTE_FILTER_TO_SOURCE_TYPE = {
   youtube_notes: 'youtube_video',

@@ -47,11 +47,11 @@ import NotificationList from './appNotification/screens/NotificationList';
 import notifee, {AndroidImportance, EventType} from '@notifee/react-native';
 import ReportTab from './TabScreens/ReportTab';
 import useMentorMenteeStore from './appMentor/useMentorMenteeStore';
-import SearchWrapper from './Search/HomeScreenHeader/SearchWrapper';
-import MainHeader from './Search/HomeScreenHeader/MainHeader';
 import MentorshipRequestBottomSheet from './appMentor/MentorshipRequestBottomSheet';
 import {BottomSheetModalProvider} from '@gorhom/bottom-sheet';
 import {GlobalBottomSheets} from './components/bottomsheets/GlobalBottomSheets';
+import MainHeader from './components/headers/MainHeader';
+import SearchWrapper from './Search/SearchWrapper';
 
 const Stack = createStackNavigator();
 const Tab = createBottomTabNavigator();

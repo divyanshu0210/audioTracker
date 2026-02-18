@@ -1,8 +1,8 @@
 import {StyleSheet, Text, View} from 'react-native';
 import React, {useEffect, useRef} from 'react';
 import {useNavigation} from '@react-navigation/native';
-import ContextHeader from './components/ContextHeader';
 import ItemNotesScreen from './ItemNotesList';
+import ContextHeader from '../components/headers/ContextHeader';
 
 const NotesListScreen = () => {
   const navigation = useNavigation();

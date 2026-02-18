@@ -1,7 +1,7 @@
 // components/SearchResultsList.js
 import React, {useMemo} from 'react';
 import {View, ActivityIndicator} from 'react-native';
-import BaseMediaListComponent from '../../StackScreens/BaseMediaListComponent';
+import BaseMediaListComponent from '../StackScreens/BaseMediaListComponent';
 
 const SearchResultsList = ({
   results = [],

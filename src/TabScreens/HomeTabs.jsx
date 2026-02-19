@@ -21,11 +21,10 @@ const HomeTabs = ({categoryId}) => {
 
   const {driveLinksList, items, validDeviceFiles, deviceFiles, notebooks} =
     useAppState();
-
+ const {homeReloadKey} = useAppState();
   const {inserting, restoreInProgress} = useDbStore();
 
   const [loading, setLoading] = useState(true);
-  const [refreshKey, setRefreshKey] = useState(0);
 
   // Animated loader bar
   const translateX = useRef(new Animated.Value(-100)).current;
@@ -130,14 +129,12 @@ const HomeTabs = ({categoryId}) => {
     }
   }, [categoryId]);
 
-  useFocusEffect(
-    useCallback(() => {
-      if (!restoreInProgress) {
+useEffect(() => {
+ if (!restoreInProgress) {
         loadAllData();
-        setRefreshKey(prev => prev + 1);
       }
-    }, [restoreInProgress, categoryId]),
-  );
+}, [categoryId,restoreInProgress, homeReloadKey]);
+  
   // Tab content wrapper
   const renderTabContent = (ScreenComponent, props) => (
     <>
@@ -212,7 +209,7 @@ const HomeTabs = ({categoryId}) => {
 
           <Tab.Screen name={categoryId ? `Notes` : 'All Notes'}>
             {() =>
-              renderTabContent(AllNotesScreen, {categoryId, key: refreshKey})
+              renderTabContent(AllNotesScreen, {categoryId, key: homeReloadKey})
             }
           </Tab.Screen>
         </Tab.Navigator>

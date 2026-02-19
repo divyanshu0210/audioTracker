@@ -44,6 +44,9 @@ export const AppStateProvider = ({children}) => {
   const addNBbottomSheetRef = useRef(null);
   const mentorMenteeRequestBottomSheetRef = useRef(null);
 
+  const [homeReloadKey, setHomeReloadKey] = useState(0);
+
+
   //modals
   const [createCategoryModalVisible, setCreateCategoryModalVisible] =
     useState(false);
@@ -193,6 +196,8 @@ export const AppStateProvider = ({children}) => {
         setActiveItem, // got common item menu
 
         filterAndSet,
+
+        homeReloadKey, setHomeReloadKey,
       }}>
       {children}
     </AppStateContext.Provider>

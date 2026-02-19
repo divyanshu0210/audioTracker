@@ -1,9 +1,11 @@
 import {View, Text} from 'react-native';
-import React, {useLayoutEffect} from 'react';
+import React, {useEffect, useLayoutEffect} from 'react';
 import HomeTabs from '../TabScreens/HomeTabs';
+import {useAppState} from '../contexts/AppStateContext';
 
 const CategoryDetailScreen = ({navigation, route}) => {
   const {item} = route.params;
+  const {setHomeReloadKey} = useAppState();
 
   const emailMatch = item.name.match(/\(([^)]+)\)/);
   const hasEmail = !!emailMatch;
@@ -11,6 +13,12 @@ const CategoryDetailScreen = ({navigation, route}) => {
     ? item.name.replace(/\s*\([^)]+\)/, '')
     : item.name;
   const email = hasEmail ? emailMatch[1] : null;
+
+  useEffect(() => {
+    return () => {
+      setHomeReloadKey(prev => prev + 1);
+    };
+  }, []);
 
   useLayoutEffect(() => {
     navigation.setOptions({
@@ -23,6 +31,6 @@ const CategoryDetailScreen = ({navigation, route}) => {
     });
   }, [navigation]);
 
-  return <HomeTabs categoryId={item.id}/>;
+  return <HomeTabs categoryId={item.id} />;
 };
 export default CategoryDetailScreen;

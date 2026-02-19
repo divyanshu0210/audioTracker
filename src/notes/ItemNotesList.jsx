@@ -6,10 +6,9 @@ import NotesListComponent from './notesListing/NotesListComponent';
 import {useAppState} from '../contexts/AppStateContext';
 import {ScreenTypes} from '../contexts/constants';
 
-const ItemNotesScreen = ({useSpecial}) => {
+const ItemNotesScreen = ({useSpecial=false}) => {
   const {activeItem, setNotesList} = useAppState();
   const [loading, setLoading] = useState(false);
-
   let sourceId = activeItem?.sourceId;
   let sourceType = activeItem?.sourceType;
 
@@ -22,9 +21,9 @@ const ItemNotesScreen = ({useSpecial}) => {
     if (sourceId && sourceType) {
       loadNotesForItem();
     }
-  }, [activeItem]);
+  }, []);
 
-  const loadNotesForItem = async () => {
+  const loadNotesForItem = async () => {  
     setLoading(true);
 
     try {

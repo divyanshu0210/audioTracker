@@ -21,10 +21,20 @@ const sourceTypeColors = {
 const ContextHeader = ({}) => {
   const navigation = useNavigation();
   const {activeItem} = useAppState();
+  console.log('CONEXT HEADER', activeItem);
 
-  const sourceId = activeItem?.sourceId;
-  const sourceType = activeItem?.sourceType;
-  const item = activeItem?.item;
+  const isNoteSource = activeItem?.sourceType === 'note';
+  const resolvedItem = isNoteSource ? activeItem?.item : activeItem;
+  
+  const sourceId = isNoteSource
+    ? resolvedItem?.source_id
+    : resolvedItem?.sourceId;
+
+  const sourceType = isNoteSource
+    ? resolvedItem?.source_type
+    : resolvedItem?.sourceType;
+
+  const item = isNoteSource ? resolvedItem?.relatedItem : resolvedItem?.item;
 
   const title = item?.title || 'Related Notes';
 

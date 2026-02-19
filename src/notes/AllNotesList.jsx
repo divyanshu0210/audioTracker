@@ -1,4 +1,4 @@
-import React, {useEffect, useState} from 'react';
+import React, {useCallback, useEffect, useState} from 'react';
 import {
   ActivityIndicator,
   SafeAreaView,
@@ -9,8 +9,8 @@ import {useAppState} from '../contexts/AppStateContext';
 import {ScreenTypes} from '../contexts/constants';
 import { fetchNotes } from '../database/R';
 
-const AllNotesScreen = () => {
-  const {setMainNotesList, selectedCategory} = useAppState();
+const AllNotesScreen = ({categoryId}) => {
+  const {setMainNotesList} = useAppState();
 
   const [offset, setOffset] = useState(0);
   const [hasMore, setHasMore] = useState(true);
@@ -19,7 +19,7 @@ const AllNotesScreen = () => {
 
   useEffect(() => {
     loadInitialData();
-  }, [selectedCategory]);
+  }, []);
 
   const loadInitialData = async () => {
     setLoading(true);
@@ -27,8 +27,8 @@ const AllNotesScreen = () => {
       const limit = 20;
       let notes = [];
 
-      if (selectedCategory) {
-        notes = await fetchNotes({categoryId: selectedCategory});
+      if (categoryId) {
+        notes = await fetchNotes({categoryId: categoryId});
       } else {
         notes = await fetchNotes({
           offset: 0,
@@ -49,7 +49,7 @@ const AllNotesScreen = () => {
   };
 
   const loadMoreData = async () => {
-    if (loading || loadingMore || !hasMore || selectedCategory) return;
+    if (loading || loadingMore || !hasMore || categoryId) return;
 
     setLoadingMore(true);
     try {

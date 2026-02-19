@@ -1,3 +1,4 @@
+import {ITEM_TYPES_THAT_USE_ITEMS_TABLE} from '../contexts/constants';
 import {getDb} from '../database/database';
 
 export const addCategory = (name, color) => {
@@ -108,15 +109,7 @@ export const getCategoryData = (categoryId, types) => {
         let table;
         let joinCondition;
 
-        if (
-          [
-            'youtube_video',
-            'youtube_playlist',
-            'device_file',
-            'drive_file',
-            'drive_folder',
-          ].includes(type)
-        ) {
+        if (ITEM_TYPES_THAT_USE_ITEMS_TABLE.includes(type)) {
           table = 'items';
           joinCondition = 'ci.item_id = t.source_id';
         } else if (type === 'note') {
@@ -171,7 +164,7 @@ export const getCategoryData = (categoryId, types) => {
     }, reject);
   });
 };
-//for fetching notes same fn is used Fetch notes of database/R.js file 
+//for fetching notes same fn : Fetch notes of database/R.js file
 // fetchNotesInCategory is removed and fetchNotes is used with categoryId as parameter to fetch notes of category
 
 export const checkItemInCategory = (categoryId, itemId, itemType) => {

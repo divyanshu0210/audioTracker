@@ -107,7 +107,7 @@ export default CategoryScreen = () => {
     if (isSelectMode) {
       toggleCategorySelection(item.id);
     } else {
-      setSelectedCategory(item.id);
+      // setSelectedCategory(item.id);
       navigation.navigate('CategoryDetailScreen', { item });
       // navigation.navigate('MainApp', {
       //   screen: 'Home',

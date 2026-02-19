@@ -11,20 +11,21 @@ import MainYouTubeView from '../StackScreens/MainYouTubeView';
 import NotebookScreen from '../StackScreens/NoteBook/NoteBookScreen';
 import {useAppState} from '../contexts/AppStateContext';
 import useDbStore from '../database/dbStore';
+import {useFocusEffect} from '@react-navigation/core';
 
 const Tab = createMaterialTopTabNavigator();
 
-const HomeTabs = () => {
-  const {
-    setDriveLinksList,
-    setItems,
-    setDeviceFiles,
-    setNotebooks,
-    selectedCategory,
-  } = useAppState();
+const HomeTabs = ({categoryId}) => {
+  const {setDriveLinksList, setItems, setDeviceFiles, setNotebooks} =
+    useAppState();
+
+  const {driveLinksList, items, validDeviceFiles, deviceFiles, notebooks} =
+    useAppState();
+
   const {inserting, restoreInProgress} = useDbStore();
 
   const [loading, setLoading] = useState(true);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   // Animated loader bar
   const translateX = useRef(new Animated.Value(-100)).current;
@@ -47,8 +48,8 @@ const HomeTabs = () => {
   const loadFilesFromDB = async (loader = true) => {
     loader && setLoading(true);
     try {
-      const files = selectedCategory
-        ? await getCategoryData(selectedCategory, ['device_file'])
+      const files = categoryId
+        ? await getCategoryData(categoryId, ['device_file'])
         : await getChildrenByParent(null, 'device_file');
       setDeviceFiles(files || []);
     } catch (err) {
@@ -61,8 +62,8 @@ const HomeTabs = () => {
   const loadMainYTFromDB = async (loader = true) => {
     loader && setLoading(true);
     try {
-      const storedItems = selectedCategory
-        ? await getCategoryData(selectedCategory, [
+      const storedItems = categoryId
+        ? await getCategoryData(categoryId, [
             'youtube_video',
             'youtube_playlist',
           ])
@@ -82,11 +83,8 @@ const HomeTabs = () => {
   const loadDriveItemsfromDB = async (loader = true) => {
     loader && setLoading(true);
     try {
-      const storedItems = selectedCategory
-        ? await getCategoryData(selectedCategory, [
-            'drive_folder',
-            'drive_file',
-          ])
+      const storedItems = categoryId
+        ? await getCategoryData(categoryId, ['drive_folder', 'drive_file'])
         : await getChildrenByParent(null, ['drive_folder', 'drive_file']);
 
       setDriveLinksList(storedItems || []);
@@ -101,8 +99,8 @@ const HomeTabs = () => {
   const loadNotebooks = async (loader = true) => {
     loader && setLoading(true);
     try {
-      const storedItems = selectedCategory
-        ? await getCategoryData(selectedCategory, ['notebook'])
+      const storedItems = categoryId
+        ? await getCategoryData(categoryId, ['notebook'])
         : await fetchNotebooks(setNotebooks);
       setNotebooks(storedItems || []);
     } catch (error) {
@@ -114,6 +112,10 @@ const HomeTabs = () => {
 
   const loadAllData = useCallback(async () => {
     setLoading(true);
+    setDriveLinksList([]);
+    setItems([]);
+    setDeviceFiles([]);
+    setNotebooks([]);
     try {
       await Promise.all([
         loadMainYTFromDB(false),
@@ -126,15 +128,16 @@ const HomeTabs = () => {
     } finally {
       setLoading(false);
     }
-  }, [selectedCategory]);
+  }, [categoryId]);
 
-  // Trigger reload when selectedCategory changes
-  useEffect(() => {
-    if (!restoreInProgress) {
-      loadAllData();
-    }
-  }, [selectedCategory, restoreInProgress]);
-
+  useFocusEffect(
+    useCallback(() => {
+      if (!restoreInProgress) {
+        loadAllData();
+        setRefreshKey(prev => prev + 1);
+      }
+    }, [restoreInProgress, categoryId]),
+  );
   // Tab content wrapper
   const renderTabContent = (ScreenComponent, props) => (
     <>
@@ -172,6 +175,7 @@ const HomeTabs = () => {
               renderTabContent(MainYouTubeView, {
                 loading,
                 onRefresh: loadMainYTFromDB,
+                data: items,
               })
             }
           </Tab.Screen>
@@ -181,6 +185,7 @@ const HomeTabs = () => {
               renderTabContent(DeviceFilesView, {
                 loading,
                 onRefresh: loadFilesFromDB,
+                data: validDeviceFiles,
               })
             }
           </Tab.Screen>
@@ -190,6 +195,7 @@ const HomeTabs = () => {
               renderTabContent(DriveFilesView, {
                 loading,
                 onRefresh: loadDriveItemsfromDB,
+                data: driveLinksList,
               })
             }
           </Tab.Screen>
@@ -199,12 +205,15 @@ const HomeTabs = () => {
               renderTabContent(NotebookScreen, {
                 loading,
                 onRefresh: loadNotebooks,
+                data: notebooks,
               })
             }
           </Tab.Screen>
 
-          <Tab.Screen name={selectedCategory ? `Notes` : 'All Notes'}>
-            {() => renderTabContent(AllNotesScreen, {})}
+          <Tab.Screen name={categoryId ? `Notes` : 'All Notes'}>
+            {() =>
+              renderTabContent(AllNotesScreen, {categoryId, key: refreshKey})
+            }
           </Tab.Screen>
         </Tab.Navigator>
       </View>

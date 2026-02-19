@@ -128,7 +128,7 @@ const UniversalFilterBar = ({
 const styles = StyleSheet.create({
   filterContainer: {
     marginTop: 5,
-    backgroundColor: '#F8F8F8',
+    backgroundColor: '#fff',
     borderRadius: 5,
     paddingVertical: 4,
   },

@@ -6,15 +6,12 @@ import {groupItemsByDate} from './utils/grouppByDate';
 import BaseMediaListComponent from './BaseMediaListComponent';
 import {ItemTypes, ScreenTypes} from '../contexts/constants';
 
-const DriveFilesView = ({onRefresh, loading}) => {
-  const {driveLinksList} = useAppState();
-
-  const renderItem = ({item}) => <DriveItem item={item} />;
+const DriveFilesView = ({data,onRefresh, loading}) => {
   const emptyText = 'Press + to Add Files using Drive Link';
 
   return (
     <BaseMediaListComponent
-      mediaList={driveLinksList}
+      mediaList={data}
       emptyText={emptyText}
       onRefresh={onRefresh}
       loading={loading}

@@ -6,15 +6,12 @@ import {groupItemsByDate} from './utils/grouppByDate';
 import BaseMediaListComponent from './BaseMediaListComponent';
 import {ItemTypes} from '../contexts/constants';
 
-const DeviceFilesView = ({onRefresh, loading}) => {
-  const {validDeviceFiles} = useAppState();
-
-  const renderItem = ({item}) => <DeviceItem item={item} />;
+const DeviceFilesView = ({data,onRefresh, loading}) => {
   const emptyText = 'Press + to Add Media from device';
 
   return (
     <BaseMediaListComponent
-      mediaList={validDeviceFiles}
+      mediaList={data}
       emptyText={emptyText}
       onRefresh={onRefresh}
       loading={loading}

@@ -105,7 +105,7 @@ const styles = StyleSheet.create({
     padding: 8,
     borderBottomWidth: 1,
     borderBottomColor: '#E0E0E0',
-    backgroundColor: '#F8F9FA',
+    backgroundColor: '#fff',
   },
   resultsContainer: {
     flex: 1,

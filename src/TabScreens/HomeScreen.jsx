@@ -1,4 +1,3 @@
-
 import React, {useEffect, useRef, useState, useCallback} from 'react';
 import {SafeAreaView, StyleSheet, View} from 'react-native';
 import {Provider} from 'react-native-paper';
@@ -15,10 +14,12 @@ import {BASE_URL} from '../appMentorBackend/userMgt';
 import HomeTabs from './HomeTabs';
 
 const HomeScreen = () => {
-  const {setCategories, setSelectedCategory, userInfo} = useAppState();
+  const {setCategories, selectedCategory, setSelectedCategory, userInfo} =
+    useAppState();
 
-  const {setMentors, setMentees,activeMentee,activeMentor} = useMentorMenteeStore();
-  const isActive = activeMentee||activeMentor
+  const {setMentors, setMentees, activeMentee, activeMentor} =
+    useMentorMenteeStore();
+  const isActive = activeMentee || activeMentor;
 
   // Initial load
   useEffect(() => {
@@ -61,14 +62,10 @@ const HomeScreen = () => {
   return (
     <Provider>
       <SafeAreaView style={styles.container}>
-       
         <View style={{flex: 1, padding: 10}}>
-          <HomeTabs />
+          <HomeTabs categoryId={selectedCategory} />
         </View>
-        {!isActive&&(
-
-         <HomeFABBtn />
-        )}
+        {!isActive && <HomeFABBtn />}
       </SafeAreaView>
     </Provider>
   );

@@ -77,7 +77,7 @@ const CategoryPreview = () => {
         <CategoryList
           categories={topThree}
           onPress={item => {
-            setSelectedCategory(item.id);
+            // setSelectedCategory(item.id);
             navigation.navigate('CategoryDetailScreen', { item });
             // navigation.navigate('MainApp', {
             //   screen: 'Home',

@@ -6,15 +6,12 @@ import YouTubeItem from './YouTubeItem';
 import BaseMediaListComponent from './BaseMediaListComponent';
 import {ItemTypes, ScreenTypes} from '../contexts/constants';
 
-export default function MainScreen({onRefresh, loading}) {
-  const {items} = useAppState();
-
-  const renderItem = ({item}) => <YouTubeItem item={item} />;
+export default function MainScreen({data,onRefresh, loading}) {
   const emptyText = '  Press + to Add Videos/Playlists using YouTube Links';
 
   return (
     <BaseMediaListComponent
-      mediaList={items}
+      mediaList={data}
       emptyText={emptyText}
       onRefresh={onRefresh}
       loading={loading}

@@ -8,8 +8,8 @@ import {
   View,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
-import { fetchNotes } from '../database/R';
-import { searchAllTables } from './searchUtils';
+import {fetchNotes} from '../database/R';
+import {searchAllTables} from './searchUtils';
 
 const NOTE_FILTER_TO_SOURCE_TYPE = {
   youtube_notes: 'youtube_video',
@@ -88,7 +88,7 @@ const SearchComponent = ({
 
     try {
       if (mode === 'items') {
-        const data = await searchAllTables(text, activeFilters,sourceId);
+        const data = await searchAllTables(text, activeFilters, sourceId);
         setResults(data);
         setNoteResults([]);
       } else if (mode === 'notes') {
@@ -97,7 +97,7 @@ const SearchComponent = ({
         setNoteResults(notes);
       } else {
         const [items, notes] = await Promise.all([
-          searchAllTables(text, activeFilters,sourceId),
+          searchAllTables(text, activeFilters, sourceId),
           searchNotes(text),
         ]);
 
@@ -167,7 +167,7 @@ const SearchComponent = ({
             />
             {searchQuery ? (
               <TouchableOpacity onPress={() => setSearchQuery('')}>
-                <Icon name="close-circle" size={20} color="#666" />
+                <Icon name="close-circle" size={20} color="#999" />
               </TouchableOpacity>
             ) : null}
           </View>
@@ -181,59 +181,34 @@ const styles = StyleSheet.create({
   container: {
     position: 'relative',
     zIndex: 10,
-    paddingHorizontal: 16,
+    paddingHorizontal: 12,
     paddingVertical: 8,
+    backgroundColor: '#fff',
   },
   row: {
     flexDirection: 'row',
-    justifyContent: 'flex-end',
     alignItems: 'center',
   },
   searchBar: {
-    backgroundColor: '#f1f3f4', // Matches searchContainer background in MentorMenteeDrawer
+    backgroundColor: '#F5F6F8',
     borderRadius: 12,
     overflow: 'hidden',
     height: 44,
     justifyContent: 'center',
-    marginRight: 12,
     borderWidth: 1,
     borderColor: '#e0e0e0',
-    shadowColor: '#000',
-    shadowOffset: {width: 0, height: 2},
-    shadowOpacity: 0.15,
-    shadowRadius: 4,
-    elevation: 4,
   },
   searchInputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    height: '100%',
+    // height: '100%',
     paddingHorizontal: 12,
-  },
-  searchIcon: {
-    marginRight: 10,
   },
   input: {
     flex: 1,
     fontSize: 14,
-    color: '#333',
-    height: '100%',
-    fontFamily: 'Roboto', // Consistent typography
-  },
-  searchBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: '#fff', // Matches selectionButton background
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-    shadowColor: '#000',
-    shadowOffset: {width: 0, height: 2},
-    shadowOpacity: 0.15,
-    shadowRadius: 4,
-    elevation: 4,
+    color: '#111',
+    marginLeft: 8,
   },
 });
 

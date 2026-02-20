@@ -2,7 +2,8 @@
 import React, {useState} from 'react';
 import {View, Text, TouchableOpacity, StyleSheet} from 'react-native';
 import {getFileIcon} from '../contexts/fileIconHelper';
-import { useNavigation } from '@react-navigation/core';
+import {useNavigation} from '@react-navigation/core';
+import {useAppState} from '../contexts/AppStateContext';
 
 const formatTime = seconds => {
   const mins = Math.floor(seconds / 60);
@@ -26,16 +27,24 @@ const VideoReportItem = ({
   revisedSeconds,
   repeatedSeconds,
   progressBarScale,
-  intervals
+  intervals,
 }) => {
   const [expandedVideoId, setExpandedVideoId] = useState(null);
   const navigation = useNavigation();
+  const {setActiveItem} = useAppState();
 
   const isExpanded = expandedVideoId === item.id;
   return (
     <View style={styles.videoContainer}>
       <TouchableOpacity
-        onPress={() => navigation.navigate('BacePlayer', {item: item})}>
+        onPress={() => {
+          setActiveItem({
+            sourceId: item?.source_id,
+            sourceType: item?.type || type,
+            item: item,
+          });
+          navigation.navigate('BacePlayer', {item: item});
+        }}>
         <View style={{padding: 12}}>
           <View style={styles.videoHeader}>
             {/* Video Icon and Title (smaller) */}

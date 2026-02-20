@@ -13,7 +13,7 @@ const WeeklyReportCard = ({currentWeek}) => {
     <View
       style={{
         // flex:1,
-        padding:5,
+        padding: 5,
         // margin:10,
         marginTop: 10,
         backgroundColor: '#fff',
@@ -29,8 +29,8 @@ const WeeklyReportCard = ({currentWeek}) => {
         onPress={() => setWeeklyExpanded(prev => !prev)}
         style={{
           padding: 10,
-        //   borderBottomWidth: 1,
-        //   borderBottomColor: '#f0f0f0',
+          //   borderBottomWidth: 1,
+          //   borderBottomColor: '#f0f0f0',
           flexDirection: 'row',
           alignItems: 'center',
         }}>

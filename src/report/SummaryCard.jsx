@@ -1,9 +1,13 @@
 import React from 'react';
 import {View, Text, StyleSheet} from 'react-native';
 
-const WeeklyCardSummary = ({totalUnfltrdAll, totalNewAll, totalWatchAll}) => {
-  const totalRevised = totalWatchAll - totalNewAll;
-  const totalRepeated = totalUnfltrdAll - totalWatchAll;
+const SummaryCard = ({
+  totalUnfiltered = 0,
+  totalNew = 0,
+  totalWatch = 0,
+}) => {
+  const totalRevised = totalWatch - totalNew;
+  const totalRepeated = totalUnfiltered - totalWatch;
 
   const formatTime = seconds => {
     const mins = Math.floor(seconds / 60);
@@ -16,13 +20,15 @@ const WeeklyCardSummary = ({totalUnfltrdAll, totalNewAll, totalWatchAll}) => {
       <View style={styles.cardContent}>
         <View style={styles.summaryRow}>
           <Text style={styles.summaryLabel}>Total: </Text>
-          <Text style={styles.summaryValue}>{formatTime(totalUnfltrdAll)}</Text>
+          <Text style={styles.summaryValue}>
+            {formatTime(totalUnfiltered)}
+          </Text>
         </View>
 
         <View style={styles.timeBadgeContainer}>
           <View style={[styles.timeBadge, {backgroundColor: '#E8F5E9'}]}>
             <Text style={[styles.timeBadgeText, {color: '#4CAF50'}]}>
-              New: {formatTime(totalNewAll)}
+              New: {formatTime(totalNew)}
             </Text>
           </View>
 
@@ -59,7 +65,6 @@ const styles = StyleSheet.create({
   },
   summaryRow: {
     flexDirection: 'row',
-    justifyContent: 'flex-start',
     marginBottom: 10,
   },
   summaryLabel: {
@@ -93,4 +98,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default WeeklyCardSummary;
+export default SummaryCard;

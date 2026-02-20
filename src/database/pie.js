@@ -17,123 +17,69 @@ const getYtColor = i =>
 
 export const fetchWatchTimeData = (startDate, endDate) => {
   const fastdb = getDb();
+
   return new Promise((resolve, reject) => {
-    fastdb.transaction(
-      tx => {
-        const results = {youtube: 0, drive: 0, device: 0};
-        const chartData = [];
-
-        const youtubeQuery = `
-        SELECT SUM(vwh.newWatchTimePerDay) AS time
+    fastdb.transaction(tx => {
+      const query = `
+        SELECT 
+          i.type,
+          ym.channel_title,
+          SUM(vwh.newWatchTimePerDay) AS time
         FROM video_watch_history vwh
-        JOIN videos v ON v.ytube_id = vwh.videoId
-        WHERE vwh.date BETWEEN ? AND ?`;
+        JOIN items i 
+          ON i.source_id = vwh.videoId
+        LEFT JOIN youtube_meta ym 
+          ON ym.item_id = i.id
+        WHERE vwh.date BETWEEN ? AND ?
+        GROUP BY i.type, ym.channel_title
+        ORDER BY time DESC
+      `;
 
-        tx.executeSql(
-          youtubeQuery,
-          [startDate, endDate],
-          (_, {rows}) => {
-            results.youtube = rows.item(0).time || 0;
+      tx.executeSql(
+        query,
+        [startDate, endDate],
+        (_, { rows }) => {
+          const chartData = [];
+          const totals = { device: 0, drive: 0 };
 
-            const driveQuery = `
-            SELECT SUM(vwh.newWatchTimePerDay) AS time
-            FROM video_watch_history vwh
-            JOIN files f ON f.drive_id = vwh.videoId
-            WHERE vwh.date BETWEEN ? AND ?`;
+          for (let i = 0; i < rows.length; i++) {
+            const row = rows.item(i);
+            if (!row.time) continue;
 
-            tx.executeSql(
-              driveQuery,
-              [startDate, endDate],
-              (_, {rows}) => {
-                results.drive = rows.item(0).time || 0;
+            if (row.type === 'device_file') {
+              totals.device += row.time;
+            } else if (row.type === 'drive_file') {
+              totals.drive += row.time;
+            } else if (row.type === 'youtube_video') {
+              chartData.push({
+                name: row.channel_title || `Unknown Channel ${i + 1}`,
+                time: row.time,
+                color: getYtColor(i),
+              });
+            }
+          }
 
-                const deviceQuery = `
-                SELECT SUM(vwh.newWatchTimePerDay) AS time
-                FROM video_watch_history vwh
-                JOIN device_files df ON df.uuid = vwh.videoId
-                WHERE vwh.date BETWEEN ? AND ?`;
+          if (totals.device > 0) {
+            chartData.push({
+              name: 'Device',
+              time: totals.device,
+              color: DEVICE_COLOR,
+            });
+          }
 
-                tx.executeSql(
-                  deviceQuery,
-                  [startDate, endDate],
-                  (_, {rows}) => {
-                    results.device = rows.item(0).time || 0;
+          if (totals.drive > 0) {
+            chartData.push({
+              name: 'Drive',
+              time: totals.drive,
+              color: DRIVE_COLOR,
+            });
+          }
 
-                    if (results.device > 0) {
-                      chartData.push({
-                        name: 'Device',
-                        time: results.device,
-                        color: DEVICE_COLOR,
-                      });
-                    }
-
-                    if (results.drive > 0) {
-                      chartData.push({
-                        name: 'Drive',
-                        time: results.drive,
-                        color: DRIVE_COLOR,
-                      });
-                    }
-
-                    const ytChannelQuery = `
-                    SELECT v.channel_title AS channel, SUM(vwh.newWatchTimePerDay) AS time
-                    FROM video_watch_history vwh
-                    JOIN videos v ON v.ytube_id = vwh.videoId
-                    WHERE vwh.date BETWEEN ? AND ?
-                    GROUP BY v.channel_title
-                    ORDER BY time DESC`;
-
-                    tx.executeSql(
-                      ytChannelQuery,
-                      [startDate, endDate],
-                      (_, {rows}) => {
-                        for (let i = 0; i < rows.length; i++) {
-                          const item = rows.item(i);
-                          if (item.time > 0) {
-                            chartData.push({
-                              name: item.channel || `Unknown Channel ${i + 1}`,
-                              time: item.time,
-                              color: getYtColor(i)
-                            });
-                          }
-                        }
-                        console.log('Final Chart Data:', chartData);
-                        resolve(chartData);
-                      },
-                      (_, error) => {
-                        console.error(
-                          'Error executing YouTube channel query:',
-                          error,
-                        );
-                        reject(error);
-                      },
-                    );
-                  },
-                  (_, error) => {
-                    console.error(
-                      'Error executing Device WatchTime query:',
-                      error,
-                    );
-                    reject(error);
-                  },
-                );
-              },
-              (_, error) => {
-                console.error('Error executing Drive WatchTime query:', error);
-                reject(error);
-              },
-            );
-          },
-          (_, error) => {
-            console.error('Error executing YouTube WatchTime query:', error);
-            reject(error);
-          },
-        );
-      },
-      error => {
-        console.error('Transaction error:', error);
-        reject(error);
-      },
-    );
+          resolve(chartData);
+        },
+        (_, error) => reject(error),
+      );
+    });
   });
 };
+

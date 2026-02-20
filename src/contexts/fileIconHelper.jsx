@@ -5,7 +5,7 @@ import FontAwesome from 'react-native-vector-icons/FontAwesome';
 import Foundation from 'react-native-vector-icons/Foundation';
 import Entypo from 'react-native-vector-icons/Entypo'
 
-export const getFileIcon = (input, size = 22) => {
+export const getFileIcon = (input, size = 22, boxSize = 44) => {
   const type = input?.toLowerCase() || '';
 
   let IconComponent = MaterialCommunityIcons;
@@ -139,15 +139,23 @@ export const getFileIcon = (input, size = 22) => {
   }
 
   return (
-    <View style={[styles.container, {backgroundColor: bgColor}]}>
+    <View
+      style={[
+        styles.container,
+        {
+          width: boxSize,
+          height: boxSize,
+          borderRadius: boxSize * 0.28, // keeps rounded proportionally
+          backgroundColor: bgColor,
+        },
+      ]}
+    >
       <IconComponent name={iconName} size={size} color={iconColor} />
     </View>
   );
 };
 const styles = StyleSheet.create({
   container: {
-    width: 44,
-    height: 44,
     borderRadius: 12,
     justifyContent: 'center',
     alignItems: 'center',

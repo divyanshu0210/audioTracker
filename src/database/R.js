@@ -598,22 +598,11 @@ export const getLatestWatchHistory = () => {
   return new Promise((resolve, reject) => {
     fastdb.transaction(tx => {
       tx.executeSql(
-        `SELECT vwh.*, 
-                v.title AS title,
-                COALESCE(f.name, d.name) AS name,
-                COALESCE(f.file_path, d.file_path) AS file_path,
-                CASE 
-                  WHEN v.title IS NOT NULL THEN 'youtube'
-                  WHEN f.name IS NOT NULL THEN 'drive'
-                  WHEN d.name IS NOT NULL THEN 'device'
-                  ELSE NULL 
-                END AS source_type,
-                COALESCE(v.title, f.name, d.name) AS videoNameInfo,
-                COALESCE(v.duration, f.duration, d.duration) AS duration
-         FROM video_watch_history vwh
-         LEFT JOIN videos v ON vwh.videoId = v.ytube_id
-         LEFT JOIN files f ON vwh.videoId = f.drive_id
-         LEFT JOIN device_files d ON vwh.videoId = d.uuid
+        `SELECT vwh.*,
+        i.* 
+        FROM video_watch_history vwh
+          LEFT JOIN items i 
+          ON vwh.videoId = i.source_id
          ORDER BY vwh.lastWatchedAt DESC
          LIMIT 20;`,
         [],
@@ -651,22 +640,10 @@ export const getAggregatedWatchHistory = (startDate, endDate) => {
                SUM(vwh.unfltrdWatchTimePerDay) AS totalUnfltrdWatchTime,
                MAX(vwh.lastWatchedAt) AS lastWatchedAt,
                GROUP_CONCAT(vwh.watchedIntervals, '|') AS combinedIntervals,
-               
-               v.title AS title,
-               COALESCE(f.name, d.name) AS name,
-               COALESCE(f.file_path, d.file_path) AS file_path,
-               CASE 
-                 WHEN v.title IS NOT NULL THEN 'youtube'
-                 WHEN f.name IS NOT NULL THEN 'drive'
-                 WHEN d.name IS NOT NULL THEN 'device'
-                 ELSE NULL 
-               END AS source_type,
-               COALESCE(v.title, f.name, d.name) AS videoNameInfo,
-               COALESCE(v.duration, f.duration, d.duration) AS duration
+        i.* 
         FROM video_watch_history vwh
-        LEFT JOIN videos v ON vwh.videoId = v.ytube_id
-        LEFT JOIN files f ON vwh.videoId = f.drive_id
-        LEFT JOIN device_files d ON vwh.videoId = d.uuid
+          LEFT JOIN items i 
+          ON vwh.videoId = i.source_id
         WHERE vwh.date BETWEEN ? AND ?
         GROUP BY vwh.videoId
         ORDER BY datetime(lastWatchedAt) DESC;
@@ -703,28 +680,16 @@ export const getAggregatedWatchHistory = (startDate, endDate) => {
 
             aggregated.push({
               videoId: record.videoId,
-              source_type: record.source_type,
-              videoNameInfo: record.videoNameInfo,
+              source_id: record.videoId,
+              type: record.type,
+              title: record.title,
               duration: record.duration,
               lastWatchedAt: record.lastWatchedAt,
               totalWatchTime: watch,
               totalNewWatchTime: newWatch,
               totalUnfltrdWatchTime: unfltrd,
               mergedIntervals,
-              sourceDetails:
-                record.source_type === 'youtube'
-                  ? {
-                      ytube_id: record.videoId,
-                      title: record.title,
-                      duration: record.duration,
-                    }
-                  : {
-                      driveId: record.videoId,
-                      name: record.name,
-                      file_path: record.file_path,
-                      duration: record.duration,
-                      source_type: record.source_type,
-                    },
+              file_path: record.file_path,
             });
           }
 

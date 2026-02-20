@@ -13,13 +13,10 @@ const DRIVE_BACKUP_FOLDERS = ['yearly', 'monthly', 'weekly', 'daily'];
 const IMAGE_FOLDER = 'images';
 
 const TABLE_ORDER = [
-  'folders',
-  'files',
-  'playlists',
-  'device_files',
+  'items',
   'notebooks',
   'categories',
-  'videos',
+  'youtube_meta',
   'category_items',
   'notes',
   'video_watch_history',
@@ -34,7 +31,7 @@ const restoreKey = userId => `restoreCheckCompleted_${userId}`;
 const restoreLockKey = userId => `restoreInProgress_${userId}`;
 
 export async function hasRestoreCheckCompleted(userId) {
-  return (await AsyncStorage.getItem(restoreKey(userId))) === 'true';
+  return (await AsyncStorage.getItem(restoreKey(userId))) === 'false';
 }
 
 export async function markRestoreCheckCompleted(userId) {
@@ -50,7 +47,6 @@ async function acquireRestoreLock(userId) {
   }
   await AsyncStorage.setItem(restoreLockKey(userId), 'true');
 }
-
 
 async function releaseRestoreLock(userId) {
   await AsyncStorage.removeItem(restoreLockKey(userId));
@@ -222,7 +218,6 @@ async function runRestore(userId, backups) {
     await releaseRestoreLock(userId);
   }
 }
-
 
 async function attemptRestore(userId, backups) {
   console.log('[Restore] Attempt started');

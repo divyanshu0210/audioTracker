@@ -217,13 +217,10 @@ export const exportDataBetweenDates = async (
     console.log(`Exporting data between ${startDate} and ${endDate}...`);
 
     const defaultTables = [
-      'folders',
-      'files',
-      'playlists',
-      'device_files',
+      'items',
       'notebooks',
       'categories',
-      'videos',
+      'youtube_meta',
       'category_items',
       'notes',
       'video_watch_history',

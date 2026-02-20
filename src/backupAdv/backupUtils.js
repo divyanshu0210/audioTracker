@@ -65,26 +65,24 @@ export const saveBackupTimestamp = async () => {
   }
 };
 
-export const prepareIncrementalBackup = async (lastBackupTime, tables = null)=> {
+export const prepareIncrementalBackup = async (
+  lastBackupTime,
+  tables = null,
+) => {
   try {
     const db = getUserDatabase().getDb() || getDb();
     const changes = {};
     const effectiveBackupTime = lastBackupTime || '1970-01-01 00:00:00';
     console.log('Preparing incremental backup since', lastBackupTime);
 
-     const defaultTables = tables||[
-      'folders',
-      'files',
-      'playlists',
-      'device_files',
+    const defaultTables = tables || [
+      'items',
       'notebooks',
       'categories',
-      'videos',
+      'youtube_meta',
       'category_items',
       'notes',
       'video_watch_history',
-      // , 'images'
-      // Add any other tables here 
     ];
     const fetchTableChanges = table => {
       return new Promise(resolve => {
@@ -95,9 +93,8 @@ export const prepareIncrementalBackup = async (lastBackupTime, tables = null)=> 
 
             if (table === 'notes') {
               query = `SELECT rowid, * FROM ${table} WHERE created_at > ?`;
-            }
-            else if (table === 'video_watch_history') {
-              query = `SELECT * FROM ${table} WHERE lastWatchedAt > ?`; 
+            } else if (table === 'video_watch_history') {
+              query = `SELECT * FROM ${table} WHERE lastWatchedAt > ?`;
               // Use lastWatchedAt for videos to capture any re-watches or progress updates, not just new entries
               // query = `SELECT * FROM ${table} WHERE date >= DATE(?)`; // Only compare date part
             } else {
@@ -160,18 +157,13 @@ export const exportDatabaseToJson = async () => {
     console.log('Exporting full database to JSON...');
 
     const tables = [
-      'folders',
-      'files',
-      'playlists',
-      'device_files',
+      'items',
       'notebooks',
       'categories',
-      'videos',
+      'youtube_meta',
       'category_items',
       'notes',
       'video_watch_history',
-      // , 'images'
-      // Add any other tables here
     ];
 
     const fetchTableData = table => {
@@ -182,7 +174,7 @@ export const exportDatabaseToJson = async () => {
             query = `SELECT rowid, * FROM ${table}`;
           }
           tx.executeSql(
-           query,
+            query,
             [],
             (_, result) => {
               let rows;
@@ -223,16 +215,15 @@ export const exportDatabaseToJson = async () => {
   }
 };
 
-
 const checkGoogleDriveStorage = async () => {
   try {
-    const { accessToken } = await GoogleSignin.getTokens();
+    const {accessToken} = await GoogleSignin.getTokens();
     const response = await RNFetchBlob.fetch(
       'GET',
       'https://www.googleapis.com/drive/v3/about?fields=storageQuota',
-      { 'Authorization': `Bearer ${accessToken}` }
+      {Authorization: `Bearer ${accessToken}`},
     );
-    const { storageQuota } = response.json();
+    const {storageQuota} = response.json();
     if (storageQuota.used / storageQuota.limit > 0.8) {
       console.warn('Google Drive storage nearing limit:', storageQuota);
       // Notify user via UI
@@ -241,4 +232,3 @@ const checkGoogleDriveStorage = async () => {
     console.error('Error checking Google Drive storage:', error);
   }
 };
-

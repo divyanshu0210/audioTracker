@@ -51,6 +51,7 @@ import MainHeader from './components/headers/MainHeader';
 import SearchWrapper from './Search/SearchWrapper';
 import FullHistoryScreen from './history/FullHistoryScreen';
 import CategoriesView from './categories/CategoriesView';
+import { initDatabase, resetDatabase } from './database/database';
 
 const Stack = createStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -305,8 +306,8 @@ export default function App() {
   const {loading, backupInProgress, restoreInProgress} = useDbStore();
 
   // useEffect(() => {
-  //   // resetDatabase();
-  //   // initDatabase();
+  //   resetDatabase();
+  //   initDatabase();
 
   // }, []);
 

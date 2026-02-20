@@ -38,7 +38,7 @@ export const getAllCategories = () => {
     fastdb.transaction(
       tx => {
         tx.executeSql(
-          `SELECT * FROM categories 
+          `SELECT *, 'category' AS type FROM categories
            WHERE name NOT LIKE '%[MENTEE_CAT_Filter]%' 
            ORDER BY created_at DESC;`,
           [],

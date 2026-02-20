@@ -9,7 +9,7 @@ import { ItemTypes } from '../../contexts/constants';
 const NotebookItem = ({item}) => {
   return (
     <View style={styles.notebookItem}>
-      <View style={[styles.colorBar, {backgroundColor: item.color}]} />
+      {/* <View style={[styles.colorBar, {backgroundColor: item.color}]} /> */}
       <MaterialCommunityIcons
         name="notebook"
         size={32}
@@ -37,13 +37,13 @@ const styles = StyleSheet.create({
   },
   colorBar: {
     width: 6,
-    height: '100%',
+    alignSelf:'stretch',
     borderTopLeftRadius: 8,
     borderBottomLeftRadius: 8,
   },
   notebookInfo: {
     flex: 1,
-    paddingLeft: 10,
+    // paddingLeft: 10,
   },
   notebookTitle: {
     fontSize: 15,

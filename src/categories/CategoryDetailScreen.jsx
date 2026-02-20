@@ -1,7 +1,8 @@
 import {View, Text} from 'react-native';
-import React, {useEffect, useLayoutEffect} from 'react';
+import React, {useEffect} from 'react';
 import HomeTabs from '../TabScreens/HomeTabs';
 import {useAppState} from '../contexts/AppStateContext';
+import AppHeader from '../components/headers/AppHeader';
 
 const CategoryDetailScreen = ({navigation, route}) => {
   const {item} = route.params;
@@ -20,17 +21,12 @@ const CategoryDetailScreen = ({navigation, route}) => {
     };
   }, []);
 
-  useLayoutEffect(() => {
-    navigation.setOptions({
-      headerTitle: () => (
-        <View style={{flexDirection: 'column'}}>
-          <Text style={{fontSize: 20}}>{displayName}</Text>
-          <Text style={{fontSize: 12, color: '#777'}}>{email || ''}</Text>
-        </View>
-      ),
-    });
-  }, [navigation]);
 
-  return <HomeTabs categoryId={item.id} />;
+  return (
+    <>
+      <AppHeader title={displayName} subtitle={email} enableSearch={true}/>
+      <HomeTabs categoryId={item.id} />
+    </>
+  );
 };
 export default CategoryDetailScreen;

@@ -1,10 +1,10 @@
 import {Image, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
 import React from 'react';
-import {useAppState} from '../contexts/AppStateContext';
 import {useNavigation} from '@react-navigation/core';
 import Ionicons from 'react-native-vector-icons/Ionicons';
+import { useAppState } from '../../contexts/AppStateContext';
 
-const Profile = () => {
+const ProfileHeader = () => {
   const {userInfo} = useAppState();
   const navigation = useNavigation();
 
@@ -36,7 +36,7 @@ const Profile = () => {
   );
 };
 
-export default Profile;
+export default ProfileHeader;
 const styles = StyleSheet.create({
   headerContainer: {
     backgroundColor: '#ffffff',
@@ -44,11 +44,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     borderBottomWidth: 1,
     borderBottomColor: '#e0e0e0',
-    // shadowColor: '#000',
-    // shadowOffset: {width: 0, height: 2},
-    // shadowOpacity: 0.05,
-    // shadowRadius: 2,
-    // elevation: 2,
   },
   profileRow: {
     flexDirection: 'row',

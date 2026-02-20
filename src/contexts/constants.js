@@ -4,6 +4,7 @@ export const ItemTypes = Object.freeze({
   DRIVE: 'drive',
   NOTEBOOK: 'notebook',
   NOTE: 'note',
+  CATEGORY:'category'
 });
 export const ScreenTypes = Object.freeze({
   MAIN: 'out',

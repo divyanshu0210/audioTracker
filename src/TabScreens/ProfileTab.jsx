@@ -1,18 +1,18 @@
 import {StyleSheet, Text, View} from 'react-native';
 import React, {useEffect, useState} from 'react';
 import {useIsFocused, useNavigation} from '@react-navigation/native'; // Import the hook
-import Profile from '../categories/Profile';
 import HistoryComponent from '../history/HistoryComponent';
-import CategoryPreview from '../categories/CategoryPreview';
+import CategoriesView from '../categories/CategoriesView';
+import ProfileHeader from '../components/headers/ProfileHeader';
 
 const ProfileTab = () => {
 
   return (
     <>
-      <Profile />
+      <ProfileHeader />
       <View style={styles.container}>
         <HistoryComponent />
-        <CategoryPreview />
+        <CategoriesView mode='preview'/>
       </View>
     </>
   );
@@ -23,7 +23,7 @@ export default ProfileTab;
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    padding: 12,
+    backgroundColor:'#fff',
     gap: 15,
   },
 });

@@ -33,7 +33,7 @@ const GeneralNotificationsList = ({notifications}) => {
       keyExtractor={item => item.id.toString()}
       renderItem={renderItem}
       ListEmptyComponent={
-        <Text style={styles.emptyText}>No notifications yet.</Text>
+        <Text style={styles.emptyText}>You are Up to Date!!</Text>
       }
     />
   );

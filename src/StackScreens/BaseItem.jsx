@@ -20,6 +20,7 @@ import {ItemTypes, ScreenTypes} from '../contexts/constants';
 import BaseMenu from '../components/menu/BaseMenu';
 import NoteItem from '../notes/notesListing/NoteItem';
 import useAppStateStore from '../contexts/appStateStore';
+import { CategoryItem } from '../categories/CategoryItem';
 
 const BaseItem = ({type, item, isSelected, onSelect, onLongPress, screen}) => {
   const navigation = useNavigation();
@@ -41,10 +42,7 @@ const BaseItem = ({type, item, isSelected, onSelect, onLongPress, screen}) => {
     state => state.routes[state.index].name,
   );
 
-  const sourceId =
-    item?.rowid ||
-    item?.source_id ||
-    (type === 'notebook' && item?.id?.toString());
+  const sourceId = item?.rowid || item?.source_id || item?.id?.toString();
 
   const handleYoutubePress = () => {
     if (item.type === 'youtube_playlist') {
@@ -54,7 +52,7 @@ const BaseItem = ({type, item, isSelected, onSelect, onLongPress, screen}) => {
       });
     } else {
       const dataSource = screen === ScreenTypes.IN ? videos : items;
-      if (screen==='search' || !dataSource || dataSource.length === 0) {
+      if (screen === 'search' || !dataSource || dataSource.length === 0) {
         navigation.navigate('BacePlayer', {item});
         return;
       }
@@ -114,7 +112,7 @@ const BaseItem = ({type, item, isSelected, onSelect, onLongPress, screen}) => {
       console.log(`'trying to play'${item}`);
       const dataSource =
         screen === ScreenTypes.IN ? nonFolderFilesInside : nonFolderFiles;
-      if (screen==='search' || !dataSource || dataSource.length === 0) {
+      if (screen === 'search' || !dataSource || dataSource.length === 0) {
         navigation.navigate('BacePlayer', {item});
         return;
       }
@@ -153,6 +151,10 @@ const BaseItem = ({type, item, isSelected, onSelect, onLongPress, screen}) => {
     item.source_type === 'notebook'
       ? handleNBNotePress(item)
       : handleMediaNotePress();
+  };
+
+  const handleCategoryPress = () => {
+    navigation.navigate('CategoryDetailScreen', {item});
   };
 
   const handleMediaNotePress = () => {
@@ -243,6 +245,11 @@ const BaseItem = ({type, item, isSelected, onSelect, onLongPress, screen}) => {
       onPress: handleNotePress,
       showMenu: () => screen,
     },
+    [ItemTypes.CATEGORY]: {
+      Component: CategoryItem,
+      onPress: handleCategoryPress,
+      showMenu: () => false,
+    },
   };
 
   return (
@@ -250,7 +257,8 @@ const BaseItem = ({type, item, isSelected, onSelect, onLongPress, screen}) => {
       onPress={handlePress}
       onLongPress={onLongPress}
       delayLongPress={400}
-      activeOpacity={0.9}
+      activeOpacity={0.5}
+      android_ripple={{color: '#eee'}}
       style={[styles.wrapper, isSelected && styles.selected]}>
       {renderItem()}
       <View style={styles.menuWrapper}>
@@ -269,6 +277,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     minHeight: 56,
     paddingVertical: 8,
+    paddingLeft: 10,
     borderBottomWidth: 0.5,
     borderBottomColor: '#ccc',
     // borderBottomColor: '#E5E7EB',

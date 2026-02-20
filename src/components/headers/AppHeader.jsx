@@ -6,6 +6,8 @@ import {useAppState} from '../../contexts/AppStateContext';
 
 const AppHeader = ({
   title,
+  titleStyle = {},
+  headerStyle = {},
   subtitle,
   showBack = true,
   onBackPress,
@@ -23,7 +25,7 @@ const AppHeader = ({
   if (selectionMode) return null;
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container,headerStyle]}>
       {showBack && (
         <TouchableOpacity
           onPress={onBackPress || navigation.goBack}
@@ -70,7 +72,7 @@ const AppHeader = ({
           />
         ) : (
           <>
-            <Text style={styles.title} numberOfLines={1}>
+            <Text style={[styles.title, titleStyle]} numberOfLines={1}>
               {title}
             </Text>
             {subtitle && <Text style={styles.subtitle}>{subtitle}</Text>}
@@ -133,7 +135,7 @@ const styles = StyleSheet.create({
   },
   rightSection: {
     marginLeft: 10,
-    flexDirection:'row'
+    flexDirection: 'row',
   },
   accentBar: {
     width: 4,

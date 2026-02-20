@@ -14,8 +14,6 @@ import FontAwesome6 from 'react-native-vector-icons/FontAwesome6';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
 import GoogleLoginScreen from './auth/GoogleLoginScreen';
 import CategoryDetailScreen from './categories/CategoryDetailScreen';
-import CategoryScreen from './categories/CategoryScreen';
-import Profile from './categories/Profile';
 import AddNotebookBottomSheet from './components/bottomsheets/AddNotebookBottomSheet';
 import NoteInfoBottomMenu from './components/bottomsheets/NoteInfoBottomMenu';
 import {AppStateProvider, useAppState} from './contexts/AppStateContext';
@@ -52,6 +50,7 @@ import {GlobalBottomSheets} from './components/bottomsheets/GlobalBottomSheets';
 import MainHeader from './components/headers/MainHeader';
 import SearchWrapper from './Search/SearchWrapper';
 import FullHistoryScreen from './history/FullHistoryScreen';
+import CategoriesView from './categories/CategoriesView';
 
 const Stack = createStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -149,6 +148,7 @@ function RootNavigator() {
         <Stack.Screen
           name="CategoryDetailScreen"
           component={CategoryDetailScreen}
+          options={{headerShown: false}}
         />
 
         <Stack.Screen
@@ -162,7 +162,11 @@ function RootNavigator() {
           component={FullHistoryScreen}
           options={{title: 'Watch History'}}
         />
-        <Stack.Screen name="CategoryScreen" component={CategoryScreen} />
+        <Stack.Screen
+          name="CategoriesView"
+          component={CategoriesView}
+          options={{headerShown: false}}
+        />
         <Stack.Screen
           name="ProfileTab"
           component={ProfileTab}

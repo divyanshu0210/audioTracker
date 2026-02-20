@@ -71,7 +71,7 @@ const BaseMenu = ({item, type, screen}) => {
       <Menu
         visible={visible}
         anchor={
-          <TouchableOpacity onPress={handleAnchorPress} style={{padding: 5}}>
+          <TouchableOpacity onPress={handleAnchorPress} style={{paddingVertical:5}}>
             <MaterialCommunityIcons
               name="dots-vertical"
               size={30}

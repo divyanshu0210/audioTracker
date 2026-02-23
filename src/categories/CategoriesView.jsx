@@ -89,6 +89,10 @@ export default function CategoriesView({mode = 'full'}) {
           </>
         }
         enableSearch={!isPreview}
+        searchParams={{
+          initialSearchActive: true,
+          mode: 'category',
+        }}
       />
     </>
   );

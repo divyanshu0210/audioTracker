@@ -19,6 +19,9 @@ const SearchWrapper = () => {
   const initialNoteFilters = params?.initialNoteFilters ?? ['all_notes'];
   const initialSearchActive = params?.initialSearchActive ?? false;
   const sourceId = params?.sourceId ?? null;
+  const categoryId = params?.categoryId ?? null;
+  const title = params?.title ;
+  
 
   const [showSearch, setShowSearch] = useState(initialSearchActive);
   const [results, setResults] = useState([]);
@@ -65,6 +68,8 @@ const SearchWrapper = () => {
             setActiveNoteFilters={setActiveNoteFilters}
             setShowNoteFilters={setShowNoteFilters}
             sourceId={sourceId}
+            categoryId={categoryId}
+            title={title}
           />
 
           {showSearch && !hideFilters && (

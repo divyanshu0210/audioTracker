@@ -25,7 +25,7 @@ const AppHeader = ({
   if (selectionMode) return null;
 
   return (
-    <View style={[styles.container,headerStyle]}>
+    <View style={[styles.container, headerStyle]}>
       {showBack && (
         <TouchableOpacity
           onPress={onBackPress || navigation.goBack}
@@ -83,7 +83,12 @@ const AppHeader = ({
       <View style={styles.rightSection}>
         {enableSearch && (
           <TouchableOpacity
-            onPress={() => navigation.navigate('SearchWrapper', searchParams)}
+            onPress={() =>
+              navigation.navigate('SearchWrapper', {
+                ...searchParams, // your search filters, query etc.
+                title: breadcrumbs? breadcrumbs[breadcrumbs.length-1].title:title, // for placeholder text
+              })
+            }
             style={styles.iconButton}>
             <MaterialIcons name="search" size={22} color="#000" />
           </TouchableOpacity>

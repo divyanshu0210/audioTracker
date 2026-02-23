@@ -9,7 +9,8 @@ import {
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import {fetchNotes} from '../database/R';
-import {searchAllTables} from './searchUtils';
+import {searchAllTables, searchNotebookNotesInCategory} from './searchUtils';
+import {getAllCategories} from '../categories/catDB';
 
 const NOTE_FILTER_TO_SOURCE_TYPE = {
   youtube_notes: 'youtube_video',
@@ -31,6 +32,8 @@ const SearchComponent = ({
   setActiveNoteFilters,
   setShowNoteFilters,
   sourceId,
+  categoryId, // for being inside a category...
+  title, // for being inside a category...
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const widthAnim = useRef(new Animated.Value(0)).current;
@@ -70,7 +73,8 @@ const SearchComponent = ({
       setShowNoteFilters(false);
     }
 
-    if (!trimmed && mode === 'all') {
+    // this decides in which all modes we will see empty list on empty search
+    if (!trimmed && mode !== 'category' && mode === 'all') {
       setResults([]);
       setNoteResults([]);
       return;
@@ -87,8 +91,19 @@ const SearchComponent = ({
     setLoadingSearch(true);
 
     try {
+      if (mode === 'category') {
+        const categories = await getAllCategories(text);
+        setResults(categories);
+        setNoteResults([]);
+        return;
+      }
       if (mode === 'items') {
-        const data = await searchAllTables(text, activeFilters, sourceId);
+        const data = await searchAllTables(
+          text,
+          activeFilters,
+          sourceId,
+          categoryId,
+        );
         setResults(data);
         setNoteResults([]);
       } else if (mode === 'notes') {
@@ -97,7 +112,7 @@ const SearchComponent = ({
         setNoteResults(notes);
       } else {
         const [items, notes] = await Promise.all([
-          searchAllTables(text, activeFilters, sourceId),
+          searchAllTables(text, activeFilters, sourceId, categoryId),
           searchNotes(text),
         ]);
 
@@ -135,11 +150,22 @@ const SearchComponent = ({
         // checks for both null and undefined
         params.sourceId = sourceId;
       }
+      if (categoryId != null) {
+        // checks for both null and undefined
+        params.categoryId = categoryId;
+      }
       const results = await fetchNotes(params);
+
+      if (sourceType === 'notebook' && categoryId != null) {
+        const notebookNotes = await searchNotebookNotesInCategory(
+          categoryId,
+          text,
+        );
+        noteData.push(...notebookNotes);
+      }
 
       noteData.push(...results);
     }
-
     return noteData;
   };
 
@@ -162,7 +188,11 @@ const SearchComponent = ({
               ref={inputRef}
               value={searchQuery}
               onChangeText={setSearchQuery}
-              placeholder="Search..."
+              placeholder={
+                title
+                  ? `Search in ${title.slice(0, 25)}...`
+                  : 'Search in Everything...'
+              }
               style={styles.input}
             />
             {searchQuery ? (

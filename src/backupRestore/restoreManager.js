@@ -31,7 +31,7 @@ const restoreKey = userId => `restoreCheckCompleted_${userId}`;
 const restoreLockKey = userId => `restoreInProgress_${userId}`;
 
 export async function hasRestoreCheckCompleted(userId) {
-  return (await AsyncStorage.getItem(restoreKey(userId))) === 'false';
+  return (await AsyncStorage.getItem(restoreKey(userId))) === 'true';
 }
 
 export async function markRestoreCheckCompleted(userId) {

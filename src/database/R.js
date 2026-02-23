@@ -235,10 +235,18 @@ export const fetchNotes = ({
       // ─────────────────────────────────────────
       // FTS Search
       // ─────────────────────────────────────────
-      if (searchQuery) {
-        conditions.push(`n.text_content MATCH ?`);
-        params.push(`${searchQuery}*`);
-      }
+if (searchQuery) {
+  const escaped = searchQuery.replace(/"/g, '""');
+
+  const matchQuery = escaped
+    .split(/\s+/)
+    .map(word => `"${word}"*`)
+    .join(' ');
+
+  conditions.push(`n.text_content MATCH ?`);
+  params.push(matchQuery);
+}
+
 
       // ─────────────────────────────────────────
       // Date filter

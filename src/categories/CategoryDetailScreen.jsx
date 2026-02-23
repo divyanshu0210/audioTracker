@@ -21,10 +21,18 @@ const CategoryDetailScreen = ({navigation, route}) => {
     };
   }, []);
 
-
   return (
     <>
-      <AppHeader title={displayName} subtitle={email} enableSearch={true}/>
+      <AppHeader
+        title={displayName}
+        subtitle={email}
+        enableSearch={true}
+        searchParams={{
+          initialSearchActive: true,
+          mode: 'all',
+          categoryId: item.id,
+        }}
+      />
       <HomeTabs categoryId={item.id} />
     </>
   );

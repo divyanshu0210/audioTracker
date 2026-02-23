@@ -32,28 +32,40 @@ export const addCategory = (name, color) => {
     );
   });
 };
-export const getAllCategories = () => {
+export const getAllCategories = (query = null) => {
   const fastdb = getDb();
+
   return new Promise((resolve, reject) => {
-    fastdb.transaction(
-      tx => {
-        tx.executeSql(
-          `SELECT *, 'category' AS type FROM categories
-           WHERE name NOT LIKE '%[MENTEE_CAT_Filter]%' 
-           ORDER BY created_at DESC;`,
-          [],
-          (_, result) => {
-            const categories = [];
-            for (let i = 0; i < result.rows.length; i++) {
-              categories.push(result.rows.item(i));
-            }
-            resolve(categories);
-          },
-          (_, error) => reject(error),
-        );
-      },
-      error => reject(error),
-    );
+    fastdb.transaction(tx => {
+      let sql = `
+        SELECT *, 'category' AS type
+        FROM categories
+        WHERE name NOT LIKE '%[MENTEE_CAT_Filter]%'
+          AND name NOT LIKE '%@%'         -- ❗ exclude emails
+      `;
+
+      const params = [];
+
+      if (query && query.trim().length > 0) {
+        sql += ` AND LOWER(name) LIKE ?`;
+        params.push(`%${query.toLowerCase()}%`);
+      }
+
+      sql += ` ORDER BY created_at DESC`;
+
+      tx.executeSql(
+        sql,
+        params,
+        (_, result) => {
+          const categories = [];
+          for (let i = 0; i < result.rows.length; i++) {
+            categories.push(result.rows.item(i));
+          }
+          resolve(categories);
+        },
+        (_, error) => reject(error),
+      );
+    });
   });
 };
 
@@ -106,30 +118,59 @@ export const getCategoryData = (categoryId, types) => {
       const params = [];
 
       typesArray.forEach(type => {
-        let table;
-        let joinCondition;
+        let selectFields = `t.*`;
+        let baseTable = '';
+        let extraJoins = '';
+        let joinCondition = '';
 
+        // ─────────────────────────────
+        // ITEMS (youtube / drive / device)
+        // ─────────────────────────────
         if (ITEM_TYPES_THAT_USE_ITEMS_TABLE.includes(type)) {
-          table = 'items';
-          joinCondition = 'ci.item_id = t.source_id';
-        } else if (type === 'note') {
-          table = 'notes';
-          joinCondition = 'ci.item_id = t.rowid';
-        } else if (type === 'notebook') {
-          table = 'notebooks';
-          joinCondition = 'ci.item_id = t.id';
-        } else {
-          return; // skip unknown type
+          baseTable = `items t`;
+          joinCondition = `ci.item_id = t.source_id`; // or t.id if needed
+
+          selectFields = `
+            t.*,
+            youtube_meta.channel_title,
+            youtube_meta.thumbnail
+          `;
+
+          extraJoins = `
+            LEFT JOIN youtube_meta
+              ON youtube_meta.item_id = t.id
+          `;
+        }
+
+        // ─────────────────────────────
+        // NOTES
+        // ─────────────────────────────
+        else if (type === 'note') {
+          baseTable = `notes t`;
+          joinCondition = `ci.item_id = t.rowid`;
+        }
+
+        // ─────────────────────────────
+        // NOTEBOOKS
+        // ─────────────────────────────
+        else if (type === 'notebook') {
+          baseTable = `notebooks t`;
+          joinCondition = `ci.item_id = t.id`;
+        }
+
+        else {
+          return;
         }
 
         queries.push(`
           SELECT 
-            t.*,
+            ${selectFields},
             ci.item_type,
             ci.created_at AS category_added_at
           FROM category_items ci
-          JOIN ${table} t
+          JOIN ${baseTable}
             ON ${joinCondition}
+          ${extraJoins}
           WHERE ci.category_id = ?
             AND ci.item_type = ?
         `);
@@ -137,7 +178,7 @@ export const getCategoryData = (categoryId, types) => {
         params.push(categoryId, type);
       });
 
-      if (queries.length === 0) {
+      if (!queries.length) {
         resolve([]);
         return;
       }
@@ -152,12 +193,10 @@ export const getCategoryData = (categoryId, types) => {
         params,
         (_, result) => {
           const data = [];
-
           for (let i = 0; i < result.rows.length; i++) {
             data.push(result.rows.item(i));
           }
-          console.log('Fetched category data:', data);
-          resolve(data || []);
+          resolve(data);
         },
         (_, error) => reject(error),
       );

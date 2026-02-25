@@ -1,6 +1,5 @@
 import { getFullItemByIdTx } from './C';
 import {db, getDb} from './database';
-import {fastdb} from './FTSDatabase';
 
 export const updateItemFields = (id, updates) => {
   const fastdb = getDb();
@@ -24,7 +23,6 @@ export const updateItemFields = (id, updates) => {
         `,
         [...values, id],
         async (result) => {
-           console.log('[updateItemFields] Rows affected:', result);
           const fullItem = await getFullItemByIdTx(tx, id);
           console.log("")
           resolve(fullItem);
@@ -58,107 +56,6 @@ export const updateWatchTimestampIfExists = videoId => {
         return true; // propagate error
       },
     );
-  });
-};
-
-// ---------------------------notes
-export const updateNoteContentbyId = (noteId, newContent) => {
-  const fastdb = getDb();
-  return new Promise((resolve, reject) => {
-    if (!noteId) {
-      reject(new Error('Note ID is required'));
-      return;
-    }
-
-    fastdb.transaction(tx => {
-      tx.executeSql(
-        `UPDATE notes SET content = ?,created_at=CURRENT_TIMESTAMP WHERE rowid = ?`,
-        [JSON.stringify(newContent), noteId],
-        () => {
-          console.log('Note updated successfully');
-          resolve();
-        },
-        (_, error) => {
-          console.error('Failed to update note:', error);
-          reject(error);
-        },
-      );
-    });
-  });
-};
-
-export const updateNoteTextContentbyId = (noteId, textContent) => {
-  const fastdb = getDb();
-  return new Promise((resolve, reject) => {
-    if (!noteId) {
-      reject(new Error('Note ID is required'));
-      return;
-    }
-
-    fastdb.transaction(tx => {
-      tx.executeSql(
-        `UPDATE notes SET text_content = ? WHERE rowid = ?`,
-        [JSON.stringify(textContent), noteId],
-        (_, result) => {
-          console.log('Text content updated successfully');
-          resolve(result);
-        },
-        (_, error) => {
-          console.error('Failed to update text content:', error);
-          reject(error);
-        },
-      );
-    });
-  });
-};
-
-export const updateNotebyId = (noteId, noteContent, textContent) => {
-  const fastdb = getDb();
-  return new Promise((resolve, reject) => {
-    if (!noteId) {
-      reject(new Error('Note ID is required'));
-      return;
-    }
-
-    fastdb.transaction(tx => {
-      tx.executeSql(
-        `UPDATE notes SET content=?,text_content = ?,created_at=CURRENT_TIMESTAMP WHERE rowid = ?`,
-        [JSON.stringify(noteContent), JSON.stringify(textContent), noteId],
-        (_, result) => {
-          console.log('Text content updated successfully');
-          resolve(result);
-        },
-        (_, error) => {
-          console.error('Failed to update text content:', error);
-          reject(error);
-        },
-      );
-    });
-  });
-};
-
-export const updateNoteTitlebyId = (noteId, noteTitle) => {
-  const fastdb = getDb();
-  return new Promise((resolve, reject) => {
-    if (!noteId) {
-      reject(new Error('Note ID is required'));
-      return;
-    }
-
-    fastdb.transaction(tx => {
-      tx.executeSql(
-        `UPDATE notes SET title=? WHERE rowid = ?`,
-        [noteTitle, noteId],
-        (_, result) => {
-          console.log('NoteTitle updated successfully');
-          resolve(result);
-        },
-        (_, error) => {
-          console.error('Failed to update NoteTitle:', error);
-          reject(error);
-        },
-      );
-    });
   });
 };
 

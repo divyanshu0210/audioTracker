@@ -4,17 +4,12 @@ import {TouchableOpacity} from 'react-native';
 import {useNavigation} from '@react-navigation/native';
 import {createNewNote} from '../../notes/richDB';
 import {useAppState} from '../../contexts/AppStateContext';
+import {generateId, useNoteController} from '../../notes/useNoteController';
 
 const AddNewNoteBtn = forwardRef(
-  ({renderItem, onNoteAdded, beforeNoteCreated}, ref) => {
-    const navigation = useNavigation();
-    const {
-      activeItem,
-      setActiveNoteId,
-      setNotesList,
-      setMainNotesList,
-      setSelectedNote,
-    } = useAppState();
+  ({renderItem, onNoteAdded, beforeNoteCreated, disabled}, ref) => {
+    const {activeItem, setActiveNoteId} = useAppState();
+    const {createNoteInstant} = useNoteController();
 
     const isNoteSource = activeItem?.sourceType === 'note';
 
@@ -33,29 +28,11 @@ const AddNewNoteBtn = forwardRef(
     const handleAddNote = async () => {
       const proceed = beforeNoteCreated?.();
       if (proceed === false) return;
+      const noteId = generateId();
+      setActiveNoteId(noteId);
+      onNoteAdded?.(noteId);
 
-      try {
-        const newNoteId = await createNewNote(String(sourceId), sourceType);
-        if (newNoteId) {
-          const newNoteObject = {
-            rowid: newNoteId,
-            source_id: String(sourceId),
-            source_type: sourceType,
-            noteTitle: '',
-            content: '',
-            text_content: {title: ''},
-            created_at: new Date().toISOString(),
-            relatedItem: item,
-          };
-          setActiveNoteId(newNoteId);
-          setSelectedNote(newNoteObject);
-          setNotesList(prev => [newNoteObject, ...prev]);
-          setMainNotesList(prev => [newNoteObject, ...prev]);
-          onNoteAdded?.(newNoteId);
-        }
-      } catch (err) {
-        console.error('Failed to create note:', err);
-      }
+      createNoteInstant(String(sourceId), sourceType, item, noteId);
     };
 
     // Expose the function to parent
@@ -64,7 +41,7 @@ const AddNewNoteBtn = forwardRef(
     }));
 
     return renderItem ? (
-      <TouchableOpacity onPress={handleAddNote} activeOpacity={0.8}>
+      <TouchableOpacity onPress={handleAddNote} activeOpacity={0.8} disabled={disabled}>
         {renderItem()}
       </TouchableOpacity>
     ) : null;

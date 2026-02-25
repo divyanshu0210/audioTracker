@@ -29,10 +29,11 @@ import {initDatabase, resetDatabase} from '../database/database';
 import useDbStore from '../database/dbStore';
 import {setupFCM} from '../appNotification/appFCMNotification/fcmNotificationService';
 import {initializeBackupSystem} from '../backupAdv/backupNew';
+import { getOrCreateDefaultNotebookId } from '../database/C';
 
 const GoogleLoginScreen = ({navigation}) => {
   const [isLoading, setIsLoading] = useState(false);
-  const {setUserInfo} = useAppState();
+  const {setUserInfo, defaultNotebookId} = useAppState();
   const {initDb} = useDbStore();
 
   // Get Zustand store methods and state
@@ -95,6 +96,8 @@ const GoogleLoginScreen = ({navigation}) => {
       // await resetDatabase()
       await initDatabase();
       await initUserDatabase(userInfo.user.id);
+      const defaultNotebookIdValue = await getOrCreateDefaultNotebookId();
+      defaultNotebookId.current = defaultNotebookIdValue;
 
       setUserInfo(userInfo.user);
       // const ws = new WebSocketManager(userInfo.user.id, handleWSNotifications);

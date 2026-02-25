@@ -1,107 +1,122 @@
 import RNHTMLtoPDF from 'react-native-html-to-pdf';
-import RNFS from 'react-native-fs';
 import {Alert} from 'react-native';
-import Share from 'react-native-share';
-import { getImagesForNote, getNoteById } from '../richDB';
+import {getImagesForNote, getNoteById} from '../richDB';
 
 export const convertToPdf = async noteId => {
-  console.log(noteId)
   try {
-    // if (!note?.rowid || !note?.content) {
-    //   Alert.alert('Error', 'Invalid note data');
-    //   return;
-    // }  
     if (!noteId) {
-      Alert.alert('Error', 'Invalid note data');
+      Alert.alert('Error', 'Invalid note');
       return;
     }
 
-    // Fetch associated images from DB
-    const images = (await getImagesForNote(noteId)) || [];
-    const imageMap = {};
-    images.forEach(img => {
-      if (img?.id && img?.image_data) {
-        imageMap[img.id] = img.image_data; // Already base64 string with data:image/... prefix
-      }
-    });
-    
     const note = await getNoteById(noteId);
-    // Replace image placeholders in HTML content
-    const contentWithImages = note.content.replace(
-      /<img[^>]*data-image-id="([^"]*)"[^>]*>/g,
-      (match, imageId) =>
-        imageMap[imageId]
-          ? `<img src="${imageMap[imageId]}" style="max-width:100%;">`
-          : '', // skip missing images
+    if (!note) {
+      Alert.alert('Error', 'Note not found');
+      return;
+    }
+
+    // 1️⃣ Get all stored images
+const images = await getImagesForNote(noteId);
+let processedContent = note.content;
+
+images.forEach(img => {
+  if (!img?.id || !img?.image_data) return;
+
+  const regex = new RegExp(
+    `<img[\\s\\S]*?data-image-id=["']${img.id}["'][\\s\\S]*?>`,
+    'gi'
+  );
+
+  processedContent = processedContent.replace(
+    regex,
+    `<img src="${img.image_data}" style="max-width:100%; margin:20px 0;" />`
+  );
+});
+
+
+    // 3️⃣ Remove editor-only attributes
+    processedContent = processedContent
+      .replace(/contenteditable="false"/g, '')
+      .replace(/onclick="[^"]*"/g, '');
+
+    // 4️⃣ Remove invisible spacer buttons
+    processedContent = processedContent.replace(
+      /<button[^>]*>\.<\/button>/g,
+      '',
+    );
+
+    // 5️⃣ Convert timestamp buttons to styled spans (static)
+    processedContent = processedContent.replace(
+      /<button[^>]*>(.*?)<\/button>/g,
+      `<span style="
+          background:#e1f5fe;
+          color:#0288d1;
+          padding:4px 8px;
+          border-radius:12px;
+          font-weight:bold;
+          font-size:12px;
+          display:inline-block;
+          margin:8px 0;
+        ">$1</span>`,
     );
 
     const escapeHtml = str =>
-  str?.replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#039;');
+      str
+        ?.replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
 
-const safeTitle = escapeHtml(note.title || 'Untitled Note');
-    // Combine title and content
-const htmlContent = `
-  <html>
-    <head>
-      <meta charset="utf-8">
-      <title>${safeTitle}</title>
-      <style>
-        body {
-          font-family: 'Helvetica', sans-serif;
-          margin: 40px;
-          line-height: 1.6;
-          color: #333;
-        }
-        h1 {
-          font-size: 24px;
-          margin-bottom: 20px;
-          color: #222;
-        }
-        img {
-          display: block;
-          margin: 20px auto;
-          max-width: 100%;
-          height: auto;
-        }
-        p {
-          font-size: 16px;
-          margin-bottom: 16px;
-        }
-      </style>
-    </head>
-    <body>
-      <h1>${safeTitle}</h1>
-      ${contentWithImages}
-    </body>
-  </html>
-`;
+    const safeTitle = escapeHtml(note.title || 'Untitled Note');
 
+    const htmlContent = `
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <style>
+            body {
+              font-family: Helvetica, sans-serif;
+              margin: 40px;
+              line-height: 1.6;
+              color: #333;
+            }
+            h1 {
+              font-size: 24px;
+              margin-bottom: 20px;
+              border-bottom: 2px solid #eee;
+              padding-bottom: 8px;
+            }
+            img {
+              max-width: 100%;
+              height: auto;
+              display: block;
+              margin: 20px auto;
+            }
+            p {
+              font-size: 16px;
+              margin-bottom: 16px;
+            }
+          </style>
+        </head>
+        <body>
+          <h1>${safeTitle}</h1>
+          ${processedContent}
+        </body>
+      </html>
+    `;
 
-    // Create PDF
     const options = {
       html: htmlContent,
-      fileName: `notes_${Date.now()}`,
+      fileName: `note_${Date.now()}`,
       directory: 'Documents',
     };
 
     const file = await RNHTMLtoPDF.convert(options);
-    console.log('PDF saved at:', file.filePath);
 
     return file.filePath;
-
-    // // Share the PDF via WhatsApp
-    // await Share.open({
-    //   url: `file://${file.filePath}`,
-    //   type: 'application/pdf',
-    //   title: 'Share Notes PDF',
-    //   social: Share.Social.WHATSAPP, // Share to WhatsApp
-    // });
   } catch (error) {
-    console.error('Error creating PDF:', error);
-    Alert.alert('Error', 'Failed to create PDF file');
+    console.error('PDF Export Error:', error);
+    Alert.alert('Error', 'Failed to create PDF');
   }
 };

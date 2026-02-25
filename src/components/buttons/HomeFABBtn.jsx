@@ -26,6 +26,7 @@ import {fetchNotebooks} from '../../database/R';
 import useDbStore from '../../database/dbStore';
 import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
 import FontAwesome5 from 'react-native-vector-icons/FontAwesome5';
+import {generateId, useNoteController} from '../../notes/useNoteController';
 
 const colors = ['#FFECB3', '#FFAB91', '#A5D6A7', '#90CAF9', '#CE93D8'];
 
@@ -40,14 +41,12 @@ const HomeFABBtn = () => {
     setItems,
     setDeviceFiles,
     selectedCategory,
-    setNotebooks,
     setActiveNoteId,
-    setNotesList,
-    setMainNotesList,
-    setSelectedNote,
+    defaultNotebookId,
     addNBbottomSheetRef,
     mentorMenteeRequestBottomSheetRef,
   } = useAppState();
+  const {createNoteInstant} = useNoteController();
   const {setInserting} = useDbStore();
   //  Media ---------------------
   // Reset modal visibility on screen blur or keyboard hide
@@ -105,40 +104,21 @@ const HomeFABBtn = () => {
     }
   };
 
-  //  Media ---------------------
-
-  //-------------Notebook
-
-  //-------------Notebook
-
   //notes--------------
   const handleAddNoteButton = async () => {
     setInserting(true);
     try {
-      const defaultNotebookId = await getOrCreateDefaultNotebookId();
-      fetchNotebooks(setNotebooks);
-
-      const newNoteId = await createNewNote(String(defaultNotebookId), 'notebook');
-      if (newNoteId) {
-        setActiveNoteId(newNoteId);
-        const newNoteObject = {
-          rowid: newNoteId,
-          source_id: String(defaultNotebookId),
-          source_type: 'notebook',
-          noteTitle: '', // You can fetch title if needed
-          content: '', // Empty content initially
-          text_content: {title: ''},
-          created_at: new Date().toISOString(),
-          relatedItem: {
-            title: 'Default Notebook', // If you fetched notebook name
-          },
-        };
-        setNotesList(prev => [newNoteObject, ...prev]);
-        setMainNotesList(prev => [newNoteObject, ...prev]);
-        setSelectedNote(newNoteObject);
-        console.log('selectedNote', newNoteId);
-        navigation.navigate('NotesSectionWithBack');
-      }
+      const noteId = generateId();
+      setActiveNoteId(noteId);
+      createNoteInstant(
+        defaultNotebookId.current,
+        'notebook',
+        {
+          title: 'Default Notebook',
+        },
+        noteId,
+      );
+      navigation.navigate('NotesSectionWithBack');
     } catch (error) {
       console.error('Note creation failed:', error);
     } finally {

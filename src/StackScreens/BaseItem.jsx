@@ -20,7 +20,7 @@ import {ItemTypes, ScreenTypes} from '../contexts/constants';
 import BaseMenu from '../components/menu/BaseMenu';
 import NoteItem from '../notes/notesListing/NoteItem';
 import useAppStateStore from '../contexts/appStateStore';
-import { CategoryItem } from '../categories/CategoryItem';
+import {CategoryItem} from '../categories/CategoryItem';
 
 const BaseItem = ({type, item, isSelected, onSelect, onLongPress, screen}) => {
   const navigation = useNavigation();
@@ -194,12 +194,6 @@ const BaseItem = ({type, item, isSelected, onSelect, onLongPress, screen}) => {
   };
 
   const handlePress = () => {
-    setActiveItem({
-      sourceId: sourceId,
-      sourceType: item?.type || type,
-      item: item,
-    });
-
     if (onSelect) {
       onSelect(sourceId, type);
       return;
@@ -207,6 +201,12 @@ const BaseItem = ({type, item, isSelected, onSelect, onLongPress, screen}) => {
 
     const action = typeConfigMap[type]?.onPress;
     if (action) action();
+
+    setActiveItem({
+      sourceId: sourceId,
+      sourceType: item?.type || type,
+      item: item,
+    });
   };
 
   const renderItem = () => {

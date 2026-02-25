@@ -46,12 +46,14 @@ export const AppStateProvider = ({children}) => {
 
   const [homeReloadKey, setHomeReloadKey] = useState(0);
 
-
   //modals
   const [createCategoryModalVisible, setCreateCategoryModalVisible] =
     useState(false);
   const [addToCategoryModalVisible, setAddToCategoryModalVisible] =
     useState(false); // for add category model
+
+  const defaultNotebookId = useRef(null);
+
 
   useEffect(() => {
     const checkFilesExistence = async () => {
@@ -108,7 +110,7 @@ export const AppStateProvider = ({children}) => {
 
   useEffect(() => {
     console.log('active note id', activeNoteId);
-    console.log(selectedNote);
+    // console.log(selectedNote);
   }, [activeNoteId, selectedNote]);
 
   const filterAndSet = (type, id, screen = null) => {
@@ -177,6 +179,7 @@ export const AppStateProvider = ({children}) => {
         setNotebooks,
         editingNotebook,
         setEditingNotebook,
+        defaultNotebookId,
 
         selectedItems,
         setSelectedItems,
@@ -197,7 +200,8 @@ export const AppStateProvider = ({children}) => {
 
         filterAndSet,
 
-        homeReloadKey, setHomeReloadKey,
+        homeReloadKey,
+        setHomeReloadKey,
       }}>
       {children}
     </AppStateContext.Provider>

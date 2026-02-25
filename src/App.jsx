@@ -318,12 +318,12 @@ export default function App() {
           <MenuProvider>
             <NavigationContainer>
               <RootNavigator />
-
-              <Button
+{/* 
+             <Button
                 title="Debug"
                 onPress={() => {
                   copyDatabaseToAccessibleLocation();
-                }}></Button>
+                }}></Button>  */}
             </NavigationContainer>
           </MenuProvider>
         </GestureHandlerRootView>

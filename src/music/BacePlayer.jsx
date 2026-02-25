@@ -1,8 +1,4 @@
-import {
-  useFocusEffect,
-  useNavigation,
-  useRoute,
-} from '@react-navigation/native';
+import {useNavigation, useRoute} from '@react-navigation/native';
 import React, {useCallback, useEffect, useRef, useState} from 'react';
 import {
   ActivityIndicator,
@@ -23,20 +19,14 @@ import ViewShot from 'react-native-view-shot';
 import BottomMenu from '../components/bottomsheets/BottomMenu';
 import {handleExport} from '../components/menu/NoteMenuItems';
 import {useAppState} from '../contexts/AppStateContext';
-import {
-  fetchLatestWatchData,
-  fetchLatestWatchDataAllFields,
-} from '../database/R';
+import {fetchLatestWatchData} from '../database/R';
 import RichTextEditor from '../notes/richEditor/RichTextEditor';
 import VideoTracker from './videoTracker';
 import useSettingsStore from '../Settings/settingsStore';
 import VLCPlayerComponent from './VLCPlayer/VLCPlayerComponent';
 import YouTubePlayerComponent from './VLCPlayer/YouTubePlayerComponent ';
 import AddNewNoteBtn from '../components/buttons/AddNewNoteBtn';
-import {
-  prepareVideoReportPayload,
-  saveDatatoBackend,
-} from '../appMentorBackend/reportMgt';
+import {saveDatatoBackend} from '../appMentorBackend/reportMgt';
 // const {PipModule} = NativeModules;
 
 const isAudioFile = mimeType => {
@@ -613,7 +603,9 @@ const BacePlayer = () => {
                 )}
                 onNoteAdded={() => {
                   setShowNotes(true);
-                  !isMinimized && currentItem.driveId && togglePlayerSize();
+                  !isMinimized &&
+                    !currentItem?.type.startsWith('youtube') &&
+                    togglePlayerSize();
                   setIsCreatingNote(false);
                 }}
                 beforeNoteCreated={() => {
@@ -624,6 +616,7 @@ const BacePlayer = () => {
                   setIsCreatingNote(true);
                   return true;
                 }}
+                disabled={isCreatingNote}
               />
             </View>
           </Animated.View>
@@ -632,7 +625,7 @@ const BacePlayer = () => {
           {renderDragHandle()}
 
           {showNotes && (
-            <View style={{flex: 1, marginTop: isHidden ? 5 : 50}}>
+            <View style={{flex: 1, marginTop: isHidden ? 5 : 50 }}>
               <RichTextEditor
                 ref={notesSectionRef}
                 noteId={activeNoteId}

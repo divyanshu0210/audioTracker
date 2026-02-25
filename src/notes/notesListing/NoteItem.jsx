@@ -2,7 +2,7 @@ import React, {memo} from 'react';
 import {StyleSheet, Text, View} from 'react-native';
 import Entypo from 'react-native-vector-icons/Entypo';
 import FontAwesome from 'react-native-vector-icons/FontAwesome';
-import { getFileIcon } from '../../contexts/fileIconHelper';
+import {getFileIcon} from '../../contexts/fileIconHelper';
 
 const NoteItem = ({item}) => {
   const previewText = getPreviewText(item);
@@ -13,9 +13,11 @@ const NoteItem = ({item}) => {
   return (
     <View style={styles.contentContainer}>
       <View style={styles.noteContent}>
-        <View>{getFileIcon(item.source_type,22)}</View>
+        <View>{getFileIcon(item.source_type, 22)}</View>
         <View style={{marginLeft: 10, flex: 1}}>
-          <Text style={styles.noteTitle}>{item.noteTitle || 'Untitled Note'}</Text>
+          <Text style={styles.noteTitle}>
+            {item.noteTitle || 'Untitled Note'}
+          </Text>
           <Text style={styles.noteText}>{previewText}</Text>
           {item.relatedItem && (
             <Text style={styles.note} numberOfLines={1}>
@@ -31,25 +33,12 @@ const NoteItem = ({item}) => {
 export default memo(NoteItem);
 
 export const getPreviewText = item => {
-  htmlContent = item.content;
-  if (!htmlContent) return '...';
-
-  // Strip HTML tags to get plain text
-  const plainText = htmlContent
-    .replace(/<[^>]*>/g, ' ') // Remove HTML tags
-    .replace(/\s+/g, ' ') // Collapse multiple spaces
-    .trim();
-
-  if (!plainText) {
-    // Check if there's an image tag
-    if (/<img/i.test(htmlContent)) {
-      return '🖼️ Image Note';
-    }
-    return 'Empty Note';
+  const bodyText = item?.text_content.slice(item.noteTitle.length).trim();
+  const hasImage = item.content?.includes('data-image-id=');
+  if (!bodyText) {
+    return hasImage ? 'Image Note...' : 'Empty Note';
   }
-
-  // Return truncated text if it's too long
-  return plainText.length > 45 ? plainText.substring(0, 45) + '...' : plainText;
+  return bodyText.length > 45 ? bodyText.slice(0, 45) + '...' : bodyText;
 };
 
 const styles = StyleSheet.create({

@@ -7,41 +7,35 @@ import React, {
   useCallback,
 } from 'react';
 import {
-  View,
-  Text,
   Alert,
   ScrollView,
-  KeyboardAvoidingView,
-  ActivityIndicator,
   StyleSheet,
   TextInput,
   TouchableOpacity,
   Keyboard,
   ToastAndroid,
   SafeAreaView,
-  Animated,
-  Easing,
 } from 'react-native';
 import {RichEditor} from 'react-native-pell-rich-editor';
 import RichTextToolbar from './RichTextToolbar.jsx';
-import {
-  createNewNote,
-  deleteNoteById,
-  deleteUnusedImages,
-  getImagesForNote,
-  getNoteById,
-  initDatabase,
-  saveImage,
-  saveNote,
-  updateNote,
-  updateNoteTitle,
-} from '../richDB.js';
+import {deleteUnusedImages, getImagesForNote, getNoteById} from '../richDB.js';
 import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
-import {
-  getCurrentVideoTime,
-  seekVideoTo,
-} from '../../music/progressTrackingUtils.js';
+import {seekVideoTo} from '../../music/progressTrackingUtils.js';
+import {generateId, useNoteController} from '../useNoteController.jsx';
+import {useImagePersistence} from '../useImagePersistence.jsx';
+import {LoadingBar} from '../../components/LoadingBar.jsx';
 import {useAppState} from '../../contexts/AppStateContext.jsx';
+
+const IMAGE_PLACEHOLDER = `
+data:image/svg+xml;utf8,
+<svg xmlns='http://www.w3.org/2000/svg' width='100%' height='200'>
+  <rect width='100%' height='100%' fill='%23e0e0e0'/>
+  <text x='50%' y='50%' dominant-baseline='middle' text-anchor='middle'
+    fill='%239e9e9e' font-size='16'>
+    Loading image...
+  </text>
+</svg>
+`;
 
 const RichTextEditor = forwardRef(
   (
@@ -73,13 +67,15 @@ const RichTextEditor = forwardRef(
     const [isTitleFocused, setIsTitleFocused] = useState(false);
 
     const saveTimeout = useRef(null);
+    const titleTimeout = useRef(null);
+
     const [isEditable, setIsEditable] = useState(false);
 
     const [isToolbarVisible, setIsToolbarVisible] = useState(false);
 
-    const [loadingProgress, setLoadingProgress] = useState(0);
-    const progressAnim = useRef(new Animated.Value(0)).current;
-    const {setNotesList, setMainNotesList, setSelectedNote} = useAppState();
+    const {saveContent, saveTitle, deleteNote} = useNoteController();
+    const {saveImageInBackground} = useImagePersistence();
+    const {setActiveNoteId} = useAppState();
 
     // Expose methods via ref
     useImperativeHandle(ref, () => ({
@@ -92,14 +88,14 @@ const RichTextEditor = forwardRef(
     }));
 
     useEffect(() => {
-      if (noteId) {
-        loadNote(noteId);
-        // setIsEditable(false);
-      } else {
-        //fallback this will only happen noteparams had a currentNodeId null and texteditor aas opened
-        createNewNote(0, 'manual', '', '', '').then(setCurrentNoteId);
+      if (!noteId) return;
+      if (typeof noteId === 'string' && noteId.startsWith('temp_')) {
         setIsEditable(true);
+        setInitialContent('');
+        return;
       }
+
+      loadNote(noteId);
     }, [noteId]);
 
     useEffect(() => {
@@ -109,16 +105,24 @@ const RichTextEditor = forwardRef(
     }, []);
 
     const stripHtml = (html, includeTitle = true) => {
-      let text = html
-        .replace(/<[^>]*>/g, ' ')
-        .replace(/\s+/g, ' ')
-        .trim();
+      if (!html) return '';
 
+      let cleaned = html;
+      // 1️⃣ Remove full non-editable image blocks
+      cleaned = cleaned.replace(
+        /<div[^>]*contenteditable=["']false["'][\s\S]*?<\/div>/gi,
+        ' ',
+      );
+      // 2️⃣ Remove any remaining buttons
+      cleaned = cleaned.replace(/<button[\s\S]*?<\/button>/gi, ' ');
+      // 3️⃣ Remove ALL remaining tags
+      cleaned = cleaned.replace(/<[^>]+>/g, ' ');
+      // 4️⃣ Normalize spaces0
+      cleaned = cleaned.replace(/\s+/g, ' ').trim();
       if (includeTitle && latestTitleRef.current) {
-        text = `${latestTitleRef.current}\n\n${text}`;
+        return `${latestTitleRef.current}\n\n${cleaned}`;
       }
-
-      return text;
+      return cleaned;
     };
 
     const isNoteEmpty = (title, content) => {
@@ -146,79 +150,76 @@ const RichTextEditor = forwardRef(
         return;
       }
 
-      setIsLoading(true);
-      setLoadingProgress(0);
-
-      // Start progress animation
-      Animated.timing(progressAnim, {
-        toValue: 1,
-        duration: 1000,
-        easing: Easing.linear,
-        useNativeDriver: false,
-      }).start();
-
       try {
-        const updateProgress = progress => {
-          setLoadingProgress(progress);
-          progressAnim.setValue(progress);
-        };
-        updateProgress(0.2);
+        setIsLoading(true);
+
         const note = await getNoteById(id);
-        updateProgress(0.4);
         if (!note || typeof note !== 'object') {
           throw new Error('Note not found or invalid format');
         }
+        const content = note.content || '';
+        const title = note.title || '';
+        setTitle(title);
+        latestTitleRef.current = title;
 
-        const images = (await getImagesForNote(id)) || [];
-        updateProgress(0.6);
+        // Set the initial content before rendering the editor
+        richText.current?.setContentHTML(content);
+
+        // setInitialContent(content);
+        latestHtmlContentRef.current = content;
+
+        const isEmpty = isNoteEmpty(title, content);
+        setIsEditable(isEmpty);
+
+        setIsLoading(false);
+        setTimeout(() => {
+          hydrateImages(id, content);
+        }, 0);
+        // hydrateImages(id, content);
+      } catch (error) {
+        console.error('Error loading note:', error);
+        Alert.alert('Error', error.message || 'Failed to load note');
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    const hydrateImages = async (noteId, htmlContent) => {
+      try {
+        const images = await getImagesForNote(noteId);
+
+        if (!images?.length) return;
+
         const imageMap = {};
-
         images.forEach(img => {
           if (img?.id && img?.image_data) {
             imageMap[img.id] = img.image_data;
           }
         });
 
-        const content = note.content || '';
-        // console.log(content);
+        richText.current?.commandDOM(`
+          (function() {
+            const map = ${JSON.stringify(imageMap)};
+            document.querySelectorAll('img[data-image-id]').forEach(img => {
+              const id = img.getAttribute('data-image-id');
+              if (map[id]) {
+                img.src = map[id];
+                img.style.minHeight = "auto";
+                img.style.background = "transparent";
+              }
+            });
+          })();
+        `);
+
+        // 4️⃣ Cleanup unused images silently
         const usedImageIds = Array.from(
-          content.matchAll(/data-image-id="(\d+)"/g),
+          htmlContent.matchAll(/data-image-id="(\d+)"/g),
         ).map(match => parseInt(match[1], 10));
-
-        const contentWithImages = content.replace(
-          /<img[^>]*data-image-id="([^"]*)"[^>]*>/g,
-          (match, imageId) =>
-            imageMap[imageId]
-              ? `<img src="${imageMap[imageId]}" data-image-id="${imageId}" style="max-width:100%;">`
-              : match,
-        );
-        updateProgress(0.8);
-        const title = note.title || '';
-        setTitle(title);
-        latestTitleRef.current = title;
-
-        // Set the initial content before rendering the editor
-        setInitialContent(contentWithImages);
-        latestHtmlContentRef.current = contentWithImages;
-        // if (richText.current?.setContentHTML) {
-        //   richText.current.setContentHTML(contentWithImages);
-        // } else {
-        //   console.warn(
-        //     'richText ref not available or setContentHTML undefined',
-        //   );
-        // }
-
-        const isEmpty = isNoteEmpty(title, contentWithImages);
-        setIsEditable(isEmpty);
-
-        updateProgress(1);
-
-        await deleteUnusedImages(id, usedImageIds);
-      } catch (error) {
-        console.error('Error loading note:', error);
-        Alert.alert('Error', error.message || 'Failed to load note');
-      } finally {
-        setIsLoading(false);
+        setTimeout(() => {
+          deleteUnusedImages(noteId, usedImageIds);
+        }, 0);
+      } catch (err) {
+        console.log('Image hydration failed:', err);
       }
     };
 
@@ -228,45 +229,24 @@ const RichTextEditor = forwardRef(
       if (saveTimeout.current) {
         clearTimeout(saveTimeout.current);
       }
-
       saveTimeout.current = setTimeout(() => {
-        handleSaveNote(newHtmlContent);
+        requestAnimationFrame(() => {
+          handleSaveNote(newHtmlContent);
+        });
       }, 500);
     };
 
     const handleSaveNote = async content => {
-      if (!currentNoteId) return;
+      if (!currentNoteId || !isEditable) return;
 
       const {processedHtml, imageIdsInContent} = processHtmlContent(content);
       const textContent = stripHtml(processedHtml);
 
       try {
-        await updateNote(currentNoteId, processedHtml, textContent);
-        updateNoteInState(currentNoteId, {
-      content: processedHtml,
-      text_content: textContent,
-    });
+        saveContent(currentNoteId, processedHtml, textContent);
       } catch (error) {
         console.error('Failed to save note:', error);
       }
-    };
-
-    const updateNoteInState = (noteId, updatedFields) => {
-      setNotesList(prevNotes =>
-        prevNotes.map(note =>
-          note.rowid === noteId ? {...note, ...updatedFields} : note,
-        ),
-      );
-
-      setMainNotesList(prevNotes =>
-        prevNotes.map(note =>
-          note.rowid === noteId ? {...note, ...updatedFields} : note,
-        ),
-      );
-
-      setSelectedNote(prev =>
-        prev?.rowid === noteId ? {...prev, ...updatedFields} : prev,
-      );
     };
 
     const processHtmlContent = html => {
@@ -279,7 +259,15 @@ const RichTextEditor = forwardRef(
 
           if (imageId) {
             imageIdsInContent.add(imageId);
-            return `<img data-image-id="${imageId}" alt="image">`;
+            // return `<img data-image-id="${imageId}" alt="image">`;
+            return `
+          <img 
+            src="${IMAGE_PLACEHOLDER}"
+            data-image-id="${imageId}" 
+            alt="image"
+            style="max-width:100%; min-height:200px; background:#e0e0e0;"
+          />
+        `;
           }
 
           return fullMatch;
@@ -292,17 +280,17 @@ const RichTextEditor = forwardRef(
       };
     };
 
-    const handleTitleChange = async text => {
+    const handleTitleChange = text => {
       setTitle(text);
-      latestTitleRef.current = text; // Update the ref
-      if (currentNoteId) {
-        try {
-          await updateNoteTitle(currentNoteId, text);
-           updateNoteInState(currentNoteId, {noteTitle: text});
-        } catch (error) {
-          console.error('Failed to update title:', error);
-        }
+      latestTitleRef.current = text;
+
+      if (titleTimeout.current) {
+        clearTimeout(titleTimeout.current);
       }
+
+      titleTimeout.current = setTimeout(() => {
+        saveTitle(currentNoteId, text);
+      }, 500);
     };
 
     const handleImagePickerResult = async result => {
@@ -326,7 +314,7 @@ const RichTextEditor = forwardRef(
           : null;
 
         const base64Image = `data:${result.mime || 'image/jpeg'};base64,${result.data}`;
-        const imageId = await saveImage(currentNoteId, base64Image);
+        const imageId = generateId();
         let html = `
         <div><br></div>
         <div contenteditable="false" style="position: relative; display: inline-block;">
@@ -378,6 +366,7 @@ const RichTextEditor = forwardRef(
            >.</button>
            <div><br></div>`,
         );
+        saveImageInBackground(currentNoteId, base64Image, imageId);
       } catch (error) {
         console.error('Error saving image or inserting HTML:', error);
         Alert.alert('Error', 'Something went wrong while handling the image.');
@@ -414,17 +403,13 @@ const RichTextEditor = forwardRef(
           );
 
           if (isEmpty) {
-            deleteNoteById(currentNoteId);
-            setNotesList(prev =>
-              prev.filter(note => note.rowid !== currentNoteId),
-            );
-            setMainNotesList(prev =>
-              prev.filter(note => note.rowid !== currentNoteId),
-            );
+            deleteNote(currentNoteId);
+
             ToastAndroid.show('Empty note deleted', ToastAndroid.SHORT);
           } else {
             await handleSaveNote(currentContent);
           }
+          setActiveNoteId(null);
         }
       } catch (error) {
         console.error('Error in handleCloseNote:', error);
@@ -513,58 +498,39 @@ const RichTextEditor = forwardRef(
             returnKeyType="next"
             onSubmitEditing={() => richText.current?.focusContentEditor()}
           />
-
-          {/* Loading Progress Bar */}
-          {isLoading && (
-            <View style={styles.progressContainer}>
-              <Animated.View
-                style={[
-                  styles.progressBar,
-                  {
-                    width: progressAnim.interpolate({
-                      inputRange: [0, 1],
-                      outputRange: ['0%', '100%'],
-                    }),
-                  },
-                ]}
-              />
-            </View>
-          )}
-
-          {!isLoading && (
-            // <ZoomableNoteWrapper>
-            <RichEditor
-              ref={richText}
-              placeholder="Start typing..."
-              style={{
-                flex: 1,
-                minHeight: 200,
-                // borderWidth:1,
-                // borderColor:'red'
-              }}
-              initialContentHTML={initialContent}
-              useContainer={true}
-              disabled={!isEditable}
-              editorStyle={{backgroundColor: '#fefefe'}}
-              onCursorPosition={handleCursorPosition}
-              onChange={descriptionText => {
-                latestHtmlContentRef.current = descriptionText;
-                if (currentNoteId && !isLoading) {
-                  debouncedSaveNote(descriptionText);
-                }
-                if (onContentChange) {
-                  onContentChange(descriptionText);
-                }
-              }}
-              customCSS={`
+          {isLoading && <LoadingBar isInserting={isLoading} speed={800} />}
+          {/* {!isLoading && ( */}
+          <RichEditor
+            ref={richText}
+            placeholder="Start typing..."
+            style={{
+              flex: 1,
+              minHeight: 200,
+              // borderWidth:1,
+              // borderColor:'red'
+            }}
+            initialContentHTML={initialContent}
+            useContainer={true}
+            disabled={!isEditable}
+            editorStyle={{backgroundColor: '#fefefe'}}
+            onCursorPosition={handleCursorPosition}
+            onChange={descriptionText => {
+              latestHtmlContentRef.current = descriptionText;
+              if (currentNoteId && !isLoading) {
+                debouncedSaveNote(descriptionText);
+              }
+              if (onContentChange) {
+                onContentChange(descriptionText);
+              }
+            }}
+            customCSS={`
               .highlight {
                 background-color: yellow;
               }
               `}
-              onMessage={handleMessage}
-            />
-            // </ZoomableNoteWrapper>
-          )}
+            onMessage={handleMessage}
+          />
+          {/* )} */}
         </ScrollView>
 
         {!isEditable && (

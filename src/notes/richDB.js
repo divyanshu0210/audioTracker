@@ -1,12 +1,13 @@
 import { getDb } from "../database/database";
 
-export const createNewNote = ( sourceId, sourceType ) => {
+export const createNewNote = (noteId, sourceId, sourceType ) => {
+  console.log(noteId)
   const fastdb = getDb();
   return new Promise((resolve, reject) => {
     fastdb.transaction(tx => {
       tx.executeSql(
-        'INSERT INTO notes (source_id, source_type, title, content, text_content, created_at) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP);',
-        [sourceId, sourceType, '', '', ''],
+        'INSERT INTO notes (rowid,source_id, source_type, title, content, text_content, created_at) VALUES (?,?, ?, ?, ?, ?, CURRENT_TIMESTAMP);',
+        [noteId,sourceId, sourceType, '', '', ''],
         (_, result) => resolve(result.insertId),
         (_, error) => {
           console.error('Error creating note:', error);
@@ -26,7 +27,7 @@ export const updateNote = (noteRowId, content, textContent) => {
       tx.executeSql(
         'UPDATE notes SET content = ?, text_content = ?, created_at = CURRENT_TIMESTAMP  WHERE rowid = ?;',
         [ content, textContent, noteRowId],
-        resolve,
+        (_, result) => {resolve(result); console.log(`Note updated! ID: ${noteRowId}`);},
         (_, error) => {
           console.error('Error saving note:', error);
           reject(error);
@@ -44,22 +45,22 @@ export const updateNoteTitle = async (noteId, newTitle) => {
   return new Promise((resolve, reject) => {
     fastdb.transaction(tx => {
       tx.executeSql(
-        'UPDATE notes SET title = ? WHERE rowid = ?',
+        'UPDATE notes SET title = ?,created_at = CURRENT_TIMESTAMP WHERE rowid = ?',
         [newTitle, noteId],
-        (_, result) => resolve(result),
+        (_, result) => {resolve(result); console.log(`Note title updated! ID: ${noteId}, New Title: ${newTitle}`);},
         (_, error) => reject(error),
       );
     });
   });
 };
 
-export const saveImage = (noteRowId, imageData) => {
+export const saveImage = (imageId, noteRowId, imageData) => {
   const fastdb = getDb();
   return new Promise((resolve, reject) => {
     fastdb.transaction(tx => {
       tx.executeSql(
-        'INSERT INTO images (note_rowid, image_data) VALUES (?, ?);',
-        [noteRowId, imageData],
+        'INSERT INTO images (id,note_rowid, image_data) VALUES (?,?,?);',
+        [imageId,noteRowId, imageData],
         (_, result) => resolve(result.insertId),
         (_, error) => {
           console.error('Error saving image:', error);

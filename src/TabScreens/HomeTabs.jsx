@@ -12,6 +12,7 @@ import NotebookScreen from '../StackScreens/NoteBook/NoteBookScreen';
 import {useAppState} from '../contexts/AppStateContext';
 import useDbStore from '../database/dbStore';
 import {useFocusEffect} from '@react-navigation/core';
+import { LoadingBar } from '../components/LoadingBar';
 
 const Tab = createMaterialTopTabNavigator();
 
@@ -25,23 +26,6 @@ const HomeTabs = ({categoryId}) => {
   const {inserting, restoreInProgress} = useDbStore();
 
   const [loading, setLoading] = useState(true);
-
-  // Animated loader bar
-  const translateX = useRef(new Animated.Value(-100)).current;
-  useEffect(() => {
-    if (inserting) {
-      Animated.loop(
-        Animated.timing(translateX, {
-          toValue: 300,
-          duration: 1200,
-          useNativeDriver: true,
-        }),
-      ).start();
-    } else {
-      translateX.stopAnimation();
-      translateX.setValue(-100);
-    }
-  }, [inserting]);
 
   // Data loading functions
   const loadFilesFromDB = async (loader = true) => {
@@ -138,13 +122,7 @@ useEffect(() => {
   // Tab content wrapper
   const renderTabContent = (ScreenComponent, props) => (
     <>
-      {inserting && (
-        <View style={styles.loaderBarContainer}>
-          <Animated.View
-            style={[styles.loaderSegment, {transform: [{translateX}]}]}
-          />
-        </View>
-      )}
+      <LoadingBar isInserting={inserting} />
       <ScreenComponent {...props} />
     </>
   );
@@ -220,18 +198,3 @@ useEffect(() => {
 
 export default HomeTabs;
 
-const styles = StyleSheet.create({
-  loaderBarContainer: {
-    height: 2,
-    backgroundColor: '#e0e0e0',
-    overflow: 'hidden',
-    marginBottom: 5,
-    borderRadius: 2,
-  },
-  loaderSegment: {
-    height: 4,
-    width: 100,
-    backgroundColor: '#007aff',
-    borderRadius: 2,
-  },
-});

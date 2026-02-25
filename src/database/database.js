@@ -153,10 +153,9 @@ export const initDatabase = async () => {
 
     // ---------------------------------------- FTS5 for notes
 
-    
     tx.executeSql(
       `CREATE TABLE IF NOT EXISTS images (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id INTEGER PRIMARY KEY,
         note_rowid INTEGER,
         image_data TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -166,6 +165,7 @@ export const initDatabase = async () => {
       error => console.error('Error creating images table:', error),
     );
 
+   
     tx.executeSql(
       `CREATE VIRTUAL TABLE IF NOT EXISTS notes USING fts5(
             source_id,
@@ -215,8 +215,7 @@ export const initDatabase = async () => {
         console.error('Error creating video watch history table:', error),
     );
 
-
-    // Create categories table 
+    // Create categories table
     tx.executeSql(
       `CREATE TABLE IF NOT EXISTS categories (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -245,4 +244,3 @@ export const initDatabase = async () => {
     );
   });
 };
-

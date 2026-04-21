@@ -18,7 +18,7 @@ const NoteItem = ({item}) => {
           <Text style={styles.noteTitle}>
             {item.noteTitle || 'Untitled Note'}
           </Text>
-          <Text style={styles.noteText}>{previewText}</Text>
+          <Text style={styles.noteText} numberOfLines={1}>{previewText}</Text>
           {item.relatedItem && (
             <Text style={styles.note} numberOfLines={1}>
               {`${item.source_type}: ${relatedItem?.title}`}
@@ -36,7 +36,7 @@ export const getPreviewText = item => {
   const bodyText = item?.text_content.slice(item.noteTitle.length).trim();
   const hasImage = item.content?.includes('data-image-id=');
   if (!bodyText) {
-    return hasImage ? 'Image Note...' : 'Empty Note';
+    return hasImage ? 'Image Note...' : '...';
   }
   return bodyText.length > 45 ? bodyText.slice(0, 45) + '...' : bodyText;
 };

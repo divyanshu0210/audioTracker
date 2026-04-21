@@ -4,6 +4,10 @@ import {getSetting, setSetting} from '../database/settings';
 import useSettingsStore from '../Settings/settingsStore';
 import {getUserDatabase} from '../database/UserDatabaseInstance';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import useBackupStore from '../stores/backupStore';
+import {NativeModules} from 'react-native'
+
+const {BackupModule} = NativeModules
 
 export const compressDatabase = async (dbPath, backupFolder) => {
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
@@ -15,51 +19,22 @@ export const compressDatabase = async (dbPath, backupFolder) => {
   return zipPath;
 };
 
-export const getLastBackupTimestamp = async () => {
+export const saveBackupSyncTimestamp = async () => {
   try {
-    const timestamp = await getSetting('LAST_BACKUP_TIME');
-
-    if (!timestamp) return null;
-
-    // If timestamp is a valid date string, return a Date object or the string
-    // const parsedDate = new Date(timestamp);
-    // if (isNaN(parsedDate.getTime())) {
-    //   console.warn('Invalid LAST_BACKUP_TIME format in DB:', timestamp);
-    //   return null;
-    // }
-
-    return timestamp; // or return timestamp if you want the raw string
-    // return parsedDate.toISOString(); // or return timestamp if you want the raw string
-  } catch (error) {
-    console.error('Failed to get LAST_BACKUP_TIME:', error);
-    return null;
-  }
-};
-
-export const saveBackupTimestamp = async () => {
-  try {
-    const userId = await AsyncStorage.getItem('userId');
-    if (!userId) {
-      console.error('User ID not found in AsyncStorage');
-      throw new Error('User not logged in');
-    }
-
-    const nowUTC = new Date().toISOString().slice(0, 19).replace('T', ' '); // "YYYY-MM-DD HH:MM:SS"
+    
+    const nowUTC = new Date().toISOString()
+    // .slice(0, 19).replace('T', ' '); // "YYYY-MM-DD HH:MM:SS"
     const nowLocal = new Date().toLocaleString();
 
     const timestampData = {
-      LAST_BACKUP_TIME: nowUTC,
-      LAST_BACKUP_LOCAL_TIME: nowLocal,
+      LAST_BACKUP_SYNC_TIME: nowUTC,
+      LAST_BACKUP_SYNC_LOCAL_TIME: nowLocal,
     };
-    await AsyncStorage.setItem(
-      `BACKUP_TIMESTAMP_${userId}`,
-      JSON.stringify(timestampData),
-    );
 
     // --------------------------
     await useSettingsStore.getState().updateSettings(timestampData);
 
-    console.log(`🔒 Backup timestamp saved for user ${userId}:`, timestampData);
+    console.log(`🔒 Backup timestamp saved`, timestampData);
   } catch (error) {
     console.error('Failed to save backup timestamp:', error);
   }
@@ -72,7 +47,7 @@ export const prepareIncrementalBackup = async (
   try {
     const db = getUserDatabase().getDb() || getDb();
     const changes = {};
-    const effectiveBackupTime = lastBackupTime || '1970-01-01 00:00:00';
+    const effectiveBackupTime = lastBackupTime || '2000-01-01 00:00:00';
     console.log('Preparing incremental backup since', lastBackupTime);
 
     const defaultTables = tables || [

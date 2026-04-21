@@ -34,7 +34,11 @@ buildscript {
     repositories {
          maven {
             url("${project(':react-native-background-fetch').projectDir}/libs")
+            url('https://jitpack.io')
         }
+        google()
+        mavenCentral()
+
     }}
    
 }

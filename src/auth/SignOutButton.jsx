@@ -7,10 +7,9 @@ import { useAppState } from '../contexts/AppStateContext';
 import { closeUserDatabase } from '../database/userDBSetupService';
 import useDbStore from '../database/dbStore';
 import useSettingsStore from '../Settings/settingsStore';
-import AndroidBackgroundService from '../backgroundService/backgroundService';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { MenuOption } from 'react-native-popup-menu';
-import { performBackupTask } from '../backupAdv/backupNew';
+import useBackupStore from '../stores/backupStore';
 
 export default function SignOutButton({ label = 'LogOut' }) {
   const navigation = useNavigation();
@@ -22,10 +21,12 @@ export default function SignOutButton({ label = 'LogOut' }) {
     setLoading(true);
     try {
       if (settings.BACKUP_ENABLED) {
-        await performBackupTask();
+        // await performBackupTask();
+        await useBackupStore.getState().runManualBackup();
+        await useBackupStore.getState().disableBackup(false);
       }
 
-      AndroidBackgroundService.init(true);
+      // AndroidBackgroundService.init(true);
 
       await GoogleSignin.signOut();
       closeDb();
@@ -33,8 +34,9 @@ export default function SignOutButton({ label = 'LogOut' }) {
       setItems([]);
       setDriveLinksList([]);
       setSelectedItems([])
-      await AsyncStorage.setItem('isLoggedIn', JSON.stringify(false));
       await AsyncStorage.removeItem('userId');
+      //also remove the user from set preference of backup module to prevent backup issues when another user logs in
+      await useBackupStore.getState().setPreference('userId', null);
 
       navigation.dispatch(
         CommonActions.reset({

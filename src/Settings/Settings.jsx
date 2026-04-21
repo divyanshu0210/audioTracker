@@ -7,10 +7,10 @@ import {
   Animated,
   Switch,
   ActivityIndicator,
+  NativeModules,
 } from 'react-native';
 import {Button} from 'react-native-paper';
 import {Picker} from '@react-native-picker/picker';
-import AndroidBackgroundService from '../backgroundService/backgroundService';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {ScrollView} from 'react-native-gesture-handler';
 import useSettingsStore from './settingsStore';
@@ -18,10 +18,19 @@ import SignOutButton from '../auth/SignOutButton';
 import {useNavigation} from '@react-navigation/core';
 import useDbStore from '../database/dbStore';
 import {performBackupTask} from '../backupAdv/backupNew';
-
+import useBackupStore from '../stores/backupStore';
 const SettingsScreen = () => {
   const navigation = useNavigation();
   const {settings, updateSettings} = useSettingsStore();
+
+  const {
+  loading,
+  lastBackupTime,
+  toggleBackup,
+  runManualBackup,
+  checkBackupStatus,
+} = useBackupStore();
+  
   const [watchTime, setWatchTime] = useState(
     settings.TARGET_WATCH_TIME.toString(),
   );
@@ -31,41 +40,6 @@ const SettingsScreen = () => {
 
   const [notificationOpacity] = useState(new Animated.Value(0));
   const {backupInProgress} = useDbStore();
-
-  const [lastBackupTime, setLastBackupTime] = useState('Never');
-
-  const loadBackupTime = async () => {
-    try {
-      const userId = await AsyncStorage.getItem('userId');
-      const data = await AsyncStorage.getItem(`BACKUP_TIMESTAMP_${userId}`);
-      if (data) {
-        const parsed = JSON.parse(data);
-        setLastBackupTime(parsed.LAST_BACKUP_LOCAL_TIME || 'Never');
-      } else {
-        setLastBackupTime('Never');
-      }
-    } catch (err) {
-      console.error('Error loading backup time:', err);
-      setLastBackupTime('Never');
-    }
-  };
-  useEffect(() => {
-    loadBackupTime();
-  }, []);
-
-  const handleBackupEnabledToggle = async value => {
-    const updated = {
-      BACKUP_ENABLED: value,
-      LAST_BACKUP_TIME: '1970-01-01 00:00:00',
-      LAST_BACKUP_LOCAL_TIME: '1970-01-01 00:00:00',
-    };
-    updateSettings(updated);
-    await AsyncStorage.removeItem(
-      'BACKUP_TIMESTAMP_' + (await AsyncStorage.getItem('userId')),
-    );
-    loadBackupTime();
-    AndroidBackgroundService.toggleBackupTask(updated);
-  };
 
   const showNotification = () => {
     Animated.sequence([
@@ -162,10 +136,7 @@ const SettingsScreen = () => {
         {/* Manual backup button */}
         <Button
           mode="contained"
-          onPress={async () => {
-            await performBackupTask();
-            await loadBackupTime(); // refresh the timestamp shown on screen
-          }}
+        onPress={runManualBackup}
           style={[styles.saveButton, {marginTop: 10}]}
           labelStyle={styles.buttonText}>
           {backupInProgress ? (
@@ -173,6 +144,21 @@ const SettingsScreen = () => {
           ) : (
             'Backup'
           )}
+        </Button>
+
+        <Button
+          mode="contained"
+          onPress={checkBackupStatus}
+          style={[styles.saveButton, {marginTop: 10}]}
+          labelStyle={styles.buttonText}>
+          Check Status
+        </Button>      
+        <Button
+          mode="contained"
+          onPress={() => navigation.navigate('BackupExplorerScreen')}
+          style={[styles.saveButton, {marginTop: 10}]}
+          labelStyle={styles.buttonText}>
+          Explore Backups
         </Button>
 
         {/* Backup toggle */}
@@ -185,7 +171,8 @@ const SettingsScreen = () => {
             trackColor={{false: '#bdbdbd', true: '#b2dfdb'}}
             thumbColor={settings.BACKUP_ENABLED ? '#00796b' : '#eeeeee'}
             value={settings.BACKUP_ENABLED}
-            onValueChange={handleBackupEnabledToggle}
+            disabled={loading}
+            onValueChange={toggleBackup}
           />
         </View>
       </View>

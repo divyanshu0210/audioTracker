@@ -4,7 +4,7 @@ import {createDrawerNavigator} from '@react-navigation/drawer';
 import {NavigationContainer, useNavigation} from '@react-navigation/native';
 import {createStackNavigator} from '@react-navigation/stack';
 import React, {useEffect} from 'react';
-import {ActivityIndicator, Button, StyleSheet, Text, View} from 'react-native';
+import {ActivityIndicator, Button, NativeEventEmitter, NativeModules, StyleSheet, Text, View} from 'react-native';
 import {GestureHandlerRootView} from 'react-native-gesture-handler';
 import {MenuProvider} from 'react-native-popup-menu';
 import 'react-native-reanimated';
@@ -51,10 +51,14 @@ import MainHeader from './components/headers/MainHeader';
 import SearchWrapper from './Search/SearchWrapper';
 import FullHistoryScreen from './history/FullHistoryScreen';
 import CategoriesView from './categories/CategoriesView';
-import { initDatabase, resetDatabase } from './database/database';
+import {initDatabase, resetDatabase} from './database/database';
+import BackupExplorerScreen from './Settings/BackupExplorerScreen';
+import { runBackupDriveSync } from './backgroundService/newBackgroundService';
 
 const Stack = createStackNavigator();
 const Tab = createBottomTabNavigator();
+
+const emitter = new NativeEventEmitter(NativeModules.BackupModule);
 
 function RootNavigator() {
   useLinkHandler(); // Now has access to navigation + context
@@ -81,6 +85,16 @@ function RootNavigator() {
 
     return () => unsubscribe(); // Cleanup the event listener
   }, [navigation]);
+
+  useEffect(() => {
+    const sub = emitter.addListener('backupCompleted', async () => {
+      console.log('Backup completed in background, syncing to Drive...');
+      runBackupDriveSync('Native Module Event');
+
+    });
+
+    return () => sub.remove();
+  }, []);
 
   return (
     <>
@@ -176,6 +190,11 @@ function RootNavigator() {
         <Stack.Screen
           name="SearchWrapper"
           component={SearchWrapper}
+          options={{headerShown: false, unmountOnBlur: true}}
+        />
+        <Stack.Screen
+          name="BackupExplorerScreen"
+          component={BackupExplorerScreen}
           options={{headerShown: false, unmountOnBlur: true}}
         />
       </Stack.Navigator>
@@ -318,8 +337,7 @@ export default function App() {
           <MenuProvider>
             <NavigationContainer>
               <RootNavigator />
-{/* 
-             <Button
+             {/* <Button
                 title="Debug"
                 onPress={() => {
                   copyDatabaseToAccessibleLocation();

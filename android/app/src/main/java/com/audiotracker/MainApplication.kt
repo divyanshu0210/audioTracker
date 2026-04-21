@@ -24,6 +24,7 @@ class MainApplication : Application(), ReactApplication {
               // add(MyReactNativePackage())
               //add(ShellPackage()) 
               add(FileMetaPackage())
+              add(BackupModulePackage())
              //  add(RNBackgroundFetchPackage())
               //add(PipPackage())
             }

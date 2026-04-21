@@ -8,6 +8,7 @@ import {
   ActivityIndicator,
   Alert,
   Image,
+  NativeModules,
   SafeAreaView,
   StyleSheet,
   Text,
@@ -18,7 +19,6 @@ import useSettingsStore from '../Settings/settingsStore';
 import {syncUserToBackend} from '../appMentorBackend/userMgt';
 import WebSocketManager from '../appWebSocket/WebSocketManager';
 import {handleWSNotifications} from '../appNotification/notificationsMgt';
-import AndroidBackgroundService from '../backgroundService/backgroundService';
 import {
   checkAndPromptRestore,
   hasRestoreCheckCompleted,
@@ -28,8 +28,10 @@ import {initUserDatabase} from '../database/UserDatabaseInstance';
 import {initDatabase, resetDatabase} from '../database/database';
 import useDbStore from '../database/dbStore';
 import {setupFCM} from '../appNotification/appFCMNotification/fcmNotificationService';
-import {initializeBackupSystem} from '../backupAdv/backupNew';
 import { getOrCreateDefaultNotebookId } from '../database/C';
+import useBackupStore from '../stores/backupStore';
+import { requestPermissions } from '../backgroundService/newBackgroundService';
+const {BackupModule} = NativeModules;
 
 const GoogleLoginScreen = ({navigation}) => {
   const [isLoading, setIsLoading] = useState(false);
@@ -38,6 +40,7 @@ const GoogleLoginScreen = ({navigation}) => {
 
   // Get Zustand store methods and state
   const {initialize: initializeSettings} = useSettingsStore();
+  const {appStartupBackupRoutine} = useBackupStore();
 
   useEffect(() => {
     GoogleSignin.configure({
@@ -88,8 +91,8 @@ const GoogleLoginScreen = ({navigation}) => {
   // Initialize database for user and handle user session
   const handleUserSession = async (userInfo, sessionType = 'restore') => {
     if (!userInfo) return;
-    await AsyncStorage.setItem('isLoggedIn', JSON.stringify(true));
     await AsyncStorage.setItem('userId', userInfo.user.id);
+    await BackupModule.setPreference("userId", userInfo.user.id);
     try {
       // Initialize user-specific database
       const db = initDb(userInfo.user.id);
@@ -111,10 +114,8 @@ const GoogleLoginScreen = ({navigation}) => {
         checkAndPromptRestore(userInfo.user.id);
       }
       const settings = await initializeSettings(); // initialises the store with default/stored settings
-      // Creates backup directory
-      initializeBackupSystem();
-      await AndroidBackgroundService.init();
-      await AndroidBackgroundService.ensureAndSyncBackupBGService(settings);
+       const granted = await requestPermissions();
+      appStartupBackupRoutine();
 
       navigation.replace('MainApp', {user: userInfo.user});
     } catch (error) {

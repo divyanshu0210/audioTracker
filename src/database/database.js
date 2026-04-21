@@ -72,6 +72,20 @@ export const initDatabase = async () => {
     // });
 
     tx.executeSql(
+    `CREATE TABLE IF NOT EXISTS backup_files (
+          file TEXT PRIMARY KEY,
+          level INTEGER NOT NULL,
+          start_epoch INTEGER NOT NULL,
+          end_epoch INTEGER NOT NULL,
+          state TEXT NOT NULL DEFAULT 'local' CHECK (state IN ('local', 'synced', 'ghost')),
+          drive_id TEXT UNIQUE
+      );`,
+    [],
+    () => console.log('Backup table created successfully'),
+    error => console.error('Error creating Backup table:', error),
+    );
+
+    tx.executeSql(
       `CREATE TABLE IF NOT EXISTS items (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
 

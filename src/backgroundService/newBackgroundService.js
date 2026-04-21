@@ -1,154 +1,49 @@
 import BackgroundService from 'react-native-background-actions';
-import { AppState } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { performBackupTask } from '../backupAdv/backupNew';
-import { getSetting } from '../database/settings';
+import { syncBackupsToDrive } from '../backupAdv/backupNew';
+import { PermissionsAndroid } from 'react-native';
 
-/* ---------------------------------- */
-/* Constants                           */
-/* ---------------------------------- */
+const oneTimeTask = async () => {
+  try {
+    console.log('[SERVICE] Running one-time backup sync');
 
-const BACKUP_INTERVAL_MS = 5 * 60 * 1000; 
+    await syncBackupsToDrive();
 
-/* ---------------------------------- */
-/* Internal State                      */
-/* ---------------------------------- */
-
-let autoBackupEnabled = true;
-let isBackupRunning = false;
-let backupInterval = null;
-let appStateSubscription = null;
-
-/* ---------------------------------- */
-/* Auto-backup setting                 */
-/* ---------------------------------- */
-
-export async function loadAutoBackupSetting() {
-  const value = await getSetting('BACKUP_ENABLED') ??  true;
-  autoBackupEnabled = value ; // default ON
-  return autoBackupEnabled;
-}
-
-export async function toggleAutoBackupEnabled(enabled) {
-  autoBackupEnabled = enabled;
-  if (enabled) {
-    registerBackupAppStateListener();
-    startForegroundBackupInterval();
-  } else {
-    stopForegroundBackupInterval();
-    unregisterBackupAppStateListener();
+    console.log('[SERVICE] Task finished');
+  } catch (e) {
+    console.error('[SERVICE] Error:', e);
+  } finally {
+    // 🔴 VERY IMPORTANT: stop service manually
+    await BackgroundService.stop();
   }
-}
+};
 
-export function isAutoBackupEnabled() {
-  return autoBackupEnabled;
-}
+const options = {
+  taskName: 'Backup Sync',
+  taskTitle: 'Syncing backups',
+  taskDesc: 'Uploading your data to Drive',
+  taskIcon: {
+    name: 'ic_launcher',
+    type: 'mipmap',
+  },
+  color: '#00ff00',
+};
 
-/* ---------------------------------- */
-/* Backup runner (one-shot service)    */
-/* ---------------------------------- */
-
-async function runBackupWithService(reason) {
-  if (!autoBackupEnabled) {
-    console.log('[Backup] Skipped (auto-backup OFF)');
+export const runBackupDriveSync = async (source) => {
+  if (BackgroundService.isRunning()) {
+    console.log('[SERVICE] Already running, skipping');
     return;
   }
+  
+  console.log('[SERVICE] Backup Sync Started By',source);
+  await BackgroundService.start(oneTimeTask, options);
+};
 
-  if (isBackupRunning) return;
-
-  isBackupRunning = true;
-  console.log(`[Backup] Triggered (${reason})`);
-
-  const task = async () => {
-    try {
-      await performBackupTask();
-    } catch (e) {
-      console.log('[BackupTask] Failed:', e);
-    } finally {
-      isBackupRunning = false;
-      await BackgroundService.stop();
-      console.log('[Backup] Finished');
+export const requestPermissions = async () => {
+    if (Platform.OS === 'android') {
+      const granted = await PermissionsAndroid.request(
+        PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS
+      );
+      return granted === PermissionsAndroid.RESULTS.GRANTED;
     }
+    return true;
   };
-
-  try {
-    await BackgroundService.start(task, {
-      taskName: 'Backup',
-      taskTitle: 'Data Backup',
-      taskDesc: 'Syncing data to Google Drive...',
-      taskIcon: { name: 'ic_launcher', type: 'mipmap' },
-    });
-  } catch (e) {
-    isBackupRunning = false;
-    console.log('[Backup] Error starting service', e);
-  }
-}
-
-
-/* ---------------------------------- */
-/* Foreground interval                 */
-/* ---------------------------------- */
-
-export function startForegroundBackupInterval() {
-  if (!autoBackupEnabled || backupInterval) return;
-
-  backupInterval = setInterval(() => {
-    runBackupWithService('foreground-interval');
-  }, BACKUP_INTERVAL_MS);
-}
-
-export function stopForegroundBackupInterval() {
-  if (backupInterval) {
-    clearInterval(backupInterval);
-    backupInterval = null;
-  }
-}
-
-/* ---------------------------------- */
-/* AppState listener                   */
-/* ---------------------------------- */
-
-export function registerBackupAppStateListener() {
-  if (!autoBackupEnabled || appStateSubscription) return;
-
-  let state = AppState.currentState;
-
-  appStateSubscription = AppState.addEventListener('change', (next) => {
-    if (!autoBackupEnabled) return;
-    // App opened
-    if (state.match(/inactive|background/) && next === 'active') {
-      runBackupWithService('app-open');
-      startForegroundBackupInterval();
-    }
-    // App closing
-    if (state === 'active' && next.match(/inactive|background/)) {
-      runBackupWithService('app-close');
-      stopForegroundBackupInterval();
-    }
-    state = next;
-  });
-}
-
-export function unregisterBackupAppStateListener() {
-  if (appStateSubscription) {
-    appStateSubscription.remove();
-    appStateSubscription = null;
-  }
-}
-
-/* ---------------------------------- */
-/* App startup / cleanup helpers       */
-/* ---------------------------------- */
-
-export async function initAutoBackupSystem() {
-  const enabled = await loadAutoBackupSetting();
-  if (enabled) {
-    registerBackupAppStateListener();
-    startForegroundBackupInterval();
-  }
-}
-
-export function shutdownAutoBackupSystem() {
-  stopForegroundBackupInterval();
-  unregisterBackupAppStateListener();
-}

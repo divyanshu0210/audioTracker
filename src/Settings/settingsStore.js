@@ -9,8 +9,8 @@ const useSettingsStore = create((set, get) => ({
     BACKUP_ENABLED: true,
     BACKUP_TASK_SCHEDULED: true,
 
-    LAST_BACKUP_TIME: null,
-    LAST_BACKUP_LOCAL_TIME: null,
+    LAST_BACKUP_SYNC_TIME: null,
+    LAST_BACKUP_SYNC_LOCAL_TIME: null,
 
     //special backup control
     SPECIAL_BACKUP_ALLOWED: true,
@@ -42,8 +42,8 @@ const useSettingsStore = create((set, get) => ({
       TARGET_NEW_WATCH_TIME: 30,
       BACKUP_ENABLED: true,
       BACKUP_TASK_SCHEDULED: true,
-      LAST_BACKUP_TIME: null,
-      LAST_BACKUP_LOCAL_TIME: null,
+      LAST_BACKUP_SYNC_TIME: null,
+      LAST_BACKUP_SYNC_LOCAL_TIME: null,
       SPECIAL_BACKUP_ALLOWED: true,
       LAST_SPECIAL_BACKUP_KEY: null,
       autoplay: true,

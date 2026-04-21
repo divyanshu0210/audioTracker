@@ -1,64 +1,108 @@
-// backup.js - Hierarchical backup strategy for React Native with calendar-based timing
-// Features:
-// - Daily incremental backups, weekly/monthly/yearly differential backups.
-// - Clears all lower-level queues when a higher-level backup is created (locally and on Drive).
-// - Creates local folders (daily, weekly, monthly, yearly) and Google Drive folders (daily, weekly, monthly, yearly, images).
-// - Queues non-image backups locally in mirrored folder structure during offline, syncs on reconnect.
-// - Images are incrementally backed up only on reconnect, no local storage.
-// - Modularized to remove redundancy.
-// - Assumes SQLite database with created_at/updated_at columns; deletions need separate handling.
 import RNFetchBlob from 'react-native-blob-util';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {GoogleSignin} from '@react-native-google-signin/google-signin';
 import NetInfo from '@react-native-community/netinfo';
-import BackgroundFetch from 'react-native-background-fetch';
+import {saveBackupSyncTimestamp} from './backupUtils';
+import useBackupStore from '../stores/backupStore';
+import useSettingsStore from '../Settings/settingsStore';
+import {NativeModules} from 'react-native';
 import {
-  getUserDatabase,
-  initUserDatabase,
-} from '../database/UserDatabaseInstance';
-import {getDb} from '../database/database';
+  getLocalFiles,
+  getGhostFiles,
+  updateState,
+  deleteFile,
+} from './BackupDbService';
 import useDbStore from '../database/dbStore';
-import {
-  getLastBackupTimestamp,
-  prepareIncrementalBackup,
-  saveBackupTimestamp,
-} from './backupUtils';
-import {verifyGoogleDriveUpload} from './googleDriveBackupUtils';
-import {getSetting,setSetting} from '../database/settings';
+import {runBackupDriveSync} from '../backgroundService/newBackgroundService';
 
-// Constants
+// =========================
+// CONSTANTS
+// =========================
 const BACKUP_FOLDER = `${RNFetchBlob.fs.dirs.DocumentDir}/backups`;
 const DRIVE_MAIN_FOLDER_NAME = 'AppBackups';
-const DRIVE_FOLDERS = {
-  daily: 'daily',
-  weekly: 'weekly',
-  monthly: 'monthly',
-  yearly: 'yearly',
-  images: 'images',
-};
-export const LOCAL_BACKUP_FOLDERS = {
-  daily: `${BACKUP_FOLDER}/daily`,
-  weekly: `${BACKUP_FOLDER}/weekly`,
-  monthly: `${BACKUP_FOLDER}/monthly`,
-  yearly: `${BACKUP_FOLDER}/yearly`,
-  images: `${BACKUP_FOLDER}/images`, // Defined for consistency, not used
+const IMAGE_DIR = `${BACKUP_FOLDER}/images`;
+
+// =========================
+// AUTH
+// =========================
+const getAccessToken = async () => {
+  const {accessToken} = await GoogleSignin.getTokens();
+  return accessToken;
 };
 
-// Helper: Get or create Google Drive folder
+// =========================
+// RETRY UTILITY
+// =========================
+const retry = async (fn, retries = 3) => {
+  let lastError;
+
+  for (let i = 0; i < retries; i++) {
+    try {
+      return await fn();
+    } catch (e) {
+      lastError = e;
+      const status = e?.status || e?.response?.status;
+
+      if (status && status >= 400 && status < 500 && status !== 429) {
+        console.error('[RETRY] Non-retriable error:', status);
+        throw e;
+      }
+
+      const delay = Math.pow(2, i) * 1000 + Math.random() * 300;
+      console.warn(`[RETRY] Attempt ${i + 1} failed. Retrying in ${delay}ms`);
+      await new Promise(r => setTimeout(r, delay));
+    }
+  }
+
+  console.error('[RETRY] All attempts failed');
+  throw lastError;
+};
+
+// =========================
+// CONCURRENCY RUNNER
+// =========================
+const runWithLimit = async (tasks, limit = 3) => {
+  const queue = [...tasks];
+
+  const workers = Array.from({length: limit}).map(async (_, index) => {
+    while (queue.length) {
+      const task = queue.shift();
+      if (task) {
+        try {
+          await task();
+        } catch (e) {
+          console.error(`[WORKER ${index}] Task failed:`, e);
+        }
+      }
+    }
+  });
+
+  await Promise.all(workers);
+};
+
+// =========================
+// DRIVE FOLDER MANAGEMENT
+// =========================
 async function getOrCreateDriveFolder(folderName, parentId = 'root') {
   try {
-    const {accessToken} = await GoogleSignin.getTokens();
+    const accessToken = await getAccessToken();
+
     const query = `name='${folderName}' and mimeType='application/vnd.google-apps.folder' and trashed=false and '${parentId}' in parents`;
+
     const response = await RNFetchBlob.fetch(
       'GET',
       `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&fields=files(id,name)`,
       {Authorization: `Bearer ${accessToken}`},
     );
+
     const {files} = response.json();
-    if (files && files.length > 0) {
-      console.log(`Folder '${folderName}' found: ${files[0].id}`);
+
+    if (files?.length > 0) {
+      console.log(`[DRIVE] Folder found: ${folderName} (${files[0].id})`);
       return files[0].id;
     }
+
+    console.log(`[DRIVE] Creating folder: ${folderName}`);
 
     const createResponse = await RNFetchBlob.fetch(
       'POST',
@@ -73,224 +117,48 @@ async function getOrCreateDriveFolder(folderName, parentId = 'root') {
         parents: [parentId],
       }),
     );
+
     const newFolder = createResponse.json();
-    console.log(`Created folder '${folderName}': ${newFolder.id}`);
+
+    console.log(`[DRIVE] Folder created: ${folderName} (${newFolder.id})`);
     return newFolder.id;
   } catch (error) {
-    console.error(`Error getting/creating folder '${folderName}':`, error);
+    console.error(`[DRIVE] Folder error (${folderName}):`, error);
     throw error;
   }
 }
 
-export const initializeBackupSystem = async () => {
-  await ensureFolderExists(BACKUP_FOLDER, 'backup');
-
-  for (const [key, path] of Object.entries(LOCAL_BACKUP_FOLDERS)) {
-    await ensureFolderExists(path, `${key} backup`);
+export async function initializeDriveFolders() {
+  const net = await NetInfo.fetch();
+  if (!net.isConnected || !net.isInternetReachable) {
+    return;
   }
+  console.log('[INIT] Initializing Drive folders');
 
-  await initializeDriveFolders();
-};
+  const root = await getOrCreateDriveFolder(DRIVE_MAIN_FOLDER_NAME);
+  const images = await getOrCreateDriveFolder('images', root);
 
-const ensureFolderExists = async (folderPath, label) => {
-  const exists = await RNFetchBlob.fs.exists(folderPath);
-  if (!exists) {
-    await RNFetchBlob.fs.mkdir(folderPath);
-    console.log(`📁 Created ${label} folder at:`, folderPath);
-  } else {
-    console.log(`📁 ${label} folder already exists at:`, folderPath);
-  }
-};
+  const data = {root, images};
 
-// Initialize Drive folders
-async function initializeDriveFolders() {
-  const mainFolderId = await getOrCreateDriveFolder(DRIVE_MAIN_FOLDER_NAME);
-  const folderIds = {};
-  for (const [key, name] of Object.entries(DRIVE_FOLDERS)) {
-    folderIds[key] = await getOrCreateDriveFolder(name, mainFolderId);
-  }
-  await AsyncStorage.setItem('driveFolderIds', JSON.stringify(folderIds));
-  console.log('Drive folders initialized:', folderIds);
-  return folderIds;
+  await AsyncStorage.setItem('driveFolderIds', JSON.stringify(data));
+
+  console.log('[INIT] Folder IDs stored:', data);
+
+  return data;
 }
 
-// Initialize local folders 
-async function initializeLocalFolders() {
-  for (const [key, path] of Object.entries(LOCAL_BACKUP_FOLDERS)) {
-    if (!(await RNFetchBlob.fs.exists(path))) {
-      await RNFetchBlob.fs.mkdir(path);
-      console.log(`Created local folder: ${path}`);
-    } else {
-      console.log(`Local folder already exists: ${path}`);
-    }
-  }
-}
-
-// Get Drive folder ID
-async function getDriveFolderId(type) {
-  const stored = await AsyncStorage.getItem('driveFolderIds');
-  if (!stored) {
-    const folderIds = await initializeDriveFolders();
-    return folderIds[type];
-  }
-  const folderIds = JSON.parse(stored);
-  return folderIds[type];
-}
-
-// Calendar-based helpers
-function isStartOfWeek(date = new Date()) {
-  return date.getDay() === 0; // Sunday
-}
-function isStartOfMonth(date = new Date()) {
-  return date.getDate() === 1;
-}
-function isStartOfYear(date = new Date()) {
-  return date.getMonth() === 0 && date.getDate() === 1;
-}
-function getPreviousWeekStartToToday(date = new Date()) {
-  const end = new Date(date);
-  end.setHours(23, 59, 59, 999);
-
-  // Nominal start = 7 days before
-  const start = new Date(end);
-  start.setDate(end.getDate() - 7);
-  start.setHours(0, 0, 0, 0);
-
-  // Start of current month
-  const monthStart = new Date(end.getFullYear(), end.getMonth(), 1);
-  monthStart.setHours(0, 0, 0, 0);
-
-  // Prevent spilling into previous month
-  if (start < monthStart) {
-    start.setTime(monthStart.getTime());
-  }
-
-  return {
-    start: start.toISOString().slice(0, 19).replace('T', ' '),
-    end: end.toISOString().slice(0, 19).replace('T', ' '),
-  };
-}
-function getPreviousMonthStartToToday(date = new Date()) {
-  // Start of previous month
-  const start = new Date(date.getFullYear(), date.getMonth() - 1, 1);
-  start.setHours(0, 0, 0, 0);
-
-  // End = today (end of day)
-  const end = new Date(date);
-  end.setHours(23, 59, 59, 999);
-
-  return {
-    start: start.toISOString().slice(0, 19).replace('T', ' '),
-    end: end.toISOString().slice(0, 19).replace('T', ' '),
-  };
-}
-function getPreviousYearStartToToday(date = new Date()) {
-  // Start of previous year
-  const start = new Date(date.getFullYear() - 1, 0, 1);
-  start.setHours(0, 0, 0, 0);
-
-  // End = today (end of day)
-  const end = new Date(date);
-  end.setHours(23, 59, 59, 999);
-
-  return {
-    start: start.toISOString().slice(0, 19).replace('T', ' '),
-    end: end.toISOString().slice(0, 19).replace('T', ' '),
-  };
-}
-
-function isEmptyData(data) {
-  return Object.values(data).every(
-    arr => Array.isArray(arr) && arr.length === 0,
-  );
-}
-
-// Export data between dates (differential backup)
-export const exportDataBetweenDates = async (
-  startDate,
-  endDate,
-  tables = null,
-) => {
-  try {
-    const db = getUserDatabase().getDb() || getDb();
-    const data = {};
-    console.log(`Exporting data between ${startDate} and ${endDate}...`);
-
-    const defaultTables = [
-      'items',
-      'notebooks',
-      'categories',
-      'youtube_meta',
-      'category_items',
-      'notes',
-      'video_watch_history',
-    ];
-    const selectedTables = tables || defaultTables;
-
-    const fetchTableData = table => {
-      return new Promise(resolve => {
-        db.transaction(tx => {
-          let query = `SELECT * FROM ${table} WHERE (created_at BETWEEN ? AND ?) OR (updated_at BETWEEN ? AND ?)`;
-          let params = [startDate, endDate, startDate, endDate];
-          if (table === 'notes') {
-            query = `SELECT rowid, * FROM ${table} WHERE (created_at BETWEEN ? AND ?) OR (updated_at BETWEEN ? AND ?)`;
-          } else if (table === 'video_watch_history') {
-            query = `SELECT * FROM ${table} WHERE date BETWEEN DATE(?) AND DATE(?)`;
-            params = [startDate.split(' ')[0], endDate.split(' ')[0]];
-          }
-          // TODO: Add deleted_at handling if using soft deletes
-          // query += ` OR (deleted_at BETWEEN ? AND ?)`;
-          // params.push(startDate, endDate);
-
-          tx.executeSql(
-            query,
-            params,
-            (_, result) => {
-              let rows;
-              if (typeof result.rows.raw === 'function') {
-                rows = result.rows.raw();
-              } else if (result.rows._array) {
-                rows = result.rows._array;
-              } else {
-                rows = [];
-                for (let i = 0; i < result.rows.length; i++) {
-                  rows.push(result.rows.item(i));
-                }
-              }
-              console.log(`Exported ${rows.length} rows from ${table}`);
-              resolve({table, rows});
-            },
-            (_, error) => {
-              console.error(`Error exporting table ${table}:`, error);
-              resolve({table, rows: []});
-              return true;
-            },
-          );
-        });
-      });
-    };
-
-    const results = await Promise.all(selectedTables.map(fetchTableData));
-    for (const {table, rows} of results) {
-      data[table] = rows;
-    }
-
-    console.log('Data export collected:', Object.keys(data));
-    return data;
-  } catch (error) {
-    console.error('Error in exportDataBetweenDates:', error);
-    throw error;
-  }
-};
-
-// Upload to Google Drive
+// =========================
+// DRIVE FILE OPERATIONS
+// =========================
 export const uploadToGoogleDrive = async (
   filePath,
   fileName,
-  mimeType = 'application/json',
   folderId = 'root',
 ) => {
-  const {accessToken} = await GoogleSignin.getTokens();
+  const accessToken = await getAccessToken();
+
+  console.log(`[UPLOAD] Uploading: ${fileName}`);
+
   const response = await RNFetchBlob.fetch(
     'POST',
     'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart',
@@ -301,11 +169,7 @@ export const uploadToGoogleDrive = async (
     [
       {
         name: 'metadata',
-        data: JSON.stringify({
-          name: fileName,
-          mimeType,
-          parents: [folderId],
-        }),
+        data: JSON.stringify({name: fileName, parents: [folderId]}),
         type: 'application/json',
       },
       {
@@ -316,374 +180,270 @@ export const uploadToGoogleDrive = async (
     ],
   );
 
-  if (response.info().status >= 400) {
-    throw new Error(`Upload failed: ${response.data}`);
+  const status = response.info().status;
+
+  if (status >= 400) {
+    console.error(`[UPLOAD] Failed (${fileName}) → Status: ${status}`);
+    const error = new Error(`Upload failed: ${response.data}`);
+    error.status = status;
+    throw error;
   }
+
+  console.log(`[UPLOAD] Success: ${fileName}`);
 
   return response.json();
 };
 
-// Delete old Drive backups
-export const deleteOldDriveBackups = async (backupType, keepLast = 0) => {
-  try {
-    const {accessToken} = await GoogleSignin.getTokens();
-    const folderId = await getDriveFolderId(backupType);
-    const query = `name contains '${backupType}_' and trashed = false and '${folderId}' in parents`;
-    const response = await RNFetchBlob.fetch(
-      'GET',
-      `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&orderBy=createdTime desc`,
-      {Authorization: `Bearer ${accessToken}`},
-    );
-    const {files} = response.json();
-    const filesToDelete = files.slice(keepLast);
-    if (filesToDelete.length === 0) return;
+export const findDriveFileByName = async (fileName, folderId) => {
+  const accessToken = await getAccessToken();
 
-    await Promise.all(
-      filesToDelete.map(async file => {
-        await RNFetchBlob.fetch(
-          'DELETE',
-          `https://www.googleapis.com/drive/v3/files/${file.id}`,
-          {Authorization: `Bearer ${accessToken}`},
-        );
-        console.log(`Deleted old ${backupType} Drive backup: ${file.name}`);
-      }),
-    );
-  } catch (error) {
-    console.error(`Error deleting old ${backupType} Drive backups:`, error);
-  }
-};
+  const query = `name='${fileName}' and trashed=false and '${folderId}' in parents`;
 
-// Delete old local backups
-async function deleteOldLocalBackups(backupType, keepLast = 0) {
-  try {
-    const folderPath = LOCAL_BACKUP_FOLDERS[backupType];
-    const files = await RNFetchBlob.fs.ls(folderPath);
-    const sortedFiles = files
-      .filter(file => file.startsWith(`${backupType}_`))
-      .sort((a, b) => {
-        const timeA = new Date(a.split('_')[1].replace('.json', '')).getTime();
-        const timeB = new Date(b.split('_')[1].replace('.json', '')).getTime();
-        return timeB - timeA; // Descending
-      });
-    const filesToDelete = sortedFiles.slice(keepLast);
-    if (filesToDelete.length === 0) return;
-
-    await Promise.all(
-      filesToDelete.map(async file => {
-        const filePath = `${folderPath}/${file}`;
-        await RNFetchBlob.fs.unlink(filePath);
-        console.log(`Deleted old local ${backupType} backup: ${file}`);
-      }),
-    );
-  } catch (error) {
-    console.error(`Error deleting old local ${backupType} backups:`, error);
-  }
-}
-
-// Process local backup queue (sync to Drive, exclude images)
-async function processLocalBackupQueue() {
-  const netInfo = await NetInfo.fetch();
-  if (!netInfo.isConnected) return;
-
-  const folderOrder = ['yearly', 'monthly', 'weekly', 'daily', 'images'];
-  for (const type of folderOrder) {
-    const localFolder = LOCAL_BACKUP_FOLDERS[type];
-    const files = await RNFetchBlob.fs.ls(localFolder);
-    const sortedFiles = files
-      .filter(file => file.endsWith('.json'))
-      .sort((a, b) => {
-        const timeA = new Date(a.split('_')[1].replace('.json', '')).getTime();
-        const timeB = new Date(b.split('_')[1].replace('.json', '')).getTime();
-        return timeA - timeB; // Ascending, upload oldest first
-      });
-
-    let allUploaded = true;
-    for (const file of sortedFiles) {
-      const filePath = `${localFolder}/${file}`;
-      try {
-        const folderId = await getDriveFolderId(type);
-        const uploadResult = await retryOnFailure(
-          async () => {
-            const result = await uploadToGoogleDrive(
-              filePath,
-              file,
-              'application/json',
-              folderId,
-            );
-            if (!(await verifyGoogleDriveUpload(result.id))) {
-              throw new Error(`${type} upload verification failed`);
-            }
-            return result;
-          },
-          {maxRetries: 3, delayMs: 5000},
-        );
-        await RNFetchBlob.fs.unlink(filePath);
-        console.log(`Synced and deleted local ${type} backup: ${file}`);
-      } catch (error) {
-        console.error(`Failed to sync local ${type} backup ${file}:`, error);
-        allUploaded = false;
-        // Leave in local for retry
-      }
-    }
-
-    if (sortedFiles.length > 0 && allUploaded && type !== 'images') {
-      // Apply clearing if differential
-      const lowerLevels =
-        {
-          yearly: ['monthly', 'weekly', 'daily'],
-          monthly: ['weekly', 'daily'],
-          weekly: ['daily'],
-          daily: [],
-        }[type] ?? [];
-      for (const level of lowerLevels) {
-        await deleteOldDriveBackups(level, 0); // Clear on Drive
-      }
-    }
-  }
-}
-
-// Retry helper
-const retryOnFailure = async (fn, {maxRetries = 3, delayMs = 5000}) => {
-  let attempt = 0;
-  let lastError;
-  while (attempt < maxRetries) {
-    try {
-      return await fn();
-    } catch (error) {
-      lastError = error;
-      attempt++;
-      console.warn(`Attempt ${attempt} failed. Retrying...`, error);
-      if (attempt < maxRetries)
-        await new Promise(res => setTimeout(res, delayMs));
-    }
-  }
-  throw lastError;
-};
-
-function getWeekKey(date = new Date()) {
-  const firstDay = new Date(date.getFullYear(), 0, 1);
-  const week = Math.ceil(
-    ((date - firstDay) / 86400000 + firstDay.getDay() + 1) / 7,
+  const res = await RNFetchBlob.fetch(
+    'GET',
+    `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&fields=files(id,name)`,
+    {Authorization: `Bearer ${accessToken}`},
   );
-  return `${date.getFullYear()}-W${week}`;
-}
 
-function getSpecialKey(type, date = new Date()) {
-  if (type === 'yearly') return `yearly-${date.getFullYear()}-01-01`;
+  return res.json().files?.[0] || null;
+};
 
-  if (type === 'monthly')
-    return `monthly-${date.getFullYear()}-${date.getMonth() + 1}`;
+const deleteDriveFile = async driveId => {
+  const accessToken = await getAccessToken();
 
-  if (type === 'weekly') return `weekly-${getWeekKey(date)}`;
+  const res = await RNFetchBlob.fetch(
+    'DELETE',
+    `https://www.googleapis.com/drive/v3/files/${driveId}`,
+    {Authorization: `Bearer ${accessToken}`},
+  );
 
-  return null;
-}
-async function refreshSingleSpecialFlag() {
-  const todayKey = `${new Date().toISOString().slice(0, 10)}`;
-  const lastKey = await getSetting('LAST_SPECIAL_BACKUP_KEY')||null;
+  const status = res.info().status;
 
-  // new day → re-arm
-  if (!lastKey || !lastKey.includes(todayKey)) {
-    await setSetting('SPECIAL_BACKUP_ALLOWED', true);
-  }
-}
-
-const SPECIAL_RULES = [
-  {
-    type: 'yearly',
-    check: isStartOfYear,
-    rangeFn: getPreviousYearStartToToday,
-    clear: ['monthly', 'weekly', 'daily'],
-  },
-  {
-    type: 'monthly',
-    check: isStartOfMonth,
-    rangeFn: getPreviousMonthStartToToday,
-    clear: ['weekly', 'daily'],
-  },
-  {
-    type: 'weekly',
-    check: isStartOfWeek,
-    rangeFn: getPreviousWeekStartToToday,
-    clear: ['daily'],
-  },
-];
-
-async function decideSpecialBackup() {
-  await refreshSingleSpecialFlag();
-
-  const specialAllowed = await getSetting('SPECIAL_BACKUP_ALLOWED') ?? true;
-  const lastKey = await getSetting('LAST_SPECIAL_BACKUP_KEY') || null;
-
-  if (!specialAllowed) return null;
-
-  for (const rule of SPECIAL_RULES) {
-    if (!rule.check()) continue;
-
-    const key = getSpecialKey(rule.type);
-    if (key === lastKey) return null;
-
-    return {
-      type: rule.type,
-      key,
-      rangeFn: rule.rangeFn,
-      clear: rule.clear,
-    };
+  if (status === 404) {
+    console.log('[DELETE] Already removed from Drive');
+    return;
   }
 
-  return null;
-}
-
-// Main performBackup function
-export const performBackup = async () => {
-  const {setBackupInProgress, backupInProgress} = useDbStore.getState();
-  if (backupInProgress) return;
-  setBackupInProgress(true);
-
-  const dbPath = getUserDatabase().getDbPath();
-  if (!dbPath) {
-    throw new Error('Database not initialized');
+  if (status >= 400) {
+    console.error('[DELETE] Failed → status:', status);
+    const err = new Error('Delete failed');
+    err.status = status;
+    throw err;
   }
 
-  const timestamp = new Date().toISOString();
-  const lastBackupTime = await getLastBackupTimestamp();
-  console.log(`Last backup time: ${lastBackupTime || 'None'}`);
+  console.log('[DELETE] Drive file deleted:', driveId);
+};
 
-  const netInfo = await NetInfo.fetch();
-  // const isConnected = false;
-  const isConnected = netInfo.isConnected;
+// =========================
+// TASK FACTORIES
+// =========================
+const makeUploadTask =
+  (localPath, fileName, folderId, options = {}) =>
+  async () => {
+    const {onMissing, onSynced, deleteAfterUpload = true} = options;
 
-  try {
-    await initializeLocalFolders(); // Ensure local folders (excl. images)
-    if (isConnected) {
-      await initializeDriveFolders();
-      await processLocalBackupQueue(); // Sync pending non-image locals
+    const exists = await RNFetchBlob.fs.exists(localPath);
+
+    if (!exists) {
+      console.warn('[SYNC] Missing local file:', fileName);
+      await onMissing?.();
+      return;
     }
 
-    // Prepare and store images incremental backup locally
-    const imagesChanges = await prepareIncrementalBackup(lastBackupTime, [
-      'images',
-    ]);
-    if (!isEmptyData({images: imagesChanges.images})) {
-      const tempFilePath = `${LOCAL_BACKUP_FOLDERS.images}/images_${timestamp}.json`;
-      await RNFetchBlob.fs.writeFile(
-        tempFilePath,
-        JSON.stringify({images: imagesChanges.images}),
-        'utf8',
+    try {
+      const existing = await findDriveFileByName(fileName, folderId);
+
+      if (existing) {
+        console.log('[SYNC] Already exists on Drive:', fileName);
+
+        await onSynced?.(existing.id);
+
+        if (await RNFetchBlob.fs.exists(localPath)) {
+          await RNFetchBlob.fs.unlink(localPath);
+        }
+
+        return;
+      }
+
+      const result = await retry(() =>
+        uploadToGoogleDrive(localPath, fileName, folderId),
       );
 
-      if (isConnected) {
-        // Images incremental (only when connected)
-        const imagesFolderId = await getDriveFolderId('images');
-        await retryOnFailure(
-          async () => {
-            const result = await uploadToGoogleDrive(
-              tempFilePath,
-              `images_${timestamp}.json`,
-              'application/json',
-              imagesFolderId,
-            );
-            if (!(await verifyGoogleDriveUpload(result.id)))
-              throw new Error('Images upload verification failed');
-            await RNFetchBlob.fs.unlink(tempFilePath);
-          },
-          {maxRetries: 3, delayMs: 5000},
-        );
+      await onSynced?.(result.id);
+
+      if (deleteAfterUpload && (await RNFetchBlob.fs.exists(localPath))) {
+        await RNFetchBlob.fs.unlink(localPath);
       }
+    } catch (e) {
+      console.error('[SYNC] Upload failed:', fileName, e);
     }
+  };
 
-    const decision = await decideSpecialBackup();
+const makeDeleteTask = (file, initialDriveId, folderId) => async () => {
+  let drive_id = initialDriveId;
+  let alreadyGone = false;
 
-    let backupType = 'daily';
-    let data = null;
-    let lowerLevelsToClear = [];
-    let specialKey = null;
+  try {
+    await retry(async () => {
+      if (!drive_id) {
+        const existing = await findDriveFileByName(file, folderId);
 
-    if (decision) {
-      const {start, end} = decision.rangeFn();
-      data = await exportDataBetweenDates(start, end);
+        if (!existing) {
+          console.log('[SYNC] Already deleted on Drive:', file);
+          alreadyGone = true;
+          return;
+        }
 
-      backupType = decision.type;
-      lowerLevelsToClear = decision.clear;
-      specialKey = decision.key;
-    } else {
-      data = await prepareIncrementalBackup(lastBackupTime);
-    }
-
-    if (backupType && data && !isEmptyData(data)) {
-      const localFolder = LOCAL_BACKUP_FOLDERS[backupType];
-      const filePath = `${localFolder}/${backupType}_${timestamp}.json`;
-      await RNFetchBlob.fs.writeFile(filePath, JSON.stringify(data), 'utf8');
-
-      // Always apply local clearing for differentials
-      for (const level of lowerLevelsToClear) {
-        await deleteOldLocalBackups(level, 0);
-        console.log(`Cleared local ${level} after ${backupType} backup`);
+        drive_id = existing.id;
       }
 
-      if (backupType !== 'daily' && specialKey) {
-        await setSetting('LAST_SPECIAL_BACKUP_KEY', specialKey);
-        await setSetting('SPECIAL_BACKUP_ALLOWED', false);
-      }
+      await deleteDriveFile(drive_id);
+    });
 
-      if (isConnected) {
-        const folderId = await getDriveFolderId(backupType);
-        await retryOnFailure(
-          async () => {
-            const result = await uploadToGoogleDrive(
-              filePath,
-              `${backupType}_${timestamp}.json`,
-              'application/json',
-              folderId,
-            );
-            if (!(await verifyGoogleDriveUpload(result.id)))
-              throw new Error(`${backupType} upload verification failed`);
-
-            // Clear on Drive
-            for (const level of lowerLevelsToClear) {
-              await deleteOldDriveBackups(level, 0);
-            }
-            await RNFetchBlob.fs.unlink(filePath);
-          },
-          {maxRetries: 3, delayMs: 5000},
-        );
-      } // Else: Leave in local, already cleared lowers
+    if (drive_id || alreadyGone) {
+      await deleteFile(file);
+      console.log('[SYNC] Ghost removed:', file);
     }
-
-    await saveBackupTimestamp();
-    return {success: true, timestamp};
-  } catch (error) {
-    console.error('Backup failed:', error);
-    return {success: false, error: error.message};
-  } finally {
-    setBackupInProgress(false);
+  } catch (e) {
+    console.error('[SYNC] Ghost delete failed:', file, e);
   }
 };
 
-// Perform backup task
-export const performBackupTask = async () => {
-  console.log(`[BackupTask] Start: ${new Date().toLocaleString()}`);
+// =========================
+// SYNC PHASES
+// =========================
+async function uploadLocalBackups(folderId) {
+  console.log('[PHASE] Upload local backups');
 
-  if (!(await getSetting('BACKUP_TASK_SCHEDULED'))) {
-    console.log('[BackupTask] Backup task not scheduled, skipping backup.');
+  const localFiles = await getLocalFiles();
+
+  console.log(`[SYNC] Found ${localFiles.length} local files to sync`);
+
+  const tasks = localFiles.map(({file, level}) =>
+    makeUploadTask(`${BACKUP_FOLDER}/L${level}/${file}`, file, folderId, {
+      onMissing: () => updateState(file, 'synced'),
+      onSynced: id => updateState(file, 'synced', id),
+    }),
+  );
+
+  await runWithLimit(tasks, 3);
+}
+
+async function deleteGhostBackups(folderId) {
+  console.log('[PHASE] Delete ghost files');
+
+  const ghostFiles = await getGhostFiles();
+
+  const tasks = ghostFiles.map(({file, drive_id}) =>
+    makeDeleteTask(file, drive_id, folderId),
+  );
+
+  await runWithLimit(tasks, 3);
+}
+
+async function syncImageFiles(folderId) {
+  console.log('[PHASE] Sync images');
+
+  if (!(await RNFetchBlob.fs.exists(IMAGE_DIR))) return;
+
+  const files = await RNFetchBlob.fs.ls(IMAGE_DIR);
+
+  if (!files?.length) {
+    console.log('[IMG] No images found');
     return;
   }
-  const userId = await AsyncStorage.getItem('userId');
-  if (!userId) {
-    console.log('[BackupTask] No user logged in, skipping backup.');
-    return;
-  }
 
-  const db = await initUserDatabase(userId);
+  const tasks = files.map(file =>
+    makeUploadTask(`${IMAGE_DIR}/${file}`, file, folderId),
+  );
 
+  await runWithLimit(tasks, 3);
+}
+
+// =========================
+// CORE SYNC
+// =========================
+async function syncFiles() {
+  const folderIds = await initializeDriveFolders();
+
+  await uploadLocalBackups(folderIds.root);
+  await deleteGhostBackups(folderIds.root);
+  await syncImageFiles(folderIds.images);
+}
+
+// =========================
+// PUBLIC ENTRY
+// =========================
+export const syncBackupsToDrive = async () => {
+  const {setBackupInProgress, backupInProgress} = useDbStore.getState();
   try {
-    const result = await performBackup();
-    if (result.success) {
-      console.log('[BackupTask] Completed');
-    } else {
-      console.error('[BackupTask] Failed:', result.error);
+    if (backupInProgress) {
+      console.log('[SYNC] Backup already in progress, skipping');
+      return;
     }
-  } catch (error) {
-    console.error('[BackupTask] Failed:', error);
+    setBackupInProgress(true);
+
+    const settings = useSettingsStore.getState().settings;
+
+    if (!settings.BACKUP_ENABLED) {
+      console.log('[SYNC] Backup disabled');
+      return;
+    }
+
+    const net = await NetInfo.fetch();
+    if (!net.isConnected || !net.isInternetReachable) {
+      console.warn('[SYNC] No internet connection');
+      return;
+    }
+
+    console.log('[SYNC] Network Status: Connected and Internet Reachable' );
+
+    const userId = await AsyncStorage.getItem('userId');
+
+    const lastNativeBackup = await NativeModules.BackupModule.getPreference(
+      `LAST_NATIVE_BACKUP_TIME_${userId}`,
+    );
+
+    if (!lastNativeBackup) {
+      console.log('[SYNC] No native backup found');
+      return;
+    }
+
+    const lastDriveSync = settings.LAST_BACKUP_SYNC_TIME;
+
+    const nativeTime = new Date(lastNativeBackup).getTime();
+    const driveTime = lastDriveSync ? new Date(lastDriveSync).getTime() : 0;
+    console.log(
+      `[SYNC] Last native backup: ${lastNativeBackup} (${nativeTime})`,
+    );
+    console.log(`[SYNC] Last Drive sync: ${lastDriveSync} (${driveTime})`);
+    if (driveTime >= nativeTime) {
+      console.log('[SYNC] Already up to date');
+    } else {
+      console.log('[SYNC] Starting Drive sync...');
+
+      await syncFiles();
+
+      console.log('[SYNC] Completed successfully');
+    }
+    await saveBackupSyncTimestamp();
+    await useBackupStore.getState().refreshLastBackupTime();
+  } catch (e) {
+    console.error('[SYNC] Failed:', e);
+  } finally {
+    setBackupInProgress(false);
+    console.log('[SYNC] Sync process ended');
   }
+};
+
+export const setBackupSyncNetworkListener = async () => {
+  NetInfo.addEventListener(state => {
+    console.log('Network change detected');
+    if (state.isConnected && state.isInternetReachable) {
+      console.log('Internet available, triggering backup sync');
+      runBackupDriveSync('Network Change');
+    } else {
+      console.log('No internet connection');
+    }
+  });
 };

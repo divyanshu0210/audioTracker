@@ -21,12 +21,9 @@ export default function SignOutButton({ label = 'LogOut' }) {
     setLoading(true);
     try {
       if (settings.BACKUP_ENABLED) {
-        // await performBackupTask();
-        await useBackupStore.getState().runManualBackup();
+        await useBackupStore.getState().runManualBackup(waitForCompletion = true);
         await useBackupStore.getState().disableBackup(false);
       }
-
-      // AndroidBackgroundService.init(true);
 
       await GoogleSignin.signOut();
       closeDb();
@@ -36,7 +33,7 @@ export default function SignOutButton({ label = 'LogOut' }) {
       setSelectedItems([])
       await AsyncStorage.removeItem('userId');
       //also remove the user from set preference of backup module to prevent backup issues when another user logs in
-      await useBackupStore.getState().setPreference('userId', null);
+      await useBackupStore.getState().setNativePreference('userId', null);
 
       navigation.dispatch(
         CommonActions.reset({

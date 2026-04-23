@@ -1,23 +1,4 @@
-import {zip, unzip} from 'react-native-zip-archive';
-import {getDb} from '../database/database';
-import {getSetting, setSetting} from '../database/settings';
 import useSettingsStore from '../Settings/settingsStore';
-import {getUserDatabase} from '../database/UserDatabaseInstance';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import useBackupStore from '../stores/backupStore';
-import {NativeModules} from 'react-native'
-
-const {BackupModule} = NativeModules
-
-export const compressDatabase = async (dbPath, backupFolder) => {
-  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const zipPath = `${backupFolder}/backup_${timestamp}.zip`;
-
-  console.log(`Compressing DB from ${dbPath} to ${zipPath}...`);
-  await zip(dbPath, zipPath);
-  console.log('Compression complete.');
-  return zipPath;
-};
 
 export const saveBackupSyncTimestamp = async () => {
   try {
@@ -40,170 +21,18 @@ export const saveBackupSyncTimestamp = async () => {
   }
 };
 
-export const prepareIncrementalBackup = async (
-  lastBackupTime,
-  tables = null,
-) => {
-  try {
-    const db = getUserDatabase().getDb() || getDb();
-    const changes = {};
-    const effectiveBackupTime = lastBackupTime || '2000-01-01 00:00:00';
-    console.log('Preparing incremental backup since', lastBackupTime);
 
-    const defaultTables = tables || [
-      'items',
-      'notebooks',
-      'categories',
-      'youtube_meta',
-      'category_items',
-      'notes',
-      'video_watch_history',
-    ];
-    const fetchTableChanges = table => {
-      return new Promise(resolve => {
-        db.transaction(
-          tx => {
-            let query;
-            let params = [effectiveBackupTime];
+export const waitForFullBackup = () => {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      sub.remove();
+      reject(new Error('Backup timeout'));
+    }, 30000);
 
-            if (table === 'notes') {
-              query = `SELECT rowid, * FROM ${table} WHERE created_at > ?`;
-            } else if (table === 'video_watch_history') {
-              query = `SELECT * FROM ${table} WHERE lastWatchedAt > ?`;
-              // Use lastWatchedAt for videos to capture any re-watches or progress updates, not just new entries
-              // query = `SELECT * FROM ${table} WHERE date >= DATE(?)`; // Only compare date part
-            } else {
-              query = `SELECT * FROM ${table} WHERE created_at > ?`; // Default strict compare with timestamp
-            }
-
-            tx.executeSql(
-              query,
-              params,
-              (_, result) => {
-                let rows;
-                if (typeof result.rows.raw === 'function') {
-                  rows = result.rows.raw();
-                } else if (result.rows._array) {
-                  rows = result.rows._array;
-                } else {
-                  rows = [];
-                  for (let i = 0; i < result.rows.length; i++) {
-                    rows.push(result.rows.item(i));
-                  }
-                }
-
-                console.log(`Fetched ${rows.length} rows from ${table}`);
-                resolve({table, rows});
-              },
-              (_, error) => {
-                console.error(`Error querying table ${table}:`, error);
-                resolve({table, rows: []});
-                return true;
-              },
-            );
-          },
-          error => {
-            console.error(`Transaction error for table ${table}:`, error);
-            resolve({table, rows: []});
-          },
-        );
-      });
-    };
-
-    const results = await Promise.all(defaultTables.map(fetchTableChanges));
-
-    for (const {table, rows} of results) {
-      changes[table] = rows;
-    }
-
-    console.log('Incremental changes collected for all tables:', changes);
-    return changes;
-  } catch (error) {
-    console.error('Error in prepareIncrementalBackup:', error);
-    throw error;
-  }
-};
-
-// New function: Export all data to JSON (for full backups)
-export const exportDatabaseToJson = async () => {
-  try {
-    const db = getUserDatabase().getDb() || getDb();
-    const data = {};
-    console.log('Exporting full database to JSON...');
-
-    const tables = [
-      'items',
-      'notebooks',
-      'categories',
-      'youtube_meta',
-      'category_items',
-      'notes',
-      'video_watch_history',
-    ];
-
-    const fetchTableData = table => {
-      return new Promise(resolve => {
-        db.transaction(tx => {
-          let query = `SELECT * FROM ${table}`;
-          if (table === 'notes') {
-            query = `SELECT rowid, * FROM ${table}`;
-          }
-          tx.executeSql(
-            query,
-            [],
-            (_, result) => {
-              let rows;
-              if (typeof result.rows.raw === 'function') {
-                rows = result.rows.raw();
-              } else if (result.rows._array) {
-                rows = result.rows._array;
-              } else {
-                rows = [];
-                for (let i = 0; i < result.rows.length; i++) {
-                  rows.push(result.rows.item(i));
-                }
-              }
-              console.log(`Exported ${rows.length} rows from ${table}`);
-              resolve({table, rows});
-            },
-            (_, error) => {
-              console.error(`Error exporting table ${table}:`, error);
-              resolve({table, rows: []});
-              return true;
-            },
-          );
-        });
-      });
-    };
-
-    const results = await Promise.all(tables.map(fetchTableData));
-
-    for (const {table, rows} of results) {
-      data[table] = rows;
-    }
-
-    console.log('Full data export collected:', Object.keys(data));
-    return data;
-  } catch (error) {
-    console.error('Error in exportDatabaseToJson:', error);
-    throw error;
-  }
-};
-
-const checkGoogleDriveStorage = async () => {
-  try {
-    const {accessToken} = await GoogleSignin.getTokens();
-    const response = await RNFetchBlob.fetch(
-      'GET',
-      'https://www.googleapis.com/drive/v3/about?fields=storageQuota',
-      {Authorization: `Bearer ${accessToken}`},
-    );
-    const {storageQuota} = response.json();
-    if (storageQuota.used / storageQuota.limit > 0.8) {
-      console.warn('Google Drive storage nearing limit:', storageQuota);
-      // Notify user via UI
-    }
-  } catch (error) {
-    console.error('Error checking Google Drive storage:', error);
-  }
+    const sub = backupEmitter.addListener('backupAllCompleted', () => {
+      clearTimeout(timeout);
+      sub.remove();
+      resolve(true);
+    });
+  });
 };

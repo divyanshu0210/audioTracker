@@ -19,7 +19,7 @@ import {runBackupDriveSync} from '../backgroundService/newBackgroundService';
 // CONSTANTS
 // =========================
 const BACKUP_FOLDER = `${RNFetchBlob.fs.dirs.DocumentDir}/backups`;
-const DRIVE_MAIN_FOLDER_NAME = 'AppBackups';
+export const DRIVE_MAIN_FOLDER_NAME = 'AppBackups';
 const IMAGE_DIR = `${BACKUP_FOLDER}/images`;
 
 // =========================
@@ -83,7 +83,7 @@ const runWithLimit = async (tasks, limit = 3) => {
 // =========================
 // DRIVE FOLDER MANAGEMENT
 // =========================
-async function getOrCreateDriveFolder(folderName, parentId = 'root') {
+export async function getOrCreateDriveFolder(folderName, parentId = 'root') {
   try {
     const accessToken = await getAccessToken();
 

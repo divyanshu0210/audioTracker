@@ -8,7 +8,6 @@ import {
   ActivityIndicator,
   Alert,
   Image,
-  NativeModules,
   SafeAreaView,
   StyleSheet,
   Text,
@@ -31,7 +30,6 @@ import {setupFCM} from '../appNotification/appFCMNotification/fcmNotificationSer
 import { getOrCreateDefaultNotebookId } from '../database/C';
 import useBackupStore from '../stores/backupStore';
 import { requestPermissions } from '../backgroundService/newBackgroundService';
-const {BackupModule} = NativeModules;
 
 const GoogleLoginScreen = ({navigation}) => {
   const [isLoading, setIsLoading] = useState(false);
@@ -92,7 +90,7 @@ const GoogleLoginScreen = ({navigation}) => {
   const handleUserSession = async (userInfo, sessionType = 'restore') => {
     if (!userInfo) return;
     await AsyncStorage.setItem('userId', userInfo.user.id);
-    await BackupModule.setPreference("userId", userInfo.user.id);
+    await useBackupStore.getState().setNativePreference("userId", userInfo.user.id);
     try {
       // Initialize user-specific database
       const db = initDb(userInfo.user.id);

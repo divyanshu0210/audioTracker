@@ -4,13 +4,13 @@ import useSettingsStore from '../Settings/settingsStore';
 import {setBackupSyncNetworkListener} from '../backupAdv/backupNew';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {runBackupDriveSync} from '../backgroundService/newBackgroundService';
+import { waitForFullBackup } from '../backupAdv/backupUtils';
 
 const {BackupModule} = NativeModules;
 
-const MAX_BACKUP_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
 const getBackupTime = () => {
   const now = new Date();
-  now.setMinutes(now.getMinutes() + 1);
+  now.setHours(now.getHours() + 1); // ⬅️ add 1 hour
 
   const hours = String(now.getHours()).padStart(2, '0');
   const minutes = String(now.getMinutes()).padStart(2, '0');
@@ -57,6 +57,13 @@ const useBackupStore = create((set, get) => ({
   /* ---------------------------------- */
   /* Enable automatic backup             */
   /* ---------------------------------- */
+  setNativePreference: async (key, value) => {
+    try {
+      await BackupModule.setPreference(key, value);
+    } catch (e) {
+      console.log('Set preference error:', e);
+    }
+  },
 
   enableBackup: async () => {
     if (get().loading) return;
@@ -80,7 +87,7 @@ const useBackupStore = create((set, get) => ({
 
       const userId = await AsyncStorage.getItem('userId');
 
-      await BackupModule.setPreference(
+      await get().setNativePreference(
         `LAST_NATIVE_BACKUP_TIME_${userId}`,
         updated.LAST_BACKUP_SYNC_TIME,
       );
@@ -141,9 +148,12 @@ const useBackupStore = create((set, get) => ({
   /* Run manual backup                   */
   /* ---------------------------------- */
 
-  runManualBackup: async () => {
+  runManualBackup: async (waitForCompletion = false) => {
     try {
       await BackupModule.runBackupNow();
+      if (waitForCompletion) {
+        await waitForFullBackup();
+      }
     } catch (e) {
       Alert.alert('Backup Error', 'Failed to start backup.');
     }

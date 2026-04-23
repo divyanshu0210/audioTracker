@@ -1,6 +1,6 @@
 import BackgroundService from 'react-native-background-actions';
 import { syncBackupsToDrive } from '../backupAdv/backupNew';
-import { PermissionsAndroid } from 'react-native';
+import { DeviceEventEmitter, PermissionsAndroid } from 'react-native';
 
 const oneTimeTask = async () => {
   try {
@@ -13,6 +13,7 @@ const oneTimeTask = async () => {
     console.error('[SERVICE] Error:', e);
   } finally {
     // 🔴 VERY IMPORTANT: stop service manually
+    DeviceEventEmitter.emit('backupAllCompleted');
     await BackgroundService.stop();
   }
 };

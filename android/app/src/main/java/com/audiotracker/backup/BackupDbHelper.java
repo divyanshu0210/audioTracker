@@ -3,6 +3,9 @@ package com.audiotracker.backup;
 import android.database.Cursor;
 import io.requery.android.database.sqlite.SQLiteDatabase;
 
+import java.util.ArrayList;
+import java.util.List;
+
 public class BackupDbHelper {
 
     private static final String TABLE = "backup_files";
@@ -26,6 +29,30 @@ public class BackupDbHelper {
         //         "CREATE INDEX IF NOT EXISTS idx_backup_level_state " +
         //                 "ON " + TABLE + "(level, state)"
         // );
+    }
+
+    // =========================
+    // Row types (mirrors JS BackupDbService row shapes)
+    // =========================
+
+    public static class FileRow {
+        public String file;
+        public int    level;
+
+        public FileRow(String file, int level) {
+            this.file  = file;
+            this.level = level;
+        }
+    }
+
+    public static class GhostRow {
+        public String file;
+        public String driveId; // may be null
+
+        public GhostRow(String file, String driveId) {
+            this.file    = file;
+            this.driveId = driveId;
+        }
     }
 
     // =========================
@@ -55,6 +82,63 @@ public class BackupDbHelper {
         );
     }
 
+    /**
+     * Returns all files in 'local' state, ordered by start_epoch ASC.
+     * Mirrors JS getLocalFiles().
+     */
+    public static List<FileRow> getLocalFiles(SQLiteDatabase db) {
+
+        List<FileRow> list = new ArrayList<>();
+
+        Cursor c = db.rawQuery(
+                "SELECT file, level FROM " + TABLE +
+                        " WHERE state='local'" +
+                        " ORDER BY start_epoch ASC",
+                null
+        );
+
+        try {
+            while (c.moveToNext()) {
+                list.add(new FileRow(c.getString(0), c.getInt(1)));
+            }
+        } finally {
+            c.close();
+        }
+
+        return list;
+    }
+
+    /**
+     * Returns all files in 'ghost' state.
+     * Mirrors JS getGhostFiles().
+     */
+    public static List<GhostRow> getGhostFiles(SQLiteDatabase db) {
+
+        List<GhostRow> list = new ArrayList<>();
+
+        Cursor c = db.rawQuery(
+                "SELECT file, drive_id FROM " + TABLE +
+                        " WHERE state='ghost'",
+                null
+        );
+
+        try {
+            while (c.moveToNext()) {
+                list.add(new GhostRow(
+                        c.getString(0),
+                        c.isNull(1) ? null : c.getString(1)
+                ));
+            }
+        } finally {
+            c.close();
+        }
+
+        return list;
+    }
+
+    /**
+     * Update state only (existing behaviour — used by compaction).
+     */
     public static void updateState(
             SQLiteDatabase db,
             String file,
@@ -63,6 +147,24 @@ public class BackupDbHelper {
         db.execSQL(
                 "UPDATE " + TABLE + " SET state=? WHERE file=?",
                 new Object[]{state, file}
+        );
+    }
+
+    /**
+     * Update state and optionally set drive_id.
+     * Mirrors JS: SET state=?, drive_id=COALESCE(?, drive_id)
+     */
+    public static void updateState(
+            SQLiteDatabase db,
+            String file,
+            String state,
+            String driveId) {
+
+        db.execSQL(
+                "UPDATE " + TABLE +
+                        " SET state=?, drive_id=COALESCE(?, drive_id)" +
+                        " WHERE file=?",
+                new Object[]{state, driveId, file}
         );
     }
 

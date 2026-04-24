@@ -13,11 +13,12 @@ import JSONTree from 'react-native-json-tree';
 import RNFS from 'react-native-fs';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import RNFetchBlob from 'react-native-blob-util';
-import {GoogleSignin} from '@react-native-google-signin/google-signin';
 
 import {getDb} from '../database/database';
 import {deleteFile} from '../backupAdv/BackupDbService';
 import Icon from 'react-native-vector-icons/MaterialIcons';
+import { DRIVE_MAIN_FOLDER_NAME, getOrCreateDriveFolder } from '../backupAdv/backupNew';
+import { getGoogleAccessToken } from '../auth/tokenManager';
 const BACKUP_DIR = `${RNFS.DocumentDirectoryPath}/backups`;
 
 const theme = {
@@ -39,20 +40,13 @@ const theme = {
   base0E: '#ae81ff',
   base0F: '#cc6633',
 };
-// =========================
-// AUTH
-// =========================
-const getAccessToken = async () => {
-  const {accessToken} = await GoogleSignin.getTokens();
-  return accessToken;
-};
 
 // =========================
 // DRIVE LIST
 // =========================
 const listDriveFiles = async folderId => {
   try {
-    const accessToken = await getAccessToken();
+    const accessToken = await getGoogleAccessToken();
 
     const res = await RNFetchBlob.fetch(
       'GET',
@@ -110,18 +104,22 @@ const formatDate = date => {
   });
 };
 
-const extractEpochs = name => {
+export const extractEpochs = name => {
   if (!name) return {};
 
   try {
     const clean = name.replace('.json', '');
+
+    // ✅ extract level (L0, L1, etc.)
+    const levelMatch = clean.match(/^L(\d+)_/);
+    const level = levelMatch ? Number(levelMatch[1]) : null;
 
     const underscoreIndex = clean.indexOf('_');
     if (underscoreIndex === -1) return {};
 
     const afterUnderscore = clean.substring(underscoreIndex + 1);
 
-    // 🔥 use LAST dash (critical fix)
+    // 🔥 keep your correct logic
     const dashIndex = afterUnderscore.lastIndexOf('-');
     if (dashIndex === -1) return {};
 
@@ -129,6 +127,7 @@ const extractEpochs = name => {
     const endStr = afterUnderscore.substring(dashIndex + 1);
 
     return {
+      level,
       start: Number(startStr),
       end: Number(endStr),
     };
@@ -212,14 +211,16 @@ export default function BackupExplorerScreen() {
     // =========================
     // DRIVE
     // =========================
-    const stored = await AsyncStorage.getItem('driveFolderIds');
-    const folderIds = JSON.parse(stored || '{}');
+    // const stored = await AsyncStorage.getItem('driveFolderIds');
+    // const folderIds = JSON.parse(stored || '{}');
+    const appFolderId = getOrCreateDriveFolder(DRIVE_MAIN_FOLDER_NAME);
+    const imageFolderId = getOrCreateDriveFolder('images', appFolderId);
 
     const drive = [];
 
     // ROOT (ignore images folder)
-    if (folderIds.root) {
-      const files = await listDriveFiles(folderIds.root);
+    if (appFolderId) {
+      const files = await listDriveFiles(appFolderId);
 
       drive.push({
         title: '☁️ BACKUPS',
@@ -242,8 +243,8 @@ export default function BackupExplorerScreen() {
     }
 
     // IMAGES
-    if (folderIds.images) {
-      const files = await listDriveFiles(folderIds.images);
+    if (imageFolderId) {
+      const files = await listDriveFiles(imageFolderId);
 
       drive.push({
         title: '☁️ IMAGES',
@@ -309,7 +310,7 @@ export default function BackupExplorerScreen() {
       }
 
       if (source === 'drive') {
-        const accessToken = await getAccessToken();
+        const accessToken = await getGoogleAccessToken();
 
         const res = await RNFetchBlob.fetch(
           'GET',
@@ -368,7 +369,7 @@ export default function BackupExplorerScreen() {
               const stored = await AsyncStorage.getItem('driveFolderIds');
               const folderIds = JSON.parse(stored || '{}');
 
-              const accessToken = await getAccessToken();
+              const accessToken = await getGoogleAccessToken();
 
               const deleteAllInFolder = async folderId => {
                 if (!folderId) return;

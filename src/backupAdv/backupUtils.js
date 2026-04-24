@@ -22,17 +22,17 @@ export const saveBackupSyncTimestamp = async () => {
 };
 
 
-export const waitForFullBackup = () => {
-  return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      sub.remove();
-      reject(new Error('Backup timeout'));
-    }, 30000);
+// export const waitForFullBackup = () => {
+//   return new Promise((resolve, reject) => {
+//     const timeout = setTimeout(() => {
+//       sub.remove();
+//       reject(new Error('Backup timeout'));
+//     }, 30000);
 
-    const sub = backupEmitter.addListener('backupAllCompleted', () => {
-      clearTimeout(timeout);
-      sub.remove();
-      resolve(true);
-    });
-  });
-};
+//     const sub = backupEmitter.addListener('backupAllCompleted', () => {
+//       clearTimeout(timeout);
+//       sub.remove();
+//       resolve(true);
+//     });
+//   });
+// };

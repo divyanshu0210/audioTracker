@@ -142,6 +142,8 @@ dependencies {
      implementation project(':react-native-background-fetch')
    implementation("androidx.work:work-runtime:2.9.0")
    implementation("com.github.requery:sqlite-android:3.45.0")
+   implementation('com.google.android.gms:play-services-auth:21.0.1')
+   implementation ("androidx.lifecycle:lifecycle-process:2.7.0")
 
     if (hermesEnabled.toBoolean()) {
         implementation("com.facebook.react:hermes-android")

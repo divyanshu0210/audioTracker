@@ -14,6 +14,7 @@ import {
 } from './BackupDbService';
 import useDbStore from '../database/dbStore';
 import {runBackupDriveSync} from '../backgroundService/newBackgroundService';
+import { getGoogleAccessToken } from '../auth/tokenManager';
 
 // =========================
 // CONSTANTS
@@ -21,14 +22,6 @@ import {runBackupDriveSync} from '../backgroundService/newBackgroundService';
 const BACKUP_FOLDER = `${RNFetchBlob.fs.dirs.DocumentDir}/backups`;
 export const DRIVE_MAIN_FOLDER_NAME = 'AppBackups';
 const IMAGE_DIR = `${BACKUP_FOLDER}/images`;
-
-// =========================
-// AUTH
-// =========================
-const getAccessToken = async () => {
-  const {accessToken} = await GoogleSignin.getTokens();
-  return accessToken;
-};
 
 // =========================
 // RETRY UTILITY
@@ -85,15 +78,16 @@ const runWithLimit = async (tasks, limit = 3) => {
 // =========================
 export async function getOrCreateDriveFolder(folderName, parentId = 'root') {
   try {
-    const accessToken = await getAccessToken();
-
+    const accessToken = await getGoogleAccessToken();
     const query = `name='${folderName}' and mimeType='application/vnd.google-apps.folder' and trashed=false and '${parentId}' in parents`;
 
     const response = await RNFetchBlob.fetch(
       'GET',
-      `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&fields=files(id,name)`,
+      `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&fields=files(id,name)`  ,
       {Authorization: `Bearer ${accessToken}`},
     );
+
+    console.log('[drive] Folder query response:', response.data);
 
     const {files} = response.json();
 
@@ -155,7 +149,7 @@ export const uploadToGoogleDrive = async (
   fileName,
   folderId = 'root',
 ) => {
-  const accessToken = await getAccessToken();
+  const accessToken = await getGoogleAccessToken();
 
   console.log(`[UPLOAD] Uploading: ${fileName}`);
 
@@ -195,7 +189,7 @@ export const uploadToGoogleDrive = async (
 };
 
 export const findDriveFileByName = async (fileName, folderId) => {
-  const accessToken = await getAccessToken();
+  const accessToken = await getGoogleAccessToken();
 
   const query = `name='${fileName}' and trashed=false and '${folderId}' in parents`;
 
@@ -209,7 +203,7 @@ export const findDriveFileByName = async (fileName, folderId) => {
 };
 
 const deleteDriveFile = async driveId => {
-  const accessToken = await getAccessToken();
+  const accessToken = await getGoogleAccessToken();
 
   const res = await RNFetchBlob.fetch(
     'DELETE',
@@ -436,14 +430,14 @@ export const syncBackupsToDrive = async () => {
   }
 };
 
-export const setBackupSyncNetworkListener = async () => {
-  NetInfo.addEventListener(state => {
-    console.log('Network change detected');
-    if (state.isConnected && state.isInternetReachable) {
-      console.log('Internet available, triggering backup sync');
-      runBackupDriveSync('Network Change');
-    } else {
-      console.log('No internet connection');
-    }
-  });
-};
+// export const setBackupSyncNetworkListener = async () => {
+//   NetInfo.addEventListener(state => {
+//     console.log('Network change detected');
+//     if (state.isConnected && state.isInternetReachable) {
+//       console.log('Internet available, triggering backup sync');
+//       runBackupDriveSync('Network Change');
+//     } else {
+//       console.log('No internet connection');
+//     }
+//   });
+// };

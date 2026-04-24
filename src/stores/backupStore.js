@@ -1,49 +1,56 @@
 import {create} from 'zustand';
 import {Alert, NativeModules} from 'react-native';
 import useSettingsStore from '../Settings/settingsStore';
-import {setBackupSyncNetworkListener} from '../backupAdv/backupNew';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import {runBackupDriveSync} from '../backgroundService/newBackgroundService';
-import { waitForFullBackup } from '../backupAdv/backupUtils';
 
 const {BackupModule} = NativeModules;
 
 const getBackupTime = () => {
-  const now = new Date();
-  now.setHours(now.getHours() + 1); // ⬅️ add 1 hour
+  // const now = new Date();
+  // now.setHours(now.getHours() - 1);
 
-  const hours = String(now.getHours()).padStart(2, '0');
-  const minutes = String(now.getMinutes()).padStart(2, '0');
+  // const hours = String(now.getHours()).padStart(2, '0');
+  // const minutes = String(now.getMinutes()).padStart(2, '0');
 
-  return `${hours}${minutes}`;
+  // return `${hours}${minutes}`;
+
+  return '0400'; // 4 AM daily backup time
 };
 
 const useBackupStore = create((set, get) => ({
   loading: false,
   lastBackupTime: 'Never',
+  lastBackupSyncTime: 'Never',
+  backupRunning: false,
+  syncRunning: false,
   setLastBackupTime: val => set({lastBackupTime: val}),
+  setLastBackupSyncTime: val => set({lastBackupSyncTime: val}),
   /* ---------------------------------- */
   /* Load last backup time               */
   /* ---------------------------------- */
 
-  refreshLastBackupTime: async () => {
-    try {
-      // the formt must be 2 min ago, tll 2 hr ago and then date and time
-      const datasynctime =
-        useSettingsStore.getState().settings.LAST_BACKUP_SYNC_LOCAL_TIME;
-
-      if (datasynctime) {
-        set({
-          lastBackupTime: datasynctime || 'Never',
-        });
-      } else {
-        set({lastBackupTime: 'Never'});
-      }
-    } catch (e) {
-      console.log('Backup time load error', e);
-      set({lastBackupTime: 'Never'});
+refreshLastBackupTime: async () => {
+  try {
+    const userId = await AsyncStorage.getItem('userId');
+    if (!userId) {
+      set({ lastBackupSyncTime: 'Never' });
+      return;
     }
-  },
+    const lastSync = await BackupModule.getPreference(
+      'LAST_BACKUP_SYNC_TIME_' + userId
+    );
+    if (!lastSync || lastSync.startsWith('2000-01-01')) {
+      set({ lastBackupSyncTime: 'Never' });
+      return;
+    }
+    // ✅ format to human readable
+    // const formatted = get().formatRelativeTime(lastSync);
+    set({ lastBackupSyncTime: lastSync });
+  } catch (e) {
+    console.log('Backup time load error', e);
+    set({ lastBackupSyncTime: 'Never' });
+  }
+},
 
   /* ---------------------------------- */
   /* Verify worker scheduled             */
@@ -79,7 +86,7 @@ const useBackupStore = create((set, get) => ({
 
       const updated = {
         BACKUP_ENABLED: true,
-        LAST_BACKUP_SYNC_TIME: '2000-01-01T00:00:00',
+        LAST_BACKUP_SYNC_TIME: '2000-01-01 00:00:00',
         LAST_BACKUP_SYNC_LOCAL_TIME: '2000-01-01 00:00:00',
       };
 
@@ -91,6 +98,13 @@ const useBackupStore = create((set, get) => ({
         `LAST_NATIVE_BACKUP_TIME_${userId}`,
         updated.LAST_BACKUP_SYNC_TIME,
       );
+
+      await get().setNativePreference(
+        `LAST_BACKUP_SYNC_TIME_${userId}`,
+        updated.LAST_BACKUP_SYNC_TIME,
+      );
+
+      await get().setNativePreference('BACKUP_ENABLED', 'true');
 
       await get().refreshLastBackupTime();
     } catch (e) {
@@ -122,6 +136,7 @@ const useBackupStore = create((set, get) => ({
         useSettingsStore.getState().updateSettings({
           BACKUP_ENABLED: false,
         });
+        await get().setNativePreference('BACKUP_ENABLED', 'false');
       }
     } catch (e) {
       console.log('Disable backup failed:', e);
@@ -152,7 +167,7 @@ const useBackupStore = create((set, get) => ({
     try {
       await BackupModule.runBackupNow();
       if (waitForCompletion) {
-        await waitForFullBackup();
+        // await waitForFullBackup();
       }
     } catch (e) {
       Alert.alert('Backup Error', 'Failed to start backup.');
@@ -199,6 +214,7 @@ const useBackupStore = create((set, get) => ({
         console.log('[Backup] Worker missing → rescheduling');
 
         await BackupModule.scheduleBackupAtTime(getBackupTime(), 5);
+        await get().setNativePreference('BACKUP_ENABLED', 'true');
       }
     } catch (e) {
       console.log('Worker heal error:', e);
@@ -215,13 +231,13 @@ const useBackupStore = create((set, get) => ({
       // on startup and not with every backup sync
       // await initializeDriveFolders();
 
-      await runBackupDriveSync('App Startup');
+      // await runBackupDriveSync('App Startup');
 
       // although sybc fn also updates the time after successful sync,
       // this ensures we have the latest time on app start
       await get().refreshLastBackupTime();
 
-      await setBackupSyncNetworkListener();
+      // await setBackupSyncNetworkListener();
 
       // TO DO: Add fn to check if a native backup was missed and has to be run manually if needed
 
@@ -230,6 +246,58 @@ const useBackupStore = create((set, get) => ({
       console.log('[Backup] Initialization failed', e);
     }
   },
+
+  initializeEventListeners: () => {
+    const {DeviceEventEmitter} = require('react-native');
+
+    const sub1 = DeviceEventEmitter.addListener('backupStarted', () => {
+      set({backupRunning: true});
+    });
+
+    const sub2 = DeviceEventEmitter.addListener('backupCompleted', () => {
+      set({backupRunning: false});
+    });
+
+    const sub3 = DeviceEventEmitter.addListener('driveSyncStarted', () => {
+      set({syncRunning: true});
+    });
+
+    const sub4 = DeviceEventEmitter.addListener('driveSyncCompleted', () => {
+      set({syncRunning: false});
+      get().refreshLastBackupTime();
+    });
+
+    // store subscriptions so we can clean later if needed
+    set({
+      _subscriptions: [sub1, sub2, sub3, sub4],
+    });
+  },
+
+  cleanupEventListeners: () => {
+    const subs = get()._subscriptions || [];
+    subs.forEach(s => s.remove());
+    set({_subscriptions: []});
+  },
+
+  formatRelativeTime: (timestamp) => {
+  try {
+    const date = new Date(timestamp.replace(' ', 'T'));
+    const now = new Date();
+
+    const diffMs = now - date;
+    const diffMin = Math.floor(diffMs / (1000 * 60));
+
+    if (diffMin < 1) return 'Just now';
+    if (diffMin < 60) return `${diffMin} min ago`;
+
+    const diffHr = Math.floor(diffMin / 60);
+    if (diffHr < 24) return `${diffHr} hr ago`;
+
+    return date.toLocaleString();
+  } catch {
+    return 'Invalid time';
+  }
+},
 }));
 
 export default useBackupStore;

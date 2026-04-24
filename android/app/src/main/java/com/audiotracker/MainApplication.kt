@@ -12,6 +12,8 @@ import com.facebook.react.defaults.DefaultReactNativeHost
 import com.facebook.react.soloader.OpenSourceMergedSoMapping
 import com.facebook.soloader.SoLoader
 import com.transistorsoft.rnbackgroundfetch.RNBackgroundFetchPackage;
+import com.audiotracker.BackupLifecycleObserver
+import com.audiotracker.BackupPauseObserver
 //import com.audiotracker.ShellPackage
 
 class MainApplication : Application(), ReactApplication {
@@ -48,5 +50,11 @@ class MainApplication : Application(), ReactApplication {
       // If you opted-in for the New Architecture, we load the native entry point for this app.
       load()
     }
+
+     // Register backup lifecycle observer.
+    // Triggers a one-time BackupWorker every time the app goes to background.
+    // Must be called on the main thread — onCreate() qualifies.
+    BackupLifecycleObserver.register(this)
+    registerActivityLifecycleCallbacks(BackupPauseObserver())
   }
 }

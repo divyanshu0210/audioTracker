@@ -53,7 +53,7 @@ import FullHistoryScreen from './history/FullHistoryScreen';
 import CategoriesView from './categories/CategoriesView';
 import {initDatabase, resetDatabase} from './database/database';
 import BackupExplorerScreen from './Settings/BackupExplorerScreen';
-import { runBackupDriveSync } from './backgroundService/newBackgroundService';
+import useBackupStore from './stores/backupStore';
 
 const Stack = createStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -86,15 +86,12 @@ function RootNavigator() {
     return () => unsubscribe(); // Cleanup the event listener
   }, [navigation]);
 
-  useEffect(() => {
-    const sub = emitter.addListener('backupCompleted', async () => {
-      console.log('Backup completed in background, syncing to Drive...');
-      runBackupDriveSync('Native Module Event');
-
-    });
-
-    return () => sub.remove();
-  }, []);
+useEffect(() => {
+  useBackupStore.getState().initializeEventListeners();
+  return () => {
+    useBackupStore.getState().cleanupEventListeners();
+  }
+}, []);
 
   return (
     <>
@@ -322,7 +319,9 @@ const CategoriesStack = () => {
 
 // 🔹 Root Stack Navigator (Login + MainApp)
 export default function App() {
-  const {loading, backupInProgress, restoreInProgress} = useDbStore();
+  const {loading, restoreInProgress} = useDbStore();
+  const {backupRunning, syncRunning} = useBackupStore();
+  const isBackupInProgress = backupRunning || syncRunning;
 
   // useEffect(() => {
   //   resetDatabase();
@@ -351,7 +350,7 @@ export default function App() {
         <View style={styles.overlay}>
           <ActivityIndicator size="large" color="#fff" />
           <Text style={styles.loadingText}>
-            {backupInProgress ? 'Saving your Progress' : 'Signing out...'}
+            {isBackupInProgress ? 'Saving your Progress' : 'Signing out...'}
           </Text>
         </View>
       )}

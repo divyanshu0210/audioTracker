@@ -7,17 +7,12 @@ import {
   Animated,
   Switch,
   ActivityIndicator,
-  NativeModules,
 } from 'react-native';
 import {Button} from 'react-native-paper';
-import {Picker} from '@react-native-picker/picker';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import {ScrollView} from 'react-native-gesture-handler';
 import useSettingsStore from './settingsStore';
 import SignOutButton from '../auth/SignOutButton';
 import {useNavigation} from '@react-navigation/core';
-import useDbStore from '../database/dbStore';
-import {performBackupTask} from '../backupAdv/backupNew';
 import useBackupStore from '../stores/backupStore';
 const SettingsScreen = () => {
   const navigation = useNavigation();
@@ -25,7 +20,7 @@ const SettingsScreen = () => {
 
   const {
   loading,
-  lastBackupTime,
+  lastBackupSyncTime,
   toggleBackup,
   runManualBackup,
   checkBackupStatus,
@@ -39,7 +34,8 @@ const SettingsScreen = () => {
   );
 
   const [notificationOpacity] = useState(new Animated.Value(0));
-  const {backupInProgress} = useDbStore();
+  const { backupRunning, syncRunning } = useBackupStore();
+  const isBackupInProgress = backupRunning || syncRunning;
 
   const showNotification = () => {
     Animated.sequence([
@@ -130,7 +126,7 @@ const SettingsScreen = () => {
 
         {/* Last backup time */}
         <Text style={{marginTop: 15, fontSize: 14, color: '#666'}}>
-          Last backup: {lastBackupTime}
+          Last backup: {lastBackupSyncTime}
         </Text>
 
         {/* Manual backup button */}
@@ -139,7 +135,7 @@ const SettingsScreen = () => {
         onPress={runManualBackup}
           style={[styles.saveButton, {marginTop: 10}]}
           labelStyle={styles.buttonText}>
-          {backupInProgress ? (
+          { isBackupInProgress ? (
             <ActivityIndicator color="#fff" size="small" />
           ) : (
             'Backup'

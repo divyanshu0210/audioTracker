@@ -8,6 +8,9 @@ import {
   DRIVE_MAIN_FOLDER_NAME,
   getOrCreateDriveFolder,
 } from '../backupAdv/backupNew';
+import {getGoogleAccessToken} from '../auth/tokenManager';
+import {extractEpochs} from '../Settings/BackupExplorerScreen';
+import useBackupStore from '../stores/backupStore';
 
 /* ---------------------------------- */
 /* Constants                           */
@@ -81,7 +84,7 @@ const parseTimestampFromName = name => {
 export async function listAllDriveBackups() {
   console.log('[Restore] Listing all Drive backups');
 
-  const {accessToken} = await GoogleSignin.getTokens();
+  const accessToken = await getGoogleAccessToken();
   console.log('[Restore] Got access token');
 
   const all = [];
@@ -153,7 +156,7 @@ export async function listAllDriveBackups() {
 async function downloadBackup(fileId) {
   console.log('[Restore] Downloading backup:', fileId);
 
-  const {accessToken} = await GoogleSignin.getTokens();
+  const accessToken = await getGoogleAccessToken();
 
   const res = await RNFetchBlob.fetch(
     'GET',
@@ -199,7 +202,7 @@ async function runRestore(userId, backups) {
     for (const b of dbBackups) {
       console.log('[Restore] Downloading DB backup:', b.name);
       const data = await downloadBackup(b.id);
-      if (data) dbDataList.push({name: b.name, data});
+      if (data) dbDataList.push({name: b.name, data, driveId: b.id});
     }
 
     const imageDataList = [];
@@ -216,15 +219,26 @@ async function runRestore(userId, backups) {
         tx => {
           tx.executeSql('PRAGMA defer_foreign_keys = ON');
 
-          for (const {name, data} of dbDataList) {
+          for (const {name, data, driveId} of dbDataList) {
             console.log('[Restore] Inserting DB backup:', name);
             insertData(data, name, tx);
+            upsertBackupFileEntry(tx, name, driveId);
           }
 
           for (const {name, data} of imageDataList) {
             console.log('[Restore] Inserting image backup:', name);
             insertData(data, name, tx);
           }
+
+          tx.executeSql(
+            `INSERT INTO notes(notes) VALUES('rebuild')`,
+            [],
+            () => console.log('[Restore] FTS index rebuilt'),
+            (_, err) => {
+              console.error('[Restore] FTS rebuild failed:', err);
+              return true;
+            }
+          );
         },
         err => {
           console.error('[Restore] Transaction failed:', err);
@@ -252,6 +266,29 @@ const insertData = (data, label, tx) => {
     console.log(`[Restore] Table ${table} → rows: ${data[table].length}`);
 
     for (const row of data[table]) {
+      // 🔥 SPECIAL HANDLING FOR FTS NOTES (preserve rowid)
+      if (table === 'notes' && row.rowid != null) {
+        const {rowid, ...rest} = row;
+
+        const cols = Object.keys(rest);
+        const vals = Object.values(rest);
+
+        const qs = ['?', ...cols.map(() => '?')].join(',');
+
+        tx.executeSql(
+          `INSERT OR REPLACE INTO notes (rowid, ${cols.join(',')}) VALUES (${qs})`,
+          [rowid, ...vals],
+          () => {},
+          (_, error) => {
+            console.error(`[Restore ERROR] ${label} → notes`, error);
+            return true;
+          },
+        );
+
+        continue;
+      }
+
+      // ✅ default for all other tables
       const cols = Object.keys(row);
       const vals = Object.values(row);
       const qs = cols.map(() => '?').join(',');
@@ -267,6 +304,35 @@ const insertData = (data, label, tx) => {
       );
     }
   }
+};
+
+const upsertBackupFileEntry = (tx, fileName, driveId) => {
+  // ✅ skip image backups completely
+  if (fileName.startsWith('img_')) {
+    console.log('[Restore] Skipping backup_files entry for image:', fileName);
+    return;
+  }
+
+  const meta = extractEpochs(fileName);
+
+  if (meta.level == null || meta.start == null || meta.end == null) {
+    console.error('[Restore] Invalid backup meta:', fileName);
+    return;
+  }
+
+  tx.executeSql(
+    `INSERT OR REPLACE INTO backup_files 
+     (file, level, start_epoch, end_epoch, state, drive_id)
+     VALUES (?, ?, ?, ?, 'synced', ?)`,
+    [fileName, meta.level, meta.start, meta.end, driveId],
+    () => {
+      console.log('[Restore] backup_files updated:', fileName);
+    },
+    (_, err) => {
+      console.error('[Restore] backup_files error:', err);
+      return true;
+    },
+  );
 };
 
 async function attemptRestore(userId, backups) {
@@ -306,7 +372,7 @@ async function handleRestoreFlow(userId, backups) {
   }
 }
 
-export async function checkAndPromptRestore() {
+export async function checkAndPromptRestore(userId) {
   console.log('[Restore] checkAndPromptRestore called');
 
   const {currentUserId, setCheckingAvailableBackup} = useDbStore.getState();
@@ -362,5 +428,36 @@ export async function checkAndPromptRestore() {
     );
   } catch (e) {
     console.error('[Restore] Fatal error', e);
+  } finally {
+    setCheckingAvailableBackup(false);
+    //setnativePref last backup time to now bcz anyway whatever is restored is in drive
+    // and now whatever will go will be from the instance app is installed and used so backup time is now
+    //we are doing here bcz this runs only once when user logs in for the first time
+    // and if we do it in backup routine then it will update the backup time every time backup runs which is not correct
+    // because backup can run multiple times a day but we want to show last backup sync time as the time when user logged in and checked for backup
+    await useBackupStore
+      .getState()
+      .setNativePreference(
+        'LAST_NATIVE_BACKUP_TIME_' + userId,
+        formatDateTime(),
+      );
   }
 }
+
+export const formatDateTime = (date = new Date()) => {
+  const pad = n => String(n).padStart(2, '0');
+
+  return (
+    date.getFullYear() +
+    '-' +
+    pad(date.getMonth() + 1) +
+    '-' +
+    pad(date.getDate()) +
+    ' ' +
+    pad(date.getHours()) +
+    ':' +
+    pad(date.getMinutes()) +
+    ':' +
+    pad(date.getSeconds())
+  );
+};

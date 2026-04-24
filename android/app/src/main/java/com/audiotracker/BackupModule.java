@@ -104,7 +104,7 @@ public class BackupModule extends ReactContextBaseJavaModule {
         PeriodicWorkRequest request = new PeriodicWorkRequest.Builder(
                 BackupWorker.class,
                 1,
-                TimeUnit.HOURS)
+                TimeUnit.DAYS)
                 .setInitialDelay(delay, TimeUnit.MILLISECONDS)
                 .setBackoffCriteria(
                         BackoffPolicy.LINEAR,
@@ -136,15 +136,17 @@ public class BackupModule extends ReactContextBaseJavaModule {
         Log.d(TAG, "BackupWorker enqueued for immediate execution");
     }
 
-    @ReactMethod
+        @ReactMethod
     public void cancelBackup() {
-
-        Log.d(TAG, "Cancelling scheduled backup");
-
-        WorkManager.getInstance(getReactApplicationContext())
-                .cancelUniqueWork("backupJob");
-
-        Log.d(TAG, "Backup cancelled successfully");
+ 
+        Log.d(TAG, "Cancelling all backup jobs");
+ 
+        WorkManager wm = WorkManager.getInstance(getReactApplicationContext());
+        wm.cancelUniqueWork("backupJob");        // daily periodic
+        wm.cancelUniqueWork("backupOnBackground");  // lifecycle-triggered one-time
+        wm.cancelUniqueWork("driveSyncJob");        // pending Drive sync
+ 
+        Log.d(TAG, "All backup jobs cancelled");
     }
 
     @ReactMethod

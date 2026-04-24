@@ -10,8 +10,8 @@ import RNFS from 'react-native-fs';
 import {NativeModules} from 'react-native';
 import {addItemToCategory} from '../../categories/catDB';
 import useDbStore from '../../database/dbStore';
-import {GoogleSignin} from '@react-native-google-signin/google-signin';
 import {updateItemFields} from '../../database/U';
+import { getGoogleAccessToken } from '../../auth/tokenManager';
 
 const {FileMeta} = NativeModules;
 const {setInserting} = useDbStore.getState();
@@ -186,7 +186,7 @@ export const handleDriveLink = async (
   selectedCategory,
 ) => {
   try {
-    const {accessToken} = await GoogleSignin.getTokens();
+    const accessToken = await getGoogleAccessToken();
 
     // Fetch basic metadata from Drive API
     const response = await axios.get(

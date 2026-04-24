@@ -1,87 +1,93 @@
 package com.audiotracker;
 
+import android.app.Notification;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
 import android.content.Context;
+import android.content.pm.ServiceInfo;
+import android.os.Build;
 import android.util.Log;
 
 import androidx.annotation.NonNull;
+import androidx.core.app.NotificationCompat;
+import androidx.work.ForegroundInfo;
 import androidx.work.Worker;
 import androidx.work.WorkerParameters;
 
 import com.audiotracker.backup.BackupEngine;
-import com.facebook.react.ReactApplication;
-import com.facebook.react.ReactInstanceManager;
-import com.facebook.react.bridge.ReactContext;
-import com.facebook.react.modules.core.DeviceEventManagerModule;
+import com.audiotracker.bridge.ReactEmitter;
 
 public class BackupWorker extends Worker {
 
-    public BackupWorker(
-            @NonNull Context context,
-            @NonNull WorkerParameters params
-    ) {
+    private static final String CHANNEL_ID  = "backup_channel";
+    private static final int    NOTIF_ID    = 1001;
+
+    public BackupWorker(@NonNull Context context, @NonNull WorkerParameters params) {
         super(context, params);
     }
 
     @NonNull
     @Override
     public Result doWork() {
+        Log.d("BackupWorker", "Worker started");
 
-        Log.d("BackupWorker","Worker started");
+        // ✅ Promote to foreground service so OS doesn't kill us
+        try {
+            setForegroundAsync(createForegroundInfo());
+        } catch (Exception e) {
+            Log.w("BackupWorker", "setForeground failed (non-fatal)", e);
+        }
+
+        ReactEmitter.emit(getApplicationContext(), "backupStarted", null);
 
         try {
-
-            BackupEngine engine =
-                    new BackupEngine(getApplicationContext());
-
+            BackupEngine engine = new BackupEngine(getApplicationContext());
             engine.performBackup();
 
-            Log.d("BackupWorker","Backup finished");
+            Log.d("BackupWorker", "Backup finished");
+            ReactEmitter.emit(getApplicationContext(), "backupCompleted", null);
 
-            emitEventToReact("backupCompleted");
-
+            DriveSyncWorker.enqueue(getApplicationContext());
             return Result.success();
 
         } catch (Exception e) {
-
-            Log.e("BackupWorker","Backup failed",e);
-
+            Log.e("BackupWorker", "Backup failed", e);
+            ReactEmitter.emit(getApplicationContext(), "backupFailed", null);
             return Result.retry();
         }
     }
 
-    private void emitEventToReact(String eventName) {
+    private ForegroundInfo createForegroundInfo() {
+        Context ctx = getApplicationContext();
 
-        try {
-
-            ReactApplication reactApplication =
-                    (ReactApplication) getApplicationContext();
-
-            ReactInstanceManager manager =
-                    reactApplication
-                            .getReactNativeHost()
-                            .getReactInstanceManager();
-
-            ReactContext reactContext =
-                    manager.getCurrentReactContext();
-
-            if (reactContext != null) {
-
-                reactContext
-                        .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter.class)
-                        .emit(eventName, null);
-
-                Log.d("BackupWorker","Event emitted to React");
-
-            } else {
-
-                Log.d("BackupWorker","React context not active, skipping event");
-
-            }
-
-        } catch (Exception e) {
-
-            Log.e("BackupWorker","Failed emitting event",e);
-
+        // Create channel (required on API 26+, safe to call repeatedly)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            NotificationChannel channel = new NotificationChannel(
+                    CHANNEL_ID,
+                    "Backup",
+                    NotificationManager.IMPORTANCE_LOW  // silent — no sound/vibration
+            );
+            channel.setShowBadge(false);
+            ctx.getSystemService(NotificationManager.class)
+               .createNotificationChannel(channel);
         }
+
+        Notification notification = new NotificationCompat.Builder(ctx, CHANNEL_ID)
+                .setContentTitle("Backing up...")
+                .setSmallIcon(android.R.drawable.ic_menu_save)
+                .setOngoing(true)       // can't be dismissed by user
+                .setSilent(true)
+                .build();
+
+        // On API 29+ you must declare the foreground service type
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            return new ForegroundInfo(
+                    NOTIF_ID,
+                    notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+            );
+        }
+
+        return new ForegroundInfo(NOTIF_ID, notification);
     }
 }

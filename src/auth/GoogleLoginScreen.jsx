@@ -97,8 +97,6 @@ const GoogleLoginScreen = ({navigation}) => {
       // await resetDatabase()
       await initDatabase();
       await initUserDatabase(userInfo.user.id);
-      const defaultNotebookIdValue = await getOrCreateDefaultNotebookId();
-      defaultNotebookId.current = defaultNotebookIdValue;
 
       setUserInfo(userInfo.user);
       // const ws = new WebSocketManager(userInfo.user.id, handleWSNotifications);
@@ -109,10 +107,16 @@ const GoogleLoginScreen = ({navigation}) => {
       console.log('Has restore been checked :', alreadyChecked);
       if (!alreadyChecked) {
         console.log('Checking for backup...');
-        checkAndPromptRestore(userInfo.user.id);
+        //inside this fn, after restore , we set last backup time to now
+        await checkAndPromptRestore(userInfo.user.id).then(async () => {
+          console.log('Restore check completed');
+          //inside this fn, after restore , we set last backup time to now
+          const defaultNotebookIdValue = await getOrCreateDefaultNotebookId();
+          defaultNotebookId.current = defaultNotebookIdValue;
+        });
       }
       const settings = await initializeSettings(); // initialises the store with default/stored settings
-       const granted = await requestPermissions();
+      // const granted = await requestPermissions();
       appStartupBackupRoutine();
 
       navigation.replace('MainApp', {user: userInfo.user});

@@ -17,8 +17,8 @@ import RNFetchBlob from 'react-native-blob-util';
 import {getDb} from '../database/database';
 import {deleteFile} from '../backupAdv/BackupDbService';
 import Icon from 'react-native-vector-icons/MaterialIcons';
-import { DRIVE_MAIN_FOLDER_NAME, getOrCreateDriveFolder } from '../backupAdv/backupNew';
 import { getGoogleAccessToken } from '../auth/tokenManager';
+import { DRIVE_MAIN_FOLDER_NAME, getOrCreateDriveFolder } from '../backupRestore/restoreManager';
 const BACKUP_DIR = `${RNFS.DocumentDirectoryPath}/backups`;
 
 const theme = {
@@ -213,8 +213,8 @@ export default function BackupExplorerScreen() {
     // =========================
     // const stored = await AsyncStorage.getItem('driveFolderIds');
     // const folderIds = JSON.parse(stored || '{}');
-    const appFolderId = getOrCreateDriveFolder(DRIVE_MAIN_FOLDER_NAME);
-    const imageFolderId = getOrCreateDriveFolder('images', appFolderId);
+    const appFolderId = await getOrCreateDriveFolder(DRIVE_MAIN_FOLDER_NAME);
+    const imageFolderId = await getOrCreateDriveFolder('images', appFolderId);
 
     const drive = [];
 

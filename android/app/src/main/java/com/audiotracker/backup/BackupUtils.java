@@ -333,19 +333,23 @@ public static void runCompaction(
         }
         return true;
     }
-
-    public static String getCurrentTimestamp() {
-        return new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new Date());
+    
+     public static String getCurrentTimestamp() {
+        SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
+        sdf.setTimeZone(TimeZone.getTimeZone("UTC"));  // Set to UTC
+        return sdf.format(new Date());
     }
 
     public static long toEpoch(String ts) throws Exception {
-        return new SimpleDateFormat("yyyy-MM-dd HH:mm:ss")
-                .parse(ts).getTime() / 1000;
+        SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
+        sdf.setTimeZone(TimeZone.getTimeZone("UTC"));  // Parse as UTC
+        return sdf.parse(ts).getTime() / 1000;
     }
 
     public static String fromEpoch(long epoch) {
-        return new SimpleDateFormat("yyyy-MM-dd HH:mm:ss")
-                .format(new Date(epoch * 1000));
+        SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
+        sdf.setTimeZone(TimeZone.getTimeZone("UTC"));  // Format as UTC
+        return sdf.format(new Date(epoch * 1000));
     }
 
     public static void saveBackupTimestamp(Context c, String userId, String time) {

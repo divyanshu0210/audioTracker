@@ -1,13 +1,8 @@
 import {Alert} from 'react-native';
-import {GoogleSignin} from '@react-native-google-signin/google-signin';
 import RNFetchBlob from 'react-native-blob-util';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {getDb} from '../database/database';
 import useDbStore from '../database/dbStore';
-import {
-  DRIVE_MAIN_FOLDER_NAME,
-  getOrCreateDriveFolder,
-} from '../backupAdv/backupNew';
 import {getGoogleAccessToken} from '../auth/tokenManager';
 import {extractEpochs} from '../Settings/BackupExplorerScreen';
 import useBackupStore from '../stores/backupStore';
@@ -16,7 +11,7 @@ import useBackupStore from '../stores/backupStore';
 /* Constants                           */
 /* ---------------------------------- */
 
-const IMAGE_FOLDER = 'images';
+export const DRIVE_MAIN_FOLDER_NAME = 'AppBackups';
 
 const TABLE_ORDER = [
   'categories',
@@ -80,6 +75,52 @@ const parseTimestampFromName = name => {
 /* ---------------------------------- */
 /* Drive listing                       */
 /* ---------------------------------- */
+
+export async function getOrCreateDriveFolder(folderName, parentId = 'root') {
+  try {
+    const accessToken = await getGoogleAccessToken();
+    const query = `name='${folderName}' and mimeType='application/vnd.google-apps.folder' and trashed=false and '${parentId}' in parents`;
+
+    const response = await RNFetchBlob.fetch(
+      'GET',
+      `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&fields=files(id,name)`  ,
+      {Authorization: `Bearer ${accessToken}`},
+    );
+
+    console.log('[drive] Folder query response:', response.data);
+
+    const {files} = response.json();
+
+    if (files?.length > 0) {
+      console.log(`[DRIVE] Folder found: ${folderName} (${files[0].id})`);
+      return files[0].id;
+    }
+
+    console.log(`[DRIVE] Creating folder: ${folderName}`);
+
+    const createResponse = await RNFetchBlob.fetch(
+      'POST',
+      'https://www.googleapis.com/drive/v3/files',
+      {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      JSON.stringify({
+        name: folderName,
+        mimeType: 'application/vnd.google-apps.folder',
+        parents: [parentId],
+      }),
+    );
+
+    const newFolder = createResponse.json();
+
+    console.log(`[DRIVE] Folder created: ${folderName} (${newFolder.id})`);
+    return newFolder.id;
+  } catch (error) {
+    console.error(`[DRIVE] Folder error (${folderName}):`, error);
+    throw error;
+  }
+}
 
 export async function listAllDriveBackups() {
   console.log('[Restore] Listing all Drive backups');
@@ -445,19 +486,6 @@ export async function checkAndPromptRestore(userId) {
 }
 
 export const formatDateTime = (date = new Date()) => {
-  const pad = n => String(n).padStart(2, '0');
-
-  return (
-    date.getFullYear() +
-    '-' +
-    pad(date.getMonth() + 1) +
-    '-' +
-    pad(date.getDate()) +
-    ' ' +
-    pad(date.getHours()) +
-    ':' +
-    pad(date.getMinutes()) +
-    ':' +
-    pad(date.getSeconds())
-  );
+  // Returns "2024-01-15 15:30:45" UTC format
+  return date.toISOString().replace('T', ' ').substring(0, 19);
 };

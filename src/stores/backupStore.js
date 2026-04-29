@@ -36,16 +36,14 @@ refreshLastBackupTime: async () => {
       set({ lastBackupSyncTime: 'Never' });
       return;
     }
-    const lastSync = await BackupModule.getPreference(
-      'LAST_BACKUP_SYNC_TIME_' + userId
-    );
+    const lastSync = await BackupModule.getPreference('LAST_BACKUP_SYNC_TIME_' + userId);
     if (!lastSync || lastSync.startsWith('2000-01-01')) {
       set({ lastBackupSyncTime: 'Never' });
       return;
     }
-    // ✅ format to human readable
-    // const formatted = get().formatRelativeTime(lastSync);
-    set({ lastBackupSyncTime: lastSync });
+    // Convert UTC "2026-04-28 15:30:00" to local display
+    const localTime = new Date(lastSync.replace(' ', 'T') + 'Z').toLocaleString();
+    set({ lastBackupSyncTime: localTime });
   } catch (e) {
     console.log('Backup time load error', e);
     set({ lastBackupSyncTime: 'Never' });

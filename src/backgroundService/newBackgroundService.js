@@ -1,12 +1,11 @@
 import BackgroundService from 'react-native-background-actions';
-import { syncBackupsToDrive } from '../backupAdv/backupNew';
 import { DeviceEventEmitter, PermissionsAndroid } from 'react-native';
 
 const oneTimeTask = async () => {
   try {
     console.log('[SERVICE] Running one-time backup sync');
 
-    await syncBackupsToDrive();
+    // await syncBackupsToDrive();
 
     console.log('[SERVICE] Task finished');
   } catch (e) {

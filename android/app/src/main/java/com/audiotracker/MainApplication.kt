@@ -54,7 +54,7 @@ class MainApplication : Application(), ReactApplication {
      // Register backup lifecycle observer.
     // Triggers a one-time BackupWorker every time the app goes to background.
     // Must be called on the main thread — onCreate() qualifies.
-    BackupLifecycleObserver.register(this)
+    //BackupLifecycleObserver.register(this)
     registerActivityLifecycleCallbacks(BackupPauseObserver())
   }
 }

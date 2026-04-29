@@ -16,8 +16,6 @@ import {
 } from 'react-native';
 import useSettingsStore from '../Settings/settingsStore';
 import {syncUserToBackend} from '../appMentorBackend/userMgt';
-import WebSocketManager from '../appWebSocket/WebSocketManager';
-import {handleWSNotifications} from '../appNotification/notificationsMgt';
 import {
   checkAndPromptRestore,
   hasRestoreCheckCompleted,
@@ -99,7 +97,6 @@ const GoogleLoginScreen = ({navigation}) => {
       await initUserDatabase(userInfo.user.id);
 
       setUserInfo(userInfo.user);
-      // const ws = new WebSocketManager(userInfo.user.id, handleWSNotifications);
       setupFCM(userInfo.user);
 
       // Check for backup restore prompt
@@ -116,7 +113,6 @@ const GoogleLoginScreen = ({navigation}) => {
         });
       }
       const settings = await initializeSettings(); // initialises the store with default/stored settings
-      // const granted = await requestPermissions();
       appStartupBackupRoutine();
 
       navigation.replace('MainApp', {user: userInfo.user});
@@ -128,10 +124,6 @@ const GoogleLoginScreen = ({navigation}) => {
 
   const handleBackupAndRestore = () => {};
 
-  const handleNotification = data => {
-    console.log('📩 Notification:', data.message);
-    // Show in-app banner or save to state
-  };
 
   const handleSignInError = error => {
     let errorMessage = 'An unknown error occurred. Please try again.';

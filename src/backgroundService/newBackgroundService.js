@@ -1,26 +1,11 @@
 import BackgroundService from 'react-native-background-actions';
-import { DeviceEventEmitter, PermissionsAndroid } from 'react-native';
-
-const oneTimeTask = async () => {
-  try {
-    console.log('[SERVICE] Running one-time backup sync');
-
-    // await syncBackupsToDrive();
-
-    console.log('[SERVICE] Task finished');
-  } catch (e) {
-    console.error('[SERVICE] Error:', e);
-  } finally {
-    // 🔴 VERY IMPORTANT: stop service manually
-    DeviceEventEmitter.emit('backupAllCompleted');
-    await BackgroundService.stop();
-  }
-};
+import {PermissionsAndroid, Platform} from 'react-native';
+import {attemptRestore} from '../backupRestore/restoreManager';
 
 const options = {
-  taskName: 'Backup Sync',
-  taskTitle: 'Syncing backups',
-  taskDesc: 'Uploading your data to Drive',
+  taskName: 'Restore Data',
+  taskTitle: 'Restoring your data',
+  taskDesc: 'Restoring data from Drive backup',
   taskIcon: {
     name: 'ic_launcher',
     type: 'mipmap',
@@ -28,22 +13,48 @@ const options = {
   color: '#00ff00',
 };
 
-export const runBackupDriveSync = async (source) => {
-  if (BackgroundService.isRunning()) {
-    console.log('[SERVICE] Already running, skipping');
-    return;
+// The background task - receives the restore function as parameter
+const restoreTask = async taskData => {
+  try {
+    console.log('[SERVICE] Running restore in background');
+
+    const {userId, backups} = taskData;
+
+    // Execute the restore function directly
+    await attemptRestore(userId, backups);
+
+    console.log('[SERVICE] Restore completed successfully');
+  } catch (e) {
+    console.error('[SERVICE] Restore error:', e);
+  } finally {
+    // Stop the background service when done
+    await BackgroundService.stop();
   }
-  
-  console.log('[SERVICE] Backup Sync Started By',source);
-  await BackgroundService.start(oneTimeTask, options);
+};
+
+export const runRestoreInBackground = async (userId, backups) => {
+  if (BackgroundService.isRunning()) {
+    console.log('[SERVICE] Service already running, stopping first');
+    await BackgroundService.stop();
+  }
+
+  console.log('[SERVICE] Starting restore background service');
+
+  await BackgroundService.start(restoreTask, {
+    ...options,
+    parameters: {
+      userId,
+      backups
+    },
+  });
 };
 
 export const requestPermissions = async () => {
-    if (Platform.OS === 'android') {
-      const granted = await PermissionsAndroid.request(
-        PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS
-      );
-      return granted === PermissionsAndroid.RESULTS.GRANTED;
-    }
-    return true;
-  };
+  if (Platform.OS === 'android') {
+    const granted = await PermissionsAndroid.request(
+      PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS,
+    );
+    return granted === PermissionsAndroid.RESULTS.GRANTED;
+  }
+  return true;
+};

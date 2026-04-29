@@ -6,6 +6,7 @@ import useDbStore from '../database/dbStore';
 import {getGoogleAccessToken} from '../auth/tokenManager';
 import {extractEpochs} from '../Settings/BackupExplorerScreen';
 import useBackupStore from '../stores/backupStore';
+import { runRestoreInBackground } from '../backgroundService/newBackgroundService';
 
 /* ---------------------------------- */
 /* Constants                           */
@@ -376,28 +377,22 @@ const upsertBackupFileEntry = (tx, fileName, driveId) => {
   );
 };
 
-async function attemptRestore(userId, backups) {
+/* ---------------------------------- */
+/* UI Flow                             */
+/* ---------------------------------- */
+
+export async function attemptRestore(userId, backups) {
   console.log('[Restore] attemptRestore triggered');
   await runRestore(userId, backups);
   await markRestoreCheckCompleted(userId);
 }
 
-/* ---------------------------------- */
-/* UI Flow                             */
-/* ---------------------------------- */
-
 async function handleRestoreFlow(userId, backups) {
   console.log('[Restore] handleRestoreFlow started');
 
   try {
-    await attemptRestore(userId, backups);
-
-    console.log('[Restore] Restore completed successfully');
-
-    Alert.alert(
-      'Restore Complete',
-      'Your data has been restored successfully.',
-    );
+    // Start background restore
+    await runRestoreInBackground(userId, backups);
   } catch (e) {
     console.error('[Restore] Failed', e);
 
@@ -432,12 +427,10 @@ export async function checkAndPromptRestore(userId) {
 
   try {
     const backups = await listAllDriveBackups();
-
     setCheckingAvailableBackup(false);
 
     if (!backups.length) {
       console.log('[Restore] No backups found');
-
       Alert.alert('No Backup Found', 'No backups available.');
       await markRestoreCheckCompleted(currentUserId);
       return;
@@ -445,28 +438,35 @@ export async function checkAndPromptRestore(userId) {
 
     console.log('[Restore] Backup found, prompting user');
 
-    Alert.alert(
-      'Backup Found',
-      'A backup was found for your account. Restore now?',
-      [
-        {
-          text: 'Skip',
-          style: 'cancel',
-          onPress: async () => {
-            console.log('[Restore] User skipped restore');
-            await markRestoreCheckCompleted(currentUserId);
+    // Return a promise that resolves when user makes a choice
+    return new Promise((resolve) => {
+      Alert.alert(
+        'Backup Found',
+        'A backup was found for your account. Restore now?',
+        [
+          {
+            text: 'Skip',
+            style: 'cancel',
+            onPress: async () => {
+              console.log('[Restore] User skipped restore');
+              await markRestoreCheckCompleted(currentUserId);
+              resolve(); // Resolve the promise
+            },
           },
-        },
-        {
-          text: 'Restore',
-          onPress: () => {
-            console.log('[Restore] User accepted restore');
-            handleRestoreFlow(currentUserId, backups);
+          {
+            text: 'Restore',
+            onPress: () => {
+              console.log('[Restore] User accepted restore');
+              // Start background restore
+              handleRestoreFlow(currentUserId, backups).then(() => {
+                resolve(); // Resolve when restore flow completes
+              });
+            },
           },
-        },
-      ],
-      {cancelable: false},
-    );
+        ],
+        {cancelable: false},
+      );
+    });
   } catch (e) {
     console.error('[Restore] Fatal error', e);
   } finally {

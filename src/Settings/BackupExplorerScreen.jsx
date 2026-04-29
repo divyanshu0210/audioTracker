@@ -15,10 +15,9 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import RNFetchBlob from 'react-native-blob-util';
 
 import {getDb} from '../database/database';
-import {deleteFile} from '../backupAdv/BackupDbService';
 import Icon from 'react-native-vector-icons/MaterialIcons';
 import { getGoogleAccessToken } from '../auth/tokenManager';
-import { DRIVE_MAIN_FOLDER_NAME, getOrCreateDriveFolder } from '../backupRestore/restoreManager';
+import {  DRIVE_MAIN_FOLDER_NAME, getOrCreateDriveFolder } from '../backupRestore/restoreManager';
 const BACKUP_DIR = `${RNFS.DocumentDirectoryPath}/backups`;
 
 const theme = {
@@ -82,6 +81,36 @@ const getAllDbFiles = async () => {
         (_, err) => reject(err),
       );
     });
+  });
+};
+
+export const deleteFile = (file) => {
+  const db = getDb();
+
+  console.log(`[DB] Deleting file entry → ${file}`);
+
+  return new Promise((resolve, reject) => {
+    db.transaction(
+      tx => {
+        tx.executeSql(
+          `DELETE FROM ${TABLE} WHERE file=?`,
+          [file],
+          (_, res) => {
+            console.log(`[DB] File deleted → ${file}, rowsAffected: ${res.rowsAffected}`);
+            resolve();
+          },
+          (_, err) => {
+            console.error(`[DB] SQL error deleting ${file}:`, err);
+            reject(err);
+            return true;
+          },
+        );
+      },
+      error => {
+        console.error('[DB] Transaction error (DELETE):', error);
+        reject(error);
+      },
+    );
   });
 };
 

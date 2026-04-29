@@ -354,12 +354,12 @@ export default function App() {
           </Text>
         </View>
       )}
-      {restoreInProgress && (
+      {/* {restoreInProgress && (
         <View style={styles.overlay}>
           <ActivityIndicator size="large" color="#fff" />
           <Text style={styles.loadingText}>Getting things ready..</Text>
         </View>
-      )}
+      )} */}
     </>
   );
 }

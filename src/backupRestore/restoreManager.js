@@ -6,7 +6,7 @@ import useDbStore from '../database/dbStore';
 import {getGoogleAccessToken} from '../auth/tokenManager';
 import {extractEpochs} from '../Settings/BackupExplorerScreen';
 import useBackupStore from '../stores/backupStore';
-import { runRestoreInBackground } from '../backgroundService/newBackgroundService';
+import useRestoreStore from './restoreStore';
 
 /* ---------------------------------- */
 /* Constants                           */
@@ -26,11 +26,17 @@ const TABLE_ORDER = [
 ];
 
 /* ---------------------------------- */
-/* Restore state helpers               */
+/* AsyncStorage keys                   */
 /* ---------------------------------- */
 
 const restoreKey = userId => `restoreCheckCompleted_${userId}`;
 const restoreLockKey = userId => `restoreInProgress_${userId}`;
+const restoreProgressKey = userId => `restoreProgress_${userId}`;
+const restoreBackupsKey = userId => `restorePendingBackups_${userId}`;
+
+/* ---------------------------------- */
+/* Restore state helpers               */
+/* ---------------------------------- */
 
 export async function hasRestoreCheckCompleted(userId) {
   console.log('[Restore] Checking restore completed for:', userId);
@@ -42,6 +48,14 @@ export async function hasRestoreCheckCompleted(userId) {
 export async function markRestoreCheckCompleted(userId) {
   console.log('[Restore] Marking restore completed for:', userId);
   await AsyncStorage.setItem(restoreKey(userId), 'true');
+  await AsyncStorage.removeItem(restoreProgressKey(userId));
+  await AsyncStorage.removeItem(restoreBackupsKey(userId));
+
+  await useBackupStore.getState().setNativePreference(
+    'LAST_NATIVE_BACKUP_TIME_' + userId,
+    formatDateTime(),
+  );
+
 }
 
 async function acquireRestoreLock(userId) {
@@ -60,6 +74,44 @@ async function acquireRestoreLock(userId) {
 async function releaseRestoreLock(userId) {
   console.log('[Restore] Releasing lock for:', userId);
   await AsyncStorage.removeItem(restoreLockKey(userId));
+}
+
+export async function isRestoreInProgress(userId) {
+  return (await AsyncStorage.getItem(restoreLockKey(userId))) === 'true';
+}
+
+export async function saveRestoreProgress(userId, progress) {
+  await AsyncStorage.setItem(
+    restoreProgressKey(userId),
+    JSON.stringify(progress),
+  );
+}
+
+export async function loadRestoreProgress(userId) {
+  const raw = await AsyncStorage.getItem(restoreProgressKey(userId));
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+export async function savePendingBackups(userId, backups) {
+  await AsyncStorage.setItem(
+    restoreBackupsKey(userId),
+    JSON.stringify(backups),
+  );
+}
+
+export async function loadPendingBackups(userId) {
+  const raw = await AsyncStorage.getItem(restoreBackupsKey(userId));
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
 }
 
 /* ---------------------------------- */
@@ -84,11 +136,9 @@ export async function getOrCreateDriveFolder(folderName, parentId = 'root') {
 
     const response = await RNFetchBlob.fetch(
       'GET',
-      `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&fields=files(id,name)`  ,
+      `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&fields=files(id,name)`,
       {Authorization: `Bearer ${accessToken}`},
     );
-
-    console.log('[drive] Folder query response:', response.data);
 
     const {files} = response.json();
 
@@ -127,10 +177,7 @@ export async function listAllDriveBackups() {
   console.log('[Restore] Listing all Drive backups');
 
   const accessToken = await getGoogleAccessToken();
-  console.log('[Restore] Got access token');
-
   const all = [];
-
   const rootFolderId = await getOrCreateDriveFolder(DRIVE_MAIN_FOLDER_NAME);
   console.log('[Restore] Root folder ID:', rootFolderId);
 
@@ -138,10 +185,9 @@ export async function listAllDriveBackups() {
     'GET',
     `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(
       `'${rootFolderId}' in parents and trashed=false`,
-    )}&fields=files(id,name,mimeType)`,
+    )}&fields=files(id,name,mimeType,size)`,
     {Authorization: `Bearer ${accessToken}`},
   );
-
   const rootFiles = rootRes.json().files || [];
   console.log('[Restore] Root files:', rootFiles.length);
 
@@ -154,7 +200,6 @@ export async function listAllDriveBackups() {
   console.log('[Restore] Image folder found:', !!imageFolder);
 
   let imageFiles = [];
-
   if (imageFolder) {
     console.log('[Restore] Fetching image folder contents');
 
@@ -162,19 +207,15 @@ export async function listAllDriveBackups() {
       'GET',
       `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(
         `'${imageFolder.id}' in parents and trashed=false`,
-      )}&fields=files(id,name)`,
+      )}&fields=files(id,name,size)`,
       {Authorization: `Bearer ${accessToken}`},
     );
-
     imageFiles = imgRes.json().files || [];
     console.log('[Restore] Image files:', imageFiles.length);
   }
 
-  const allFiles = [...rootFiles, ...imageFiles];
-
-  for (const f of allFiles) {
+  for (const f of [...rootFiles, ...imageFiles]) {
     if (!f.name.endsWith('.json')) continue;
-
     const ts = parseTimestampFromName(f.name);
     if (!ts) continue;
 
@@ -184,139 +225,326 @@ export async function listAllDriveBackups() {
       id: f.id,
       name: f.name,
       timestamp: ts,
+      size: Number(f.size) || 0,
     });
   }
 
-  console.log('[Restore] Total backups found:', all.length);
   return all;
 }
 
 /* ---------------------------------- */
-/* Download                            */
+/* Download with continuous progress   */
 /* ---------------------------------- */
 
-async function downloadBackup(fileId) {
-  console.log('[Restore] Downloading backup:', fileId);
-
+/**
+ * Downloads a single backup file and reports byte-level progress continuously.
+ * Uses RNFetchBlob's progress callback which fires every chunk.
+ */
+async function downloadBackup(fileId, expectedBytes, onBytes, onChunk) {
   const accessToken = await getGoogleAccessToken();
 
-  const res = await RNFetchBlob.fetch(
-    'GET',
-    `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,
-    {Authorization: `Bearer ${accessToken}`},
-  );
+  return new Promise((resolve, reject) => {
+    let lastReportedBytes = 0;
+    let responseText = '';
 
-  if (res.info().status >= 400) {
-    console.error('[Restore] Download failed:', fileId);
-    throw new Error('Failed to download backup');
-  }
+    RNFetchBlob.config({
+      fileCache: false,
+      timeout: 60000, // 60 second timeout
+    })
+      .fetch(
+        'GET',
+        `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,
+        {
+          Authorization: `Bearer ${accessToken}`,
+          'Cache-Control': 'no-cache',
+        },
+      )
+      // This fires on every chunk received - gives us continuous progress
+      .progress((received, total) => {
+        // total from headers - sometimes -1 if unknown
+        let denominator = total > 0 ? total : expectedBytes;
 
-  const parsed = JSON.parse(res.text());
-  console.log('[Restore] Download successful:', fileId);
+        // Call onChunk for every chunk (more frequent updates)
+        if (onChunk && typeof onChunk === 'function' && denominator > 0) {
+          onChunk(received, denominator);
+        }
 
-  return parsed;
+        // Call onBytes for cumulative tracking (less frequent)
+        if (onBytes && received - lastReportedBytes > 1024 * 10) {
+          // Report every ~10KB
+          lastReportedBytes = received;
+          onBytes(received, denominator);
+        }
+      })
+      .then(res => {
+        if (res.info().status >= 400) {
+          reject(
+            new Error(`HTTP ${res.info().status}: Failed to download backup`),
+          );
+          return;
+        }
+
+        // Get the response as string
+        responseText = res.text();
+
+        try {
+          const data = JSON.parse(responseText);
+          // Calculate actual bytes using string length (works in React Native)
+          const actualBytes = responseText.length;
+          resolve({data, actualBytes});
+        } catch (e) {
+          console.error('[DOWNLOAD] JSON parse error:', e);
+          console.error(
+            '[DOWNLOAD] First 500 chars of response:',
+            responseText.substring(0, 500),
+          );
+          reject(new Error('Failed to parse backup JSON: ' + e.message));
+        }
+      })
+      .catch(err => {
+        console.error('[DOWNLOAD] Network error:', err);
+        reject(new Error('Network error during download: ' + err.message));
+      });
+  });
 }
 
 /* ---------------------------------- */
-/* Main restore pipeline               */
+/* Core restore runner                 */
 /* ---------------------------------- */
 
-async function runRestore(userId, backups) {
-  console.log('[Restore] Starting restore for user:', userId);
-
+async function runRestore(
+  userId,
+  backups,
+  onProgress = null,
+  completedFiles = [],
+) {
   const {setRestoreInProgress} = useDbStore.getState();
   const db = getDb();
 
-  await acquireRestoreLock(userId);
   setRestoreInProgress(true);
 
   try {
-    const dbBackups = backups.filter(b => b.name.startsWith('L'));
-    const imageBackups = backups.filter(b => b.name.startsWith('img_'));
-
-    console.log('[Restore] DB backups:', dbBackups.length);
-    console.log('[Restore] Image backups:', imageBackups.length);
+    const dbBackups = backups.filter(b => b.name && b.name.startsWith('L'));
+    const imageBackups = backups.filter(
+      b => b.name && b.name.startsWith('img_'),
+    );
 
     dbBackups.sort((a, b) => a.timestamp - b.timestamp);
     imageBackups.sort((a, b) => a.timestamp - b.timestamp);
 
-    const dbDataList = [];
-    for (const b of dbBackups) {
-      console.log('[Restore] Downloading DB backup:', b.name);
-      const data = await downloadBackup(b.id);
-      if (data) dbDataList.push({name: b.name, data, driveId: b.id});
+    const allBackups = [...dbBackups, ...imageBackups];
+
+    // Filter out any invalid backups
+    const validBackups = allBackups.filter(b => b.id && b.size > 0);
+
+    if (validBackups.length === 0) {
+      console.warn('[Restore] No valid backups found');
+      if (onProgress) onProgress(100);
+      return;
     }
 
-    const imageDataList = [];
-    for (const b of imageBackups) {
-      console.log('[Restore] Downloading image backup:', b.name);
-      const data = await downloadBackup(b.id);
-      if (data) imageDataList.push({name: b.name, data});
-    }
+    const totalBytes = validBackups.reduce((sum, b) => sum + (b.size || 0), 0);
+    const priorBytes = validBackups
+      .filter(b => completedFiles.includes(b.name))
+      .reduce((sum, b) => sum + (b.size || 0), 0);
 
-    console.log('[Restore] Starting DB transaction');
+    let downloadedBytes = priorBytes;
+    let lastReportedPercent = 0;
+    let lastEmitTime = 0;
 
-    await new Promise((resolve, reject) => {
-      db.transaction(
-        tx => {
-          tx.executeSql('PRAGMA defer_foreign_keys = ON');
+    // For smooth progress updates
+    const emitProgress = () => {
+      if (!onProgress || totalBytes === 0) return;
 
-          for (const {name, data, driveId} of dbDataList) {
-            console.log('[Restore] Inserting DB backup:', name);
-            insertData(data, name, tx);
-            upsertBackupFileEntry(tx, name, driveId);
-          }
+      // Throttle to max 20 updates per second (50ms)
+      const now = Date.now();
+      if (now - lastEmitTime < 50 && lastReportedPercent < 99) {
+        return;
+      }
+      lastEmitTime = now;
 
-          for (const {name, data} of imageDataList) {
-            console.log('[Restore] Inserting image backup:', name);
-            insertData(data, name, tx);
-          }
-
-          tx.executeSql(
-            `INSERT INTO notes(notes) VALUES('rebuild')`,
-            [],
-            () => console.log('[Restore] FTS index rebuilt'),
-            (_, err) => {
-              console.error('[Restore] FTS rebuild failed:', err);
-              return true;
-            }
-          );
-        },
-        err => {
-          console.error('[Restore] Transaction failed:', err);
-          reject(err);
-        },
-        () => {
-          console.log('[Restore] Transaction success');
-          resolve();
-        },
+      const pct = Math.min(
+        Math.floor((downloadedBytes / totalBytes) * 100),
+        99,
       );
+      // Only update if changed
+      if (pct !== lastReportedPercent) {
+        lastReportedPercent = pct;
+        onProgress(pct);
+      }
+    };
+
+    emitProgress();
+
+    const dbDataList = [];
+    const imageDataList = [];
+
+    // Download with byte-level progress reporting for smooth animation
+    const downloadWithProgress = async backup => {
+      if (completedFiles.includes(backup.name)) return null;
+
+      return new Promise((resolve, reject) => {
+        let fileDownloadedBytes = 0;
+        let lastProgressUpdate = 0;
+
+        downloadBackup(
+          backup.id,
+          backup.size,
+          (received, total) => {
+            const delta = received - fileDownloadedBytes;
+            if (delta > 0) {
+              fileDownloadedBytes = received;
+              downloadedBytes += delta;
+              const now = Date.now();
+              if (now - lastProgressUpdate > 100) {
+                lastProgressUpdate = now;
+                emitProgress();
+              }
+            }
+          },
+          (received, total) => {
+            if (received > fileDownloadedBytes) {
+              const delta = received - fileDownloadedBytes;
+              fileDownloadedBytes = received;
+              downloadedBytes += delta;
+              const now = Date.now();
+              if (now - lastProgressUpdate > 50) {
+                lastProgressUpdate = now;
+                emitProgress();
+              }
+            }
+          },
+        )
+          .then(result => resolve(result))
+          .catch(err => reject(err));
+      });
+    };
+
+    // Download DB backups sequentially
+    for (const backup of dbBackups) {
+      if (completedFiles.includes(backup.name)) continue;
+      try {
+        const result = await downloadWithProgress(backup);
+        if (result && result.data) {
+          dbDataList.push({
+            name: backup.name,
+            data: result.data,
+            driveId: backup.id,
+          });
+        }
+      } catch (err) {
+        console.error(`[Restore] Failed to download ${backup.name}:`, err);
+        throw new Error(`Failed to download ${backup.name}: ${err.message}`);
+      }
+    }
+
+    // Download image backups
+    for (const backup of imageBackups) {
+      if (completedFiles.includes(backup.name)) continue;
+      try {
+        const result = await downloadWithProgress(backup);
+        if (result && result.data) {
+          imageDataList.push({name: backup.name, data: result.data});
+        }
+      } catch (err) {
+        console.error(`[Restore] Failed to download ${backup.name}:`, err);
+        throw new Error(`Failed to download ${backup.name}: ${err.message}`);
+      }
+    }
+
+    // DB write phase
+    if (dbDataList.length > 0 || imageDataList.length > 0) {
+      await new Promise((resolve, reject) => {
+        db.transaction(
+          tx => {
+            tx.executeSql('PRAGMA defer_foreign_keys = ON');
+
+            for (const {name, data, driveId} of dbDataList) {
+              insertData(data, name, tx);
+              upsertBackupFileEntry(tx, name, driveId);
+            }
+            for (const {name, data} of imageDataList) {
+              insertData(data, name, tx);
+            }
+
+            tx.executeSql(
+              `INSERT INTO notes(notes) VALUES('rebuild')`,
+              [],
+              () => {},
+              (_, err) => {
+                console.error('[Restore] FTS rebuild failed:', err);
+                return true;
+              },
+            );
+          },
+          err => reject(err),
+          () => resolve(),
+        );
+      });
+    }
+
+    // Save progress
+    const allDoneNames = [
+      ...completedFiles,
+      ...dbDataList.map(b => b.name),
+      ...imageDataList.map(b => b.name),
+    ];
+
+    await saveRestoreProgress(userId, {
+      completedFiles: allDoneNames,
+      totalBytes,
+      downloadedBytes: totalBytes,
     });
+
+    if (onProgress) onProgress(100);
+  } catch (error) {
+    console.error('[Restore] runRestore failed:', error);
+    throw error;
   } finally {
-    console.log('[Restore] Finishing restore');
     setRestoreInProgress(false);
+  }
+}
+/* ---------------------------------- */
+/* Public entry point (resume-aware)   */
+/* ---------------------------------- */
+
+export async function attemptRestore(userId, backups, onProgress = null) {
+  const alreadyLocked =
+    (await AsyncStorage.getItem(restoreLockKey(userId))) === 'true';
+
+  if (!alreadyLocked) {
+    await acquireRestoreLock(userId);
+    await savePendingBackups(userId, backups);
+  }
+
+  const savedProgress = await loadRestoreProgress(userId);
+  const completedFiles = savedProgress?.completedFiles ?? [];
+
+  try {
+    await runRestore(userId, backups, onProgress, completedFiles);
+    await markRestoreCheckCompleted(userId);
+  } catch (e) {
+    console.error('[Restore] attemptRestore failed:', e);
+    throw e;
+  } finally {
     await releaseRestoreLock(userId);
   }
 }
 
-const insertData = (data, label, tx) => {
-  console.log('[Restore] insertData called for:', label);
+/* ---------------------------------- */
+/* Insert helpers                      */
+/* ---------------------------------- */
 
+const insertData = (data, label, tx) => {
   for (const table of TABLE_ORDER) {
     if (!Array.isArray(data[table])) continue;
 
-    console.log(`[Restore] Table ${table} → rows: ${data[table].length}`);
-
     for (const row of data[table]) {
-      // 🔥 SPECIAL HANDLING FOR FTS NOTES (preserve rowid)
       if (table === 'notes' && row.rowid != null) {
         const {rowid, ...rest} = row;
-
         const cols = Object.keys(rest);
         const vals = Object.values(rest);
-
         const qs = ['?', ...cols.map(() => '?')].join(',');
-
         tx.executeSql(
           `INSERT OR REPLACE INTO notes (rowid, ${cols.join(',')}) VALUES (${qs})`,
           [rowid, ...vals],
@@ -326,15 +554,12 @@ const insertData = (data, label, tx) => {
             return true;
           },
         );
-
         continue;
       }
 
-      // ✅ default for all other tables
       const cols = Object.keys(row);
       const vals = Object.values(row);
       const qs = cols.map(() => '?').join(',');
-
       tx.executeSql(
         `INSERT OR REPLACE INTO ${table} (${cols.join(',')}) VALUES (${qs})`,
         vals,
@@ -349,27 +574,16 @@ const insertData = (data, label, tx) => {
 };
 
 const upsertBackupFileEntry = (tx, fileName, driveId) => {
-  // ✅ skip image backups completely
-  if (fileName.startsWith('img_')) {
-    console.log('[Restore] Skipping backup_files entry for image:', fileName);
-    return;
-  }
+  if (fileName.startsWith('img_')) return;
 
   const meta = extractEpochs(fileName);
-
-  if (meta.level == null || meta.start == null || meta.end == null) {
-    console.error('[Restore] Invalid backup meta:', fileName);
-    return;
-  }
+  if (meta.level == null || meta.start == null || meta.end == null) return;
 
   tx.executeSql(
-    `INSERT OR REPLACE INTO backup_files 
-     (file, level, start_epoch, end_epoch, state, drive_id)
+    `INSERT OR REPLACE INTO backup_files (file, level, start_epoch, end_epoch, state, drive_id)
      VALUES (?, ?, ?, ?, 'synced', ?)`,
     [fileName, meta.level, meta.start, meta.end, driveId],
-    () => {
-      console.log('[Restore] backup_files updated:', fileName);
-    },
+    () => {},
     (_, err) => {
       console.error('[Restore] backup_files error:', err);
       return true;
@@ -377,90 +591,89 @@ const upsertBackupFileEntry = (tx, fileName, driveId) => {
   );
 };
 
-/* ---------------------------------- */
-/* UI Flow                             */
-/* ---------------------------------- */
+/**
+ * Called from GoogleLoginScreen.
+ * Shows Alert → if Restore, starts restore inline on the login screen via callbacks.
+ * If an interrupted restore is detected, auto-resumes immediately.
+ */
+// In restoreManager.js - Updated checkAndPromptRestore
 
-export async function attemptRestore(userId, backups) {
-  console.log('[Restore] attemptRestore triggered');
-  await runRestore(userId, backups);
-  await markRestoreCheckCompleted(userId);
-}
+// Check and handle restore flow (prompt user)
+export const checkAndPromptRestore = async (userInfo, navigateToMain) => {
+  const {setCheckingAvailableBackup} = useDbStore.getState();
+  const {updateProgress, startRestore, performRestoreAndNavigate} =
+    useRestoreStore.getState();
+  const userId = userInfo.user.id;
+  const alreadyChecked = await hasRestoreCheckCompleted(userId);
 
-async function handleRestoreFlow(userId, backups) {
-  console.log('[Restore] handleRestoreFlow started');
-
-  try {
-    // Start background restore
-    await runRestoreInBackground(userId, backups);
-  } catch (e) {
-    console.error('[Restore] Failed', e);
-
-    Alert.alert(
-      'Restore Failed',
-      'Restore could not be completed.',
-      [
-        {text: 'Cancel', style: 'cancel'},
-        {text: 'Retry', onPress: () => handleRestoreFlow(userId, backups)},
-      ],
-      {cancelable: false},
-    );
-  }
-}
-
-export async function checkAndPromptRestore(userId) {
-  console.log('[Restore] checkAndPromptRestore called');
-
-  const {currentUserId, setCheckingAvailableBackup} = useDbStore.getState();
-
-  if (!currentUserId) {
-    console.log('[Restore] No user ID found');
-    return;
-  }
-
-  if (await hasRestoreCheckCompleted(currentUserId)) {
-    console.log('[Restore] Already checked, skipping');
-    return;
+  if (alreadyChecked) {
+    await navigateToMain(userInfo);
+    return false;
   }
 
   setCheckingAvailableBackup(true);
 
   try {
+    // Check for interrupted restore first
+    const inProgress = await isRestoreInProgress(userId);
+    const savedBackups = await loadPendingBackups(userId);
+
+    if (inProgress && savedBackups) {
+      // Auto-resume interrupted restore
+      const savedProgress = await loadRestoreProgress(userId);
+      if (savedProgress?.totalBytes > 0) {
+        const pct = Math.min(
+          Math.round(
+            (savedProgress.downloadedBytes / savedProgress.totalBytes) * 100,
+          ),
+          99,
+        );
+        updateProgress(pct);
+      }
+      await performRestoreAndNavigate(userInfo, navigateToMain);
+      return true;
+    }
+
+    // Fresh backup check
     const backups = await listAllDriveBackups();
     setCheckingAvailableBackup(false);
 
     if (!backups.length) {
-      console.log('[Restore] No backups found');
-      Alert.alert('No Backup Found', 'No backups available.');
-      await markRestoreCheckCompleted(currentUserId);
-      return;
+      await markRestoreCheckCompleted(userId);
+      await navigateToMain(userInfo);
+      return false;
     }
 
-    console.log('[Restore] Backup found, prompting user');
-
-    // Return a promise that resolves when user makes a choice
-    return new Promise((resolve) => {
+    // Show restore prompt
+    return new Promise(resolve => {
       Alert.alert(
         'Backup Found',
-        'A backup was found for your account. Restore now?',
+        'A backup was found for your account. Would you like to restore it now?',
         [
           {
             text: 'Skip',
             style: 'cancel',
             onPress: async () => {
-              console.log('[Restore] User skipped restore');
-              await markRestoreCheckCompleted(currentUserId);
-              resolve(); // Resolve the promise
+              await markRestoreCheckCompleted(userId);
+              await navigateToMain(userInfo);
+              resolve(false);
             },
           },
           {
             text: 'Restore',
-            onPress: () => {
-              console.log('[Restore] User accepted restore');
-              // Start background restore
-              handleRestoreFlow(currentUserId, backups).then(() => {
-                resolve(); // Resolve when restore flow completes
-              });
+            onPress: async () => {
+              resolve(true);
+              startRestore();
+              try {
+                await performRestoreAndNavigate(userInfo, navigateToMain);
+              } catch (e) {
+                console.error('[Restore] Failed:', e);
+                Alert.alert(
+                  'Restore Failed',
+                  'Something went wrong. Your progress is saved — reopen the app to retry.',
+                  [{text: 'OK'}],
+                );
+              }
             },
           },
         ],
@@ -469,23 +682,16 @@ export async function checkAndPromptRestore(userId) {
     });
   } catch (e) {
     console.error('[Restore] Fatal error', e);
+    Alert.alert(
+      'Restore Error',
+      'Could not check for backups. Please try again.',
+      [{text: 'OK'}],
+    );
+    return false;
   } finally {
     setCheckingAvailableBackup(false);
-    //setnativePref last backup time to now bcz anyway whatever is restored is in drive
-    // and now whatever will go will be from the instance app is installed and used so backup time is now
-    //we are doing here bcz this runs only once when user logs in for the first time
-    // and if we do it in backup routine then it will update the backup time every time backup runs which is not correct
-    // because backup can run multiple times a day but we want to show last backup sync time as the time when user logged in and checked for backup
-    await useBackupStore
-      .getState()
-      .setNativePreference(
-        'LAST_NATIVE_BACKUP_TIME_' + userId,
-        formatDateTime(),
-      );
   }
-}
-
-export const formatDateTime = (date = new Date()) => {
-  // Returns "2024-01-15 15:30:45" UTC format
-  return date.toISOString().replace('T', ' ').substring(0, 19);
 };
+
+export const formatDateTime = (date = new Date()) =>
+  date.toISOString().replace('T', ' ').substring(0, 19);

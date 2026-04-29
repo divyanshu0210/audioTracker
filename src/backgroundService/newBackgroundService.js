@@ -1,6 +1,7 @@
 import BackgroundService from 'react-native-background-actions';
 import {PermissionsAndroid, Platform} from 'react-native';
-import {attemptRestore} from '../backupRestore/restoreManager';
+import {attemptRestore, loadPendingBackups, loadRestoreProgress, saveRestoreProgress} from '../backupRestore/restoreManager';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const options = {
   taskName: 'Restore Data',
@@ -10,51 +11,151 @@ const options = {
     name: 'ic_launcher',
     type: 'mipmap',
   },
-  color: '#00ff00',
+  color: '#4fc3f7',
+  progressBar: {
+    max: 100,
+    value: 0,
+    indeterminate: false,
+  },
 };
 
-// The background task - receives the restore function as parameter
-const restoreTask = async taskData => {
+/**
+ * Background task that continues restore even when app is in background/killed.
+ * Progress is continuously saved to AsyncStorage.
+ */
+const restoreTask = async (taskData) => {
+  const { userId } = taskData;
+  
   try {
-    console.log('[SERVICE] Running restore in background');
+    const backups = await loadPendingBackups(userId);
+    if (!backups) {
+      console.error('[BACKGROUND] No backup list found');
+      return;
+    }
 
-    const {userId, backups} = taskData;
+    // Load saved progress to update notification
+    const updateNotification = async () => {
+      const progress = await loadRestoreProgress(userId);
+      if (progress?.totalBytes > 0) {
+        const percent = Math.min(Math.round((progress.downloadedBytes / progress.totalBytes) * 100), 100);
+        
+        // Update notification with current progress
+        await BackgroundService.updateNotification({
+          taskDesc: `Restoring... ${percent}% complete`,
+          progressBar: {
+            max: 100,
+            value: percent,
+            indeterminate: false,
+          },
+        });
+      }
+    };
 
-    // Execute the restore function directly
-    await attemptRestore(userId, backups);
+    // Set up progress callback that updates notification
+    const onProgress = async (percent) => {
+      await BackgroundService.updateNotification({
+        taskDesc: `Restoring... ${percent}% complete`,
+        progressBar: {
+          max: 100,
+          value: percent,
+          indeterminate: false,
+        },
+      });
+    };
 
-    console.log('[SERVICE] Restore completed successfully');
+    await attemptRestore(userId, backups, onProgress);
+    console.log('[BACKGROUND] Restore completed');
+    
+    // Show completion notification
+    await BackgroundService.updateNotification({
+      taskDesc: 'Restore complete!',
+      progressBar: {
+        max: 100,
+        value: 100,
+        indeterminate: false,
+      },
+    });
+    
+    // Store completion flag
+    await AsyncStorage.setItem(`restore_completed_${userId}`, 'true');
+    
   } catch (e) {
-    console.error('[SERVICE] Restore error:', e);
+    console.error('[BACKGROUND] Restore error:', e);
+    await BackgroundService.updateNotification({
+      taskDesc: 'Restore paused - will resume when you reopen',
+    });
   } finally {
-    // Stop the background service when done
-    await BackgroundService.stop();
+    // Don't stop the service - let it complete naturally
+    // BackgroundService.stop() will be called when task finishes
   }
 };
 
-export const runRestoreInBackground = async (userId, backups) => {
+/**
+ * Start background restore with continuous progress
+ */
+export const startBackgroundRestore = async (userId) => {
   if (BackgroundService.isRunning()) {
-    console.log('[SERVICE] Service already running, stopping first');
-    await BackgroundService.stop();
+    console.log('[BACKGROUND] Service already running');
+    return;
   }
 
-  console.log('[SERVICE] Starting restore background service');
+  // Request notification permission for Android 13+
+  await requestPermissions();
 
   await BackgroundService.start(restoreTask, {
     ...options,
-    parameters: {
-      userId,
-      backups
-    },
+    parameters: { userId },
   });
 };
 
+/**
+ * Stop background restore (if user cancels)
+ */
+export const stopBackgroundRestore = async () => {
+  if (BackgroundService.isRunning()) {
+    await BackgroundService.stop();
+  }
+};
+
+/**
+ * Check if background restore is active
+ */
+export const isBackgroundRestoreRunning = async () => {
+  return BackgroundService.isRunning();
+};
+
+/**
+ * Request necessary permissions
+ */
 export const requestPermissions = async () => {
   if (Platform.OS === 'android') {
-    const granted = await PermissionsAndroid.request(
-      PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS,
-    );
-    return granted === PermissionsAndroid.RESULTS.GRANTED;
+    try {
+      const permissionsToRequest = [];
+      
+      // Notification permission for Android 13+ (API 33+)
+      if (Platform.Version >= 33) {
+        permissionsToRequest.push(PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS);
+      }
+      
+      // Note: FOREGROUND_SERVICE_DATA_SYNC requires:
+      // - React Native 0.73+ 
+      // - Android 14 (API 34) with proper manifest declaration
+      // Let's make it optional and check if it exists first
+      if (Platform.Version >= 34 && PermissionsAndroid.PERMISSIONS.FOREGROUND_SERVICE_DATA_SYNC) {
+        permissionsToRequest.push(PermissionsAndroid.PERMISSIONS.FOREGROUND_SERVICE_DATA_SYNC);
+      }
+      
+      if (permissionsToRequest.length > 0) {
+        const granted = await PermissionsAndroid.requestMultiple(permissionsToRequest);
+        
+        // Check if at least notification permission is granted (for Android 13+)
+        if (Platform.Version >= 33) {
+          return granted[PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS] === PermissionsAndroid.RESULTS.GRANTED;
+        }
+      }
+    } catch (err) {
+      console.warn('[BACKGROUND] Permission error:', err);
+    }
   }
   return true;
 };

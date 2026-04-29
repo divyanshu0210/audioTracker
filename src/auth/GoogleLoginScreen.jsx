@@ -16,27 +16,25 @@ import {
 } from 'react-native';
 import useSettingsStore from '../Settings/settingsStore';
 import {syncUserToBackend} from '../appMentorBackend/userMgt';
-import {
-  checkAndPromptRestore,
-  hasRestoreCheckCompleted,
-} from '../backupRestore/restoreManager';
 import {useAppState} from '../contexts/AppStateContext';
 import {initUserDatabase} from '../database/UserDatabaseInstance';
-import {initDatabase, resetDatabase} from '../database/database';
+import {initDatabase} from '../database/database';
 import useDbStore from '../database/dbStore';
 import {setupFCM} from '../appNotification/appFCMNotification/fcmNotificationService';
-import { getOrCreateDefaultNotebookId } from '../database/C';
+import {getOrCreateDefaultNotebookId} from '../database/C';
 import useBackupStore from '../stores/backupStore';
-import { requestPermissions } from '../backgroundService/newBackgroundService';
+import useRestoreStore from '../backupRestore/restoreStore';
+import LoginRestoreProgressBar from './LoginRestoreProgressBar';
+import { checkAndPromptRestore } from '../backupRestore/restoreManager';
 
 const GoogleLoginScreen = ({navigation}) => {
   const [isLoading, setIsLoading] = useState(false);
+
   const {setUserInfo, defaultNotebookId} = useAppState();
   const {initDb} = useDbStore();
-
-  // Get Zustand store methods and state
   const {initialize: initializeSettings} = useSettingsStore();
   const {appStartupBackupRoutine} = useBackupStore();
+  const {isRestoring} = useRestoreStore();
 
   useEffect(() => {
     GoogleSignin.configure({
@@ -84,47 +82,37 @@ const GoogleLoginScreen = ({navigation}) => {
     }
   };
 
-  // Initialize database for user and handle user session
-  const handleUserSession = async (userInfo, sessionType = 'restore') => {
+    const navigateToMain = async (userInfo) => {
+    try {
+      const defaultNotebookIdValue = await getOrCreateDefaultNotebookId();
+      defaultNotebookId.current = defaultNotebookIdValue;
+      await initializeSettings();
+      appStartupBackupRoutine();
+      navigation.replace('MainApp', { user: userInfo.user ?? userInfo });
+    } catch (e) {
+      console.error('[Login] Post-restore nav error:', e);
+      Alert.alert('Error', 'Failed to complete setup. Please restart the app.');
+    }
+  };
+
+  const handleUserSession = async userInfo => {
     if (!userInfo) return;
     await AsyncStorage.setItem('userId', userInfo.user.id);
-    await useBackupStore.getState().setNativePreference("userId", userInfo.user.id);
+    await useBackupStore.getState().setNativePreference('userId', userInfo.user.id);
     try {
-      // Initialize user-specific database
-      const db = initDb(userInfo.user.id);
-      // await resetDatabase()
+      initDb(userInfo.user.id);
       await initDatabase();
       await initUserDatabase(userInfo.user.id);
 
       setUserInfo(userInfo.user);
       setupFCM(userInfo.user);
 
-      // Check for backup restore prompt
-      const alreadyChecked = await hasRestoreCheckCompleted(userInfo.user.id);
-      console.log('Has restore been checked :', alreadyChecked);
-      if (!alreadyChecked) {
-        console.log('Checking for backup...');
-        //inside this fn, after restore , we set last backup time to now
-        await checkAndPromptRestore(userInfo.user.id).then(async () => {
-          console.log('Restore check completed');
-          //inside this fn, after restore , we set last backup time to now
-          const defaultNotebookIdValue = await getOrCreateDefaultNotebookId();
-          defaultNotebookId.current = defaultNotebookIdValue;
-        });
-      }
-      const settings = await initializeSettings(); // initialises the store with default/stored settings
-      appStartupBackupRoutine();
-
-      navigation.replace('MainApp', {user: userInfo.user});
+      await checkAndPromptRestore(userInfo, navigateToMain);
     } catch (error) {
       console.error('Error handling user session:', error);
-      throw error;
+      setIsLoading(false);
     }
   };
-
-  const handleBackupAndRestore = () => {};
-
-
   const handleSignInError = error => {
     let errorMessage = 'An unknown error occurred. Please try again.';
 
@@ -156,9 +144,10 @@ const GoogleLoginScreen = ({navigation}) => {
         </Text>
         <Text style={styles.subtitle}>All in One Place!</Text>
         <View style={{marginBottom: 80}} />
-        {/* <Text style={styles.subtitle}>Sign in to continue...</Text> */}
 
-        {isLoading ? (
+        {isRestoring ? (
+          <LoginRestoreProgressBar />
+        ) : isLoading ? (
           <View style={styles.loaderContainer}>
             <ActivityIndicator size="large" color="#ffffff" />
           </View>
@@ -186,7 +175,7 @@ const GoogleLoginScreen = ({navigation}) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#18222d', // dark background
+    backgroundColor: '#18222d',
   },
   content: {
     flex: 1,

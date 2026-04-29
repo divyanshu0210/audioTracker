@@ -51,11 +51,9 @@ export async function markRestoreCheckCompleted(userId) {
   await AsyncStorage.removeItem(restoreProgressKey(userId));
   await AsyncStorage.removeItem(restoreBackupsKey(userId));
 
-  await useBackupStore.getState().setNativePreference(
-    'LAST_NATIVE_BACKUP_TIME_' + userId,
-    formatDateTime(),
-  );
-
+  await useBackupStore
+    .getState()
+    .setNativePreference('LAST_NATIVE_BACKUP_TIME_' + userId, formatDateTime());
 }
 
 async function acquireRestoreLock(userId) {
@@ -240,7 +238,7 @@ export async function listAllDriveBackups() {
  * Downloads a single backup file and reports byte-level progress continuously.
  * Uses RNFetchBlob's progress callback which fires every chunk.
  */
-async function downloadBackup(fileId, expectedBytes, onBytes, onChunk) {
+async function downloadBackup(fileId, expectedBytes, onChunk) {
   const accessToken = await getGoogleAccessToken();
 
   return new Promise((resolve, reject) => {
@@ -267,13 +265,6 @@ async function downloadBackup(fileId, expectedBytes, onBytes, onChunk) {
         // Call onChunk for every chunk (more frequent updates)
         if (onChunk && typeof onChunk === 'function' && denominator > 0) {
           onChunk(received, denominator);
-        }
-
-        // Call onBytes for cumulative tracking (less frequent)
-        if (onBytes && received - lastReportedBytes > 1024 * 10) {
-          // Report every ~10KB
-          lastReportedBytes = received;
-          onBytes(received, denominator);
         }
       })
       .then(res => {
@@ -333,8 +324,6 @@ async function runRestore(
     imageBackups.sort((a, b) => a.timestamp - b.timestamp);
 
     const allBackups = [...dbBackups, ...imageBackups];
-
-    // Filter out any invalid backups
     const validBackups = allBackups.filter(b => b.id && b.size > 0);
 
     if (validBackups.length === 0) {
@@ -352,22 +341,15 @@ async function runRestore(
     let lastReportedPercent = 0;
     let lastEmitTime = 0;
 
-    // For smooth progress updates
     const emitProgress = () => {
       if (!onProgress || totalBytes === 0) return;
-
-      // Throttle to max 20 updates per second (50ms)
       const now = Date.now();
-      if (now - lastEmitTime < 50 && lastReportedPercent < 99) {
-        return;
-      }
+      if (now - lastEmitTime < 50 && lastReportedPercent < 99) return;
       lastEmitTime = now;
-
       const pct = Math.min(
         Math.floor((downloadedBytes / totalBytes) * 100),
         99,
       );
-      // Only update if changed
       if (pct !== lastReportedPercent) {
         lastReportedPercent = pct;
         onProgress(pct);
@@ -376,124 +358,107 @@ async function runRestore(
 
     emitProgress();
 
-    const dbDataList = [];
-    const imageDataList = [];
-
-    // Download with byte-level progress reporting for smooth animation
-    const downloadWithProgress = async backup => {
-      if (completedFiles.includes(backup.name)) return null;
-
-      return new Promise((resolve, reject) => {
-        let fileDownloadedBytes = 0;
-        let lastProgressUpdate = 0;
-
-        downloadBackup(
-          backup.id,
-          backup.size,
-          (received, total) => {
-            const delta = received - fileDownloadedBytes;
-            if (delta > 0) {
-              fileDownloadedBytes = received;
-              downloadedBytes += delta;
-              const now = Date.now();
-              if (now - lastProgressUpdate > 100) {
-                lastProgressUpdate = now;
-                emitProgress();
-              }
-            }
-          },
-          (received, total) => {
-            if (received > fileDownloadedBytes) {
-              const delta = received - fileDownloadedBytes;
-              fileDownloadedBytes = received;
-              downloadedBytes += delta;
-              const now = Date.now();
-              if (now - lastProgressUpdate > 50) {
-                lastProgressUpdate = now;
-                emitProgress();
-              }
-            }
-          },
-        )
-          .then(result => resolve(result))
-          .catch(err => reject(err));
-      });
-    };
-
-    // Download DB backups sequentially
-    for (const backup of dbBackups) {
-      if (completedFiles.includes(backup.name)) continue;
-      try {
-        const result = await downloadWithProgress(backup);
-        if (result && result.data) {
-          dbDataList.push({
-            name: backup.name,
-            data: result.data,
-            driveId: backup.id,
-          });
-        }
-      } catch (err) {
-        console.error(`[Restore] Failed to download ${backup.name}:`, err);
-        throw new Error(`Failed to download ${backup.name}: ${err.message}`);
-      }
-    }
-
-    // Download image backups
-    for (const backup of imageBackups) {
-      if (completedFiles.includes(backup.name)) continue;
-      try {
-        const result = await downloadWithProgress(backup);
-        if (result && result.data) {
-          imageDataList.push({name: backup.name, data: result.data});
-        }
-      } catch (err) {
-        console.error(`[Restore] Failed to download ${backup.name}:`, err);
-        throw new Error(`Failed to download ${backup.name}: ${err.message}`);
-      }
-    }
-
-    // DB write phase
-    if (dbDataList.length > 0 || imageDataList.length > 0) {
-      await new Promise((resolve, reject) => {
+    // ── helper: commit a single backup file to DB immediately ──────────────
+    const commitFileToDB = (name, data, driveId) =>
+      new Promise((resolve, reject) => {
         db.transaction(
           tx => {
             tx.executeSql('PRAGMA defer_foreign_keys = ON');
-
-            for (const {name, data, driveId} of dbDataList) {
-              insertData(data, name, tx);
+            insertData(data, name, tx);
+            if (driveId) {
               upsertBackupFileEntry(tx, name, driveId);
             }
-            for (const {name, data} of imageDataList) {
-              insertData(data, name, tx);
-            }
-
-            tx.executeSql(
-              `INSERT INTO notes(notes) VALUES('rebuild')`,
-              [],
-              () => {},
-              (_, err) => {
-                console.error('[Restore] FTS rebuild failed:', err);
-                return true;
-              },
-            );
           },
-          err => reject(err),
-          () => resolve(),
+          err => {
+            console.error('[Restore] DB commit failed for:', name, err);
+            reject(err);
+          },
+          () => {
+            console.log('[Restore] DB committed:', name);
+            resolve();
+          },
         );
       });
+
+    // ── download helper (unchanged) ────────────────────────────────────────
+    const downloadWithProgress = async backup => {
+      if (completedFiles.includes(backup.name)) {
+        console.log('[Restore] Skipping already completed file:', backup.name);
+        return null;
+      }
+
+      let fileDownloadedBytes = 0;
+
+      return downloadBackup(backup.id, backup.size, received => {
+        const delta = received - fileDownloadedBytes;
+        if (delta > 0) {
+          fileDownloadedBytes = received;
+          downloadedBytes += delta;
+          emitProgress();
+        }
+      });
+    };
+
+    // ── DB backups: download → commit → checkpoint each file ──────────────
+    for (const backup of dbBackups) {
+      if (completedFiles.includes(backup.name)) continue;
+
+      const result = await downloadWithProgress(backup);
+      if (!result?.data) continue;
+
+      console.log('[Restore] Download complete:', backup.name);
+
+      await commitFileToDB(backup.name, result.data, backup.id);
+
+      // mark complete only after DB write confirmed
+      completedFiles.push(backup.name);
+      await saveRestoreProgress(userId, {
+        completedFiles: [...completedFiles],
+        totalBytes,
+        downloadedBytes,
+      });
+
+      console.log('[Restore] Checkpointed:', backup.name);
     }
 
-    // Save progress
-    const allDoneNames = [
-      ...completedFiles,
-      ...dbDataList.map(b => b.name),
-      ...imageDataList.map(b => b.name),
-    ];
+    // ── image backups: same pattern ────────────────────────────────────────
+    for (const backup of imageBackups) {
+      if (completedFiles.includes(backup.name)) continue;
 
-    await saveRestoreProgress(userId, {
-      completedFiles: allDoneNames,
-      totalBytes,
-      downloadedBytes: totalBytes,
+      const result = await downloadWithProgress(backup);
+      if (!result?.data) continue;
+
+      console.log('[Restore] Download complete:', backup.name);
+
+      await commitFileToDB(backup.name, result.data, null);
+
+      completedFiles.push(backup.name);
+      await saveRestoreProgress(userId, {
+        completedFiles: [...completedFiles],
+        totalBytes,
+        downloadedBytes,
+      });
+
+      console.log('[Restore] Checkpointed:', backup.name);
+    }
+
+    // ── FTS rebuild once at the end (not per file) ─────────────────────────
+    await new Promise((resolve, reject) => {
+      db.transaction(
+        tx => {
+          tx.executeSql(
+            `INSERT INTO notes(notes) VALUES('rebuild')`,
+            [],
+            () => {},
+            (_, err) => {
+              console.error('[Restore] FTS rebuild failed:', err);
+              return true;
+            },
+          );
+        },
+        err => reject(err),
+        () => resolve(),
+      );
     });
 
     if (onProgress) onProgress(100);
@@ -621,6 +586,7 @@ export const checkAndPromptRestore = async (userInfo, navigateToMain) => {
     if (inProgress && savedBackups) {
       // Auto-resume interrupted restore
       const savedProgress = await loadRestoreProgress(userId);
+      startRestore();
       if (savedProgress?.totalBytes > 0) {
         const pct = Math.min(
           Math.round(

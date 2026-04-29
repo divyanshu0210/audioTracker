@@ -28,9 +28,7 @@ const useRestoreStore = create((set, get) => ({
 
   // Core restore logic with navigation
   performRestoreAndNavigate: async (userInfo, navigateToMain) => {
-    const {startRestore, updateProgress, setRestoreError} = get();
-
-    startRestore();
+    const { updateProgress, setRestoreError} = get();
 
     try {
       const backups = await listAllDriveBackups();

@@ -76,7 +76,7 @@ export const addItemToCategory = (categoryId, itemId, itemType) => {
       tx => {
         tx.executeSql(
           'INSERT OR IGNORE INTO category_items (category_id, item_id, item_type) VALUES (?, ?, ?);',
-          [categoryId, itemId, itemType],
+          [categoryId, String(itemId), itemType],
           (_, result) => resolve(result),
           (_, error) => reject(error),
         );
@@ -214,7 +214,7 @@ export const checkItemInCategory = (categoryId, itemId, itemType) => {
         tx.executeSql(
           `SELECT 1 FROM category_items 
              WHERE category_id = ? AND item_id = ? AND item_type = ?;`,
-          [categoryId, itemId, itemType],
+          [categoryId, String(itemId), itemType],
           (_, result) => resolve(result.rows.length > 0),
           (_, error) => reject(error),
         );

@@ -189,7 +189,8 @@ useEffect(() => {
 
           <Tab.Screen name={categoryId ? `Notes` : 'All Notes'}>
             {() =>
-              renderTabContent(AllNotesScreen, {categoryId, key: homeReloadKey+categoryId})
+              renderTabContent(AllNotesScreen, {categoryId})
+              // renderTabContent(AllNotesScreen, {categoryId, key: homeReloadKey+categoryId})
             }
           </Tab.Screen>
         </Tab.Navigator>

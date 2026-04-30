@@ -35,6 +35,7 @@ const BaseItem = ({type, item, isSelected, onSelect, onLongPress, screen}) => {
     setActiveItem,
     setActiveNoteId,
     setSelectedNote,
+    setSelectedCategory,
   } = useAppState();
   const {setLoading} = useAppStateStore();
 
@@ -155,6 +156,8 @@ const BaseItem = ({type, item, isSelected, onSelect, onLongPress, screen}) => {
 
   const handleCategoryPress = () => {
     navigation.navigate('CategoryDetailScreen', {item});
+    // setSelectedCategory(item.id);
+    // navigation.navigate('MainApp')
   };
 
   const handleMediaNotePress = () => {

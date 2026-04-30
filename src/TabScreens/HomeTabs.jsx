@@ -13,6 +13,7 @@ import {useAppState} from '../contexts/AppStateContext';
 import useDbStore from '../database/dbStore';
 import {useFocusEffect} from '@react-navigation/core';
 import { LoadingBar } from '../components/LoadingBar';
+import useRestoreStore from '../backupRestore/restoreStore';
 
 const Tab = createMaterialTopTabNavigator();
 
@@ -23,7 +24,8 @@ const HomeTabs = ({categoryId}) => {
   const {driveLinksList, items, validDeviceFiles, deviceFiles, notebooks} =
     useAppState();
  const {homeReloadKey} = useAppState();
-  const {inserting, restoreInProgress} = useDbStore();
+  const {inserting} = useDbStore();
+  const {isRestoring} = useRestoreStore();
 
   const [loading, setLoading] = useState(true);
 
@@ -114,10 +116,10 @@ const HomeTabs = ({categoryId}) => {
   }, [categoryId]);
 
 useEffect(() => {
- if (!restoreInProgress) {
+ if (!isRestoring) {
         loadAllData();
       }
-}, [categoryId,restoreInProgress, homeReloadKey]);
+}, [categoryId, isRestoring, homeReloadKey]);
   
   // Tab content wrapper
   const renderTabContent = (ScreenComponent, props) => (

@@ -1,10 +1,6 @@
 import BackgroundService from 'react-native-background-actions';
 import {PermissionsAndroid, Platform} from 'react-native';
-import {
-  attemptRestore,
-  loadPendingBackups,
-} from '../backupRestore/restoreManager';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import {attemptRestore} from '../backupRestore/restoreManager';
 import useRestoreStore from '../backupRestore/restoreStore';
 
 const options = {

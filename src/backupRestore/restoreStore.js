@@ -6,6 +6,8 @@ const useRestoreStore = create((set, get) => ({
   restorePercent: 0,
   restoreError: null,
   animProgress: 0,
+  checkingAvailableBackup: false,
+  setCheckingAvailableBackup: val => set({checkingAvailableBackup: val}),
 
   // Actions
   startRestore: () => {

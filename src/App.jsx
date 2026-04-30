@@ -54,6 +54,7 @@ import CategoriesView from './categories/CategoriesView';
 import {initDatabase, resetDatabase} from './database/database';
 import BackupExplorerScreen from './Settings/BackupExplorerScreen';
 import useBackupStore from './stores/backupStore';
+import useRestoreStore from './backupRestore/restoreStore';
 
 const Stack = createStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -212,7 +213,7 @@ useEffect(() => {
 // 🔹 Main App (Tabs)
 function MainApp({route}) {
   const user = route.params?.user; // Get user data
-  const {checkingAvailableBackup} = useDbStore();
+  const {checkingAvailableBackup} = useRestoreStore();
 
   console.log(route);
   return (
@@ -319,7 +320,7 @@ const CategoriesStack = () => {
 
 // 🔹 Root Stack Navigator (Login + MainApp)
 export default function App() {
-  const {loading, restoreInProgress} = useDbStore();
+  const {loading} = useDbStore();
   const {backupRunning, syncRunning} = useBackupStore();
   const isBackupInProgress = backupRunning || syncRunning;
 
@@ -354,12 +355,6 @@ export default function App() {
           </Text>
         </View>
       )}
-      {/* {restoreInProgress && (
-        <View style={styles.overlay}>
-          <ActivityIndicator size="large" color="#fff" />
-          <Text style={styles.loadingText}>Getting things ready..</Text>
-        </View>
-      )} */}
     </>
   );
 }

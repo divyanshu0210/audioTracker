@@ -2,7 +2,6 @@ import {Alert} from 'react-native';
 import RNFetchBlob from 'react-native-blob-util';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {getDb} from '../database/database';
-import useDbStore from '../database/dbStore';
 import {getGoogleAccessToken} from '../auth/tokenManager';
 import {extractEpochs} from '../Settings/BackupExplorerScreen';
 import useBackupStore from '../stores/backupStore';
@@ -371,7 +370,7 @@ async function downloadBackup(fileId, expectedBytes, onChunk) {
 
 // Check and handle restore flow (prompt user)
 export const checkAndPromptRestore = async (userInfo, navigateToMain) => {
-  const {setCheckingAvailableBackup} = useDbStore.getState();
+  const {setCheckingAvailableBackup} = useRestoreStore.getState();
   const {updateProgress, startRestore} = useRestoreStore.getState();
   useRestoreStore.getState().setOnComplete(async () => {
   await navigateToMain(userInfo);
@@ -492,11 +491,7 @@ export async function attemptRestore(userInfo, backups, onProgress=null) {
 }
 
 async function runRestore(userId, backups, onProgress=null) {
-  // const {setRestoreInProgress} = useDbStore.getState();
   const db = getDb();
-
-  // setRestoreInProgress(true);
-
   try {
     const savedProgress = await loadRestoreProgress(userId);
     const completedFiles = savedProgress?.completedFiles ?? [];
@@ -662,7 +657,5 @@ async function runRestore(userId, backups, onProgress=null) {
   } catch (error) {
     console.error('[Restore] runRestore failed:', error);
     throw error;
-  } finally {
-    // setRestoreInProgress(false);
   }
 }

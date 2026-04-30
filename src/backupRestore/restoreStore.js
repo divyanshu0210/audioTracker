@@ -1,6 +1,4 @@
 import {create} from 'zustand';
-import {Alert} from 'react-native';
-import {savePendingBackups, listAllDriveBackups, attemptRestore} from './restoreManager';
 
 const useRestoreStore = create((set, get) => ({
   // State
@@ -26,43 +24,14 @@ const useRestoreStore = create((set, get) => ({
     set({isRestoring: false, restorePercent: 0, restoreError: null});
   },
 
-  // Core restore logic with navigation
-  performRestoreAndNavigate: async (userInfo, navigateToMain) => {
-    const { updateProgress, setRestoreError} = get();
+  setOnComplete: fn => set({_onComplete: fn}),
 
-    try {
-      const backups = await listAllDriveBackups();
-
-      if (!backups || backups.length === 0) {
-        // No backup found, just navigate
-        await navigateToMain(userInfo);
-        return false;
-      }
-
-      await savePendingBackups(userInfo.user.id, backups);
-
-        await attemptRestore(userInfo.user.id, backups, pct => {
-          updateProgress(pct);
-        });
-
-      updateProgress(100);
-
-      // Wait a moment to show 100%
-      await new Promise(r => setTimeout(r, 500));
-      await navigateToMain(userInfo);
-
-      return true;
-    } catch (error) {
-      console.error('[RestoreStore] Restore failed:', error);
-      setRestoreError(error.message);
-
-      Alert.alert(
-        'Restore In Progress',
-        'Your data is being restored in the background. You can close the app and it will continue.',
-        [{text: 'OK'}],
-      );
-
-      return false;
+  // background service calls this when done
+  notifyComplete: () => {
+    const {_onComplete} = get();
+    if (_onComplete) {
+      set({restorePercent: 100, isRestoring: false});
+      _onComplete(); // navigateToMain
     }
   },
 }));

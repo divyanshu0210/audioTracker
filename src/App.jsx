@@ -177,7 +177,7 @@ function RootNavigator() {
             contentStyle: {
               backgroundColor: 'white',
             },
-            // sheetElevation: 10,
+             sheetCornerRadius: 20,
             sheetLargestUndimmedDetentIndex: 0,
             sheetExpandsWhenScrolledToEdge: false,
             keyboardHandlingEnabled: true,

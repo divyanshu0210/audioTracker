@@ -156,10 +156,8 @@ const {setActiveItem} = useSelectionStore(
       hidePlayer();
     }
 
-    navigation.setOptions({headerShown: false});
     navigation.getParent()?.setOptions({tabBarStyle: {display: 'none'}});
     return () => {
-      navigation.setOptions({headerShown: true});
       navigation.getParent()?.setOptions({tabBarStyle: {display: 'flex'}});
       cleanupPlayer();
       setActiveNoteId(null);
@@ -357,7 +355,7 @@ const handleOpenBottomMenu = () => {
   Keyboard.dismiss();
   notesSectionRef.current?.blurEditor();
   setTimeout(() => {
-    navigation.navigate('ItemNotesScreen');
+    navigation.navigate('ItemNotesScreen',{showHeader: true});
   }, 150);
 };
   const handleBackPress = useCallback(() => {

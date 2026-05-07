@@ -3,7 +3,6 @@ import React, {useEffect, useState} from 'react';
 import {ActivityIndicator, Dimensions, StyleSheet, Text, View} from 'react-native';
 import {fetchNotes} from '../database/R';
 import NotesListComponent from './notesListing/NotesListComponent';
-import {useAppState} from '../contexts/AppStateContext';
 import {ScreenTypes} from '../contexts/constants';
 import { useSelectionStore } from '../stores/useSelectionStore';
 
@@ -16,6 +15,7 @@ const ItemNotesScreen = ({route}) => {
   
   // Get item from route params or context
   const item = route?.params?.item || activeItem;
+  const showheader = route?.params?.showHeader || false;
   
   let sourceId = item?.source_id || item?.sourceId;
   let sourceType = item?.source_type || item?.sourceType || item?.type;
@@ -58,7 +58,12 @@ const SHEET_HEIGHT = SCREEN_HEIGHT * 0.70;
 
 return (
   <View style={{ height: SHEET_HEIGHT, backgroundColor: '#fff' }}>
-    <Text style={styles.title}>Notes for this Item</Text>
+    {showheader && (
+      <>
+       <View style={styles.dragHandle} />
+      <Text style={styles.title}>All Notes</Text>
+      </>
+    )}
     <View style={{ flex: 1 }}>
        {loading ? (
         <ActivityIndicator
@@ -88,9 +93,20 @@ const styles = StyleSheet.create({
   },
   title: {
     textAlign: 'center',
-    marginVertical: 10,
+    marginTop: 10,
+    // marginVertical: 10,
     fontSize: 16,
     fontWeight: 'bold',
     color: '#000',
   },
+ dragHandle: {
+  width: 46,
+  height: 4,
+  borderRadius: 2,
+  backgroundColor: '#B0B0B0',
+  alignSelf: 'center',
+  marginTop: 8,
+  marginBottom: 8,
+  opacity: 0.7,
+}
 });

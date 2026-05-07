@@ -15,6 +15,7 @@ import {
   Keyboard,
   ToastAndroid,
   SafeAreaView,
+  unstable_batchedUpdates,
 } from 'react-native';
 import {RichEditor} from 'react-native-pell-rich-editor';
 import RichTextToolbar from './RichTextToolbar.jsx';
@@ -24,7 +25,7 @@ import {seekVideoTo} from '../../music/progressTrackingUtils.js';
 import {generateId, useNoteController} from '../useNoteController.jsx';
 import {useImagePersistence} from '../useImagePersistence.jsx';
 import {LoadingBar} from '../../components/LoadingBar.jsx';
-import {useAppState} from '../../contexts/AppStateContext.jsx';
+import {useNotesStore} from '../../stores/useNotesStore.js';
 
 const IMAGE_PLACEHOLDER = `
 data:image/svg+xml;utf8,
@@ -44,15 +45,23 @@ const RichTextEditor = forwardRef(
       onContentChange,
       captureScreenshot,
       webViewRef,
-      ytTime,
-      vlcTime,
-      seekToTime,
+      source_type,
       isHidden,
       showPlayerMinimized,
       playerRef,
     },
     ref,
   ) => {
+    console.log('🔄 RichTextEditor RENDERING', new Date().toISOString());
+
+    // 🔵 LOG: Track render count
+    const renderCount = useRef(0);
+    renderCount.current++;
+    console.log(`🎯 Render #${renderCount.current}`, {
+      noteId,
+      currentNoteId: noteId,
+    });
+
     const richText = useRef(null);
     const scrollRef = useRef(null);
 
@@ -75,7 +84,39 @@ const RichTextEditor = forwardRef(
 
     const {saveContent, saveTitle, deleteNote} = useNoteController();
     const {saveImageInBackground} = useImagePersistence();
-    const {setActiveNoteId} = useAppState();
+    const setActiveNoteId = useNotesStore(state => state.setActiveNoteId);
+
+    // 🔵 LOG: Track state changes
+    useEffect(() => {
+      console.log('📌 currentNoteId changed:', currentNoteId);
+    }, [currentNoteId]);
+
+    useEffect(() => {
+      console.log('📌 isLoading changed:', isLoading);
+    }, [isLoading]);
+
+    useEffect(() => {
+      console.log('📌 isEditable changed:', isEditable);
+    }, [isEditable]);
+
+    useEffect(() => {
+      console.log('📌 isToolbarVisible changed:', isToolbarVisible);
+    }, [isToolbarVisible]);
+
+    useEffect(() => {
+      console.log('📝 Title changed to:', title);
+    }, [title]);
+
+    // 🔵 LOG: Track prop changes
+    useEffect(() => {
+      console.log('📦 Props updated:', {
+        noteId,
+        isHidden,
+        captureScreenshot: !!captureScreenshot,
+        webViewConnected: !!webViewRef,
+        showPlayerMinimized: !!showPlayerMinimized,
+      });
+    }, [noteId, isHidden, captureScreenshot, webViewRef, showPlayerMinimized]);
 
     // Expose methods via ref
     useImperativeHandle(ref, () => ({
@@ -84,23 +125,35 @@ const RichTextEditor = forwardRef(
       getCurrentContent: () => latestHtmlContentRef.current,
       getCurrentTitle: () => latestTitleRef.current,
       focusEditor: () => richText.current?.focusContentEditor(),
+      blurEditor: () => richText.current?.blurContentEditor(),
       toggleEditMode,
     }));
 
     useEffect(() => {
-      if (!noteId) return;
+      console.log('🟢 useEffect[noteId] triggered', noteId);
+      if (!noteId) {
+        console.log('🟢 No noteId, returning');
+        return;
+      }
       if (typeof noteId === 'string' && noteId.startsWith('temp_')) {
+        console.log('🟢 Temp note detected, setting editable');
         setIsEditable(true);
         setInitialContent('');
         return;
       }
 
+      console.log('🟢 Loading note:', noteId);
       loadNote(noteId);
     }, [noteId]);
 
     useEffect(() => {
+      console.log('📊 RichTextEditor MOUNTED:', noteId);
+      const mountedNoteId = noteId;
       return () => {
-        handleCloseNote();
+        console.log('💀 RichTextEditor UNMOUNTED:', mountedNoteId);
+        if (mountedNoteId) {
+          handleCloseNote(mountedNoteId);
+        }
       };
     }, []);
 
@@ -144,49 +197,105 @@ const RichTextEditor = forwardRef(
     };
 
     const loadNote = async id => {
+      console.log('🟡 loadNote: START for id:', id);
       if (!id) {
-        console.warn('No note ID provided');
+        console.warn('🟡 loadNote: No note ID provided');
         Alert.alert('Error', 'Invalid note ID');
         return;
       }
 
       try {
+        console.log('🟡 loadNote: Setting isLoading(true)');
         setIsLoading(true);
 
+        console.log('🟡 loadNote: Fetching from DB...');
         const note = await getNoteById(id);
+        console.log(
+          '🟡 loadNote: Note received:',
+          !!note,
+          note ? `(title: "${note.noteTitle}")` : '',
+        );
+
         if (!note || typeof note !== 'object') {
           throw new Error('Note not found or invalid format');
         }
         const content = note.content || '';
         const title = note.title || '';
-        setTitle(title);
-        latestTitleRef.current = title;
 
-        // Set the initial content before rendering the editor
-        richText.current?.setContentHTML(content);
-
-        // setInitialContent(content);
-        latestHtmlContentRef.current = content;
+        console.log(
+          '🟡 loadNote: Extracted - title:',
+          title,
+          ', content length:',
+          content.length,
+        );
 
         const isEmpty = isNoteEmpty(title, content);
-        setIsEditable(isEmpty);
+        console.log(
+          '🟡 loadNote: Is note empty?',
+          isEmpty,
+          ', current isEditable:',
+          isEditable,
+        );
 
-        setIsLoading(false);
+        // ✅ Batch ALL state updates into ONE render
+        console.log('🟡 loadNote: Batching state updates...');
+        unstable_batchedUpdates(() => {
+          console.log(
+            '🟡 loadNote: Inside batchedUpdates - setting title:',
+            title,
+          );
+          setTitle(title);
+          latestTitleRef.current = title;
+
+          console.log(
+            '🟡 loadNote: Setting content HTML (length:',
+            content.length,
+            ')',
+          );
+          richText.current?.setContentHTML(content);
+          latestHtmlContentRef.current = content;
+
+          if (isEditable !== isEmpty) {
+            console.log(
+              '🟡 loadNote: Updating isEditable from',
+              isEditable,
+              'to',
+              isEmpty,
+            );
+            setIsEditable(isEmpty);
+          } else {
+            console.log(
+              '🟡 loadNote: Skipping setIsEditable - value unchanged (',
+              isEmpty,
+              ')',
+            );
+          }
+
+          console.log('🟡 loadNote: Setting isLoading(false)');
+          setIsLoading(false);
+        });
+        console.log('🟡 loadNote: Batched updates complete');
+
+        console.log('🟡 loadNote: Scheduling hydrateImages');
         setTimeout(() => {
+          console.log('🟡 loadNote: Calling hydrateImages (timeout fired)');
           hydrateImages(id, content);
         }, 0);
-        // hydrateImages(id, content);
+
+        console.log('🟡 loadNote: END of try block');
       } catch (error) {
-        console.error('Error loading note:', error);
+        console.error('🔴 loadNote: Error loading note:', error);
         Alert.alert('Error', error.message || 'Failed to load note');
-      } finally {
+        console.log('🔴 loadNote: Setting isLoading(false) from catch block');
         setIsLoading(false);
       }
     };
 
     const hydrateImages = async (noteId, htmlContent) => {
+      console.log('🟠 hydrateImages: START for note:', noteId);
       try {
         const images = await getImagesForNote(noteId);
+        console.log('🟠 hydrateImages: Images found:', images?.length || 0);
 
         if (!images?.length) return;
 
@@ -197,6 +306,7 @@ const RichTextEditor = forwardRef(
           }
         });
 
+        console.log('🟠 hydrateImages: Injecting JS to replace placeholders');
         richText.current?.commandDOM(`
           (function() {
             const map = ${JSON.stringify(imageMap)};
@@ -215,37 +325,70 @@ const RichTextEditor = forwardRef(
         const usedImageIds = Array.from(
           htmlContent.matchAll(/data-image-id="(\d+)"/g),
         ).map(match => parseInt(match[1], 10));
+
+        console.log('🟠 hydrateImages: Used image IDs:', usedImageIds);
         setTimeout(() => {
+          console.log('🟠 hydrateImages: Cleaning up unused images');
           deleteUnusedImages(noteId, usedImageIds);
         }, 0);
       } catch (err) {
-        console.log('Image hydration failed:', err);
+        console.log('🟠 hydrateImages: Failed:', err);
       }
     };
 
     const debouncedSaveNote = newHtmlContent => {
+      console.log(
+        '🟤 debouncedSaveNote: Called (content length:',
+        newHtmlContent?.length,
+        ')',
+      );
       latestHtmlContentRef.current = newHtmlContent;
 
       if (saveTimeout.current) {
         clearTimeout(saveTimeout.current);
+        console.log('🟤 debouncedSaveNote: Cleared previous timeout');
       }
       saveTimeout.current = setTimeout(() => {
+        console.log('🟤 debouncedSaveNote: Timeout fired, saving...');
         requestAnimationFrame(() => {
           handleSaveNote(newHtmlContent);
         });
       }, 500);
     };
 
-    const handleSaveNote = async content => {
-      if (!currentNoteId || !isEditable) return;
+    const handleSaveNote = async (content, forceSave = false) => {
+      console.log(
+        '🔵 handleSaveNote: START (isEditable:',
+        isEditable,
+        ', currentNoteId:',
+        currentNoteId,
+        ', forceSave:',
+        forceSave,
+        ')',
+      );
+
+      if (!currentNoteId) {
+        console.log('🔵 handleSaveNote: Aborting - no noteId');
+        return;
+      }
+
+      // Allow force save even when not editable (for cleanup)
+      if (!isEditable && !forceSave) {
+        console.log(
+          '🔵 handleSaveNote: Aborting - not editable and not forced',
+        );
+        return;
+      }
 
       const {processedHtml, imageIdsInContent} = processHtmlContent(content);
       const textContent = stripHtml(processedHtml);
 
+      console.log('🔵 handleSaveNote: Calling saveContent');
       try {
         saveContent(currentNoteId, processedHtml, textContent);
+        console.log('🔵 handleSaveNote: Save complete');
       } catch (error) {
-        console.error('Failed to save note:', error);
+        console.error('🔵 handleSaveNote: Failed:', error);
       }
     };
 
@@ -281,6 +424,7 @@ const RichTextEditor = forwardRef(
     };
 
     const handleTitleChange = text => {
+      console.log('📝 handleTitleChange: New title:', text);
       setTitle(text);
       latestTitleRef.current = text;
 
@@ -289,11 +433,13 @@ const RichTextEditor = forwardRef(
       }
 
       titleTimeout.current = setTimeout(() => {
+        console.log('📝 handleTitleChange: Saving title to DB');
         saveTitle(currentNoteId, text);
       }, 500);
     };
 
     const handleImagePickerResult = async result => {
+      console.log('🖼️ handleImagePickerResult: Called');
       if (!result || !result.data) {
         Alert.alert(
           'Info',
@@ -307,7 +453,7 @@ const RichTextEditor = forwardRef(
           webViewRef && result.timestamp
             ? result.timestamp
             : !webViewRef
-              ? vlcTime
+              ? playerRef.current?.getCurrentTime() / 1000
               : null;
         const formattedTime = timestamp
           ? new Date(timestamp * 1000).toISOString().substr(11, 8)
@@ -315,6 +461,12 @@ const RichTextEditor = forwardRef(
 
         const base64Image = `data:${result.mime || 'image/jpeg'};base64,${result.data}`;
         const imageId = generateId();
+        console.log(
+          '🖼️ handleImagePickerResult: Inserting image (id:',
+          imageId,
+          ')',
+        );
+
         let html = `
         <div><br></div>
         <div contenteditable="false" style="position: relative; display: inline-block;">
@@ -366,9 +518,10 @@ const RichTextEditor = forwardRef(
            >.</button>
            <div><br></div>`,
         );
+        console.log('🖼️ handleImagePickerResult: Saving image in background');
         saveImageInBackground(currentNoteId, base64Image, imageId);
       } catch (error) {
-        console.error('Error saving image or inserting HTML:', error);
+        console.error('🔴 Error saving image or inserting HTML:', error);
         Alert.alert('Error', 'Something went wrong while handling the image.');
       }
     };
@@ -379,10 +532,16 @@ const RichTextEditor = forwardRef(
     }, []);
 
     const toggleEditMode = async () => {
+      console.log(
+        '✏️ toggleEditMode: Current mode:',
+        isEditable ? 'editing' : 'read-only',
+      );
       if (!isEditable) {
+        console.log('✏️ toggleEditMode: Entering edit mode');
         richText.current?.focusContentEditor();
       } else {
         // Get the latest content before saving
+        console.log('✏️ toggleEditMode: Exiting edit mode, saving...');
         const currentContent = await richText.current?.getContentHtml();
         latestHtmlContentRef.current = currentContent;
         handleSaveNote(currentContent);
@@ -392,33 +551,55 @@ const RichTextEditor = forwardRef(
       setIsEditable(prev => !prev);
     };
 
-    const handleCloseNote = async () => {
-      try {
-        if (currentNoteId) {
-          // Use the ref which always has the latest content
-          const currentContent = latestHtmlContentRef.current;
-          const isEmpty = isNoteEmpty(
-            latestTitleRef.current,
-            latestHtmlContentRef.current,
-          );
+const handleCloseNote = async (noteIdToClose) => {
+  const id = noteIdToClose || currentNoteId;
+  console.log('🚪 handleCloseNote: START for note:', id);
 
-          if (isEmpty) {
-            deleteNote(currentNoteId);
+  if (!id) {
+    console.log('🚪 handleCloseNote: No noteId, returning');
+    return;
+  }
 
-            ToastAndroid.show('Empty note deleted', ToastAndroid.SHORT);
-          } else {
-            await handleSaveNote(currentContent);
-          }
-          setActiveNoteId(null);
-        }
-      } catch (error) {
-        console.error('Error in handleCloseNote:', error);
-        ToastAndroid.show('Error closing note', ToastAndroid.SHORT);
+  try {
+    const currentContent = latestHtmlContentRef.current;
+    const isEmpty = isNoteEmpty(latestTitleRef.current, currentContent);
+
+    console.log('🚪 handleCloseNote: Is empty?', isEmpty, 'Content length:', currentContent?.length);
+
+    if (isEmpty) {
+      // If content was never loaded (empty ref default), don't delete
+      if (currentContent === '' && id !== currentNoteId) {
+        console.log('🚪 handleCloseNote: Content never loaded for', id, '- skipping delete');
+        return;
       }
-    };
+      console.log('🚪 handleCloseNote: Deleting empty note:', id);
+      await deleteNote(id);
+      ToastAndroid.show('Empty note deleted', ToastAndroid.SHORT);
+    } else {
+      console.log('🚪 handleCloseNote: Saving note before close:', id);
+      await handleSaveNote(currentContent);
+    }
+    
+    // 🔑 ONLY clear activeNoteId if THIS note is still the active one
+    // Use the current state value, not the stale closure
+    const { activeNoteId: currentActiveId } = useNotesStore.getState();
+    console.log('🚪 handleCloseNote: current activeNoteId:', currentActiveId, 'closing noteId:', id);
+    
+    if (currentActiveId === id) {
+      console.log('🚪 handleCloseNote: Setting activeNoteId to null (was our note)');
+      setActiveNoteId(null);
+    } else {
+      console.log('🚪 handleCloseNote: NOT setting null - activeNoteId changed to', currentActiveId);
+    }
+  } catch (error) {
+    console.error('🔴 Error in handleCloseNote:', error);
+    ToastAndroid.show('Error closing note', ToastAndroid.SHORT);
+  }
+};
 
     //timestamp handlers
     const addTimestamp = async time => {
+      console.log('⏱️ addTimestamp: Adding timestamp at', time);
       const formattedTime = new Date(time * 1000).toISOString().substr(11, 8);
       const timestampHtml = `
       <div><br></div>
@@ -441,26 +622,35 @@ const RichTextEditor = forwardRef(
       `;
 
       richText.current?.insertHTML(timestampHtml);
-
       richText.current?.focusContentEditor();
     };
 
+    const addTimestampCb = useCallback(() => {
+      // Get time fresh from playerRef when actually needed
+      const time = playerRef.current?.getCurrentTime();
+      if (source_type !== 'youtube_video' && time) {
+        addTimestamp(time / 1000);
+      } else if (time) {
+        addTimestamp(time);
+      }
+    }, []);
+
     // Function to handle timestamp clicks
     const handleMessage = message => {
-      console.log('editor is able to send message');
+      console.log('📨 editor is able to send message');
       const type = message.type;
       // The library sends the message as a string directly
       if (typeof type === 'string' && type.startsWith('TIMESTAMP_')) {
         const time = parseFloat(type.replace('TIMESTAMP_', ''));
-        console.log('Seeking to timestamp:', time);
+        console.log('📨 Seeking to timestamp:', time);
         seekToTimestamp(time);
       }
     };
 
     const seekToTimestamp = time => {
-      if (typeof seekToTime === 'function') {
+      console.log('🎬 seekToTimestamp:', time);
+      if (source_type !== 'youtube_video') {
         playerRef.current?.handleSeek(time * 1000);
-        // vlcTime=time;  not needed vlc player itself handles
       } else {
         seekVideoTo(webViewRef, time);
       }
@@ -492,8 +682,14 @@ const RichTextEditor = forwardRef(
             value={title}
             editable={isEditable}
             onChangeText={handleTitleChange}
-            onFocus={() => setIsTitleFocused(true)}
-            onBlur={() => setIsTitleFocused(false)}
+            onFocus={() => {
+              console.log('📝 Title input FOCUSED');
+              setIsTitleFocused(true);
+            }}
+            onBlur={() => {
+              console.log('📝 Title input BLURRED');
+              setIsTitleFocused(false);
+            }}
             multiline={false}
             returnKeyType="next"
             onSubmitEditing={() => richText.current?.focusContentEditor()}
@@ -515,11 +711,17 @@ const RichTextEditor = forwardRef(
             editorStyle={{backgroundColor: '#fefefe'}}
             onCursorPosition={handleCursorPosition}
             onChange={descriptionText => {
+              console.log(
+                '🟣 onChange FIRED (content length:',
+                descriptionText?.length,
+                ')',
+              );
               latestHtmlContentRef.current = descriptionText;
               if (currentNoteId && !isLoading) {
                 debouncedSaveNote(descriptionText);
               }
               if (onContentChange) {
+                console.log('🟣 onChange: Calling onContentChange callback');
                 onContentChange(descriptionText);
               }
             }}
@@ -552,7 +754,7 @@ const RichTextEditor = forwardRef(
             captureScreenshot={captureScreenshot}
             isHidden={isHidden}
             webViewRef={webViewRef}
-            addVLCTimestamp={() => addTimestamp(vlcTime)}
+            addTimestampCb={addTimestampCb}
             onToolbarVisibilityChange={setIsToolbarVisible}
           />
         )}
@@ -603,4 +805,10 @@ const styles = StyleSheet.create({
   },
 });
 
-export default RichTextEditor;
+// export default RichTextEditor;
+export default React.memo(RichTextEditor, (prevProps, nextProps) => {
+  // Only re-render if noteId changes
+  return prevProps.noteId === nextProps.noteId;
+  // This will ignore ALL other prop changes!
+  // Use refs or context for functions you need inside the editor
+});

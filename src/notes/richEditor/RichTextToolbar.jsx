@@ -24,11 +24,10 @@ const RichTextToolbar = ({
   editorRef,
   handleImagePickerResult,
   captureScreenshot,
-  addVLCTimestamp,
-  webViewRef,
+  addTimestampCb,
   onToolbarVisibilityChange,
-  isHidden,
 }) => {
+     console.log('🔄🔄 RichTextToolbar RENDERING', new Date().toISOString());
   const [activeToolbar, setActiveToolbar] = useState(null);
   const [showColorPicker, setShowColorPicker] = useState(false);
   // Define our category buttons
@@ -181,14 +180,17 @@ const RichTextToolbar = ({
     }
 
     if (categoryId === 'timestamp') {
-      if (webViewRef != null) {
-        getCurrentVideoTime(webViewRef);
-      } else if (typeof addVLCTimestamp === 'function') {
-        addVLCTimestamp();
+      // if (webViewRef != null) {
+      //   getCurrentVideoTime(webViewRef);
+      // } else if (typeof addTimestampCb === 'function') {
+      //   addTimestampCb();
+      // }
+      if (typeof addTimestampCb === 'function') {
+        addTimestampCb();
       }
       return; // Don't change toolbar state
     }
-    
+
     // For other categories, toggle toolbar visibility
     const newState = activeToolbar === categoryId ? null : categoryId;
     setActiveToolbar(newState);
@@ -363,4 +365,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default RichTextToolbar;
+export default React.memo(RichTextToolbar);

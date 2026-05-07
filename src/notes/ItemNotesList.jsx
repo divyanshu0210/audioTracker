@@ -54,10 +54,13 @@ const ItemNotesScreen = ({route}) => {
   };
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
-const SHEET_HEIGHT = SCREEN_HEIGHT * 0.70;
+
+const containerStyle = showheader
+  ? { height: SCREEN_HEIGHT * 0.70, backgroundColor: '#fff' }
+  : { flex: 1, backgroundColor: '#fff' };
 
 return (
-  <View style={{ height: SHEET_HEIGHT, backgroundColor: '#fff' }}>
+  <View style={containerStyle}>
     {showheader && (
       <>
        <View style={styles.dragHandle} />

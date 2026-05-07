@@ -6,11 +6,14 @@ import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
 import { handleExport } from '../components/menu/NoteMenuItems';
 import RichTextEditor from './richEditor/RichTextEditor';
 import { useAppState } from '../contexts/AppStateContext';
+import { useNotesStore } from '../stores/useNotesStore';
 
 const NotesSectionWithBack = () => {
   const navigation = useNavigation();
   const route = useRoute();
-  const {activeNoteId} = useAppState();
+const activeNoteId = useNotesStore(
+  state => state.activeNoteId,
+);
 
   return (
     <View style={{flex: 1, backgroundColor: '#fff'}}>

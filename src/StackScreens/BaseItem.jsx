@@ -21,22 +21,48 @@ import BaseMenu from '../components/menu/BaseMenu';
 import NoteItem from '../notes/notesListing/NoteItem';
 import useAppStateStore from '../contexts/appStateStore';
 import {CategoryItem} from '../categories/CategoryItem';
+import { useMediaStore } from '../stores/useMediaStore';
+import { useShallow } from 'zustand/react/shallow';
+import { useSelectionStore } from '../stores/useSelectionStore';
+import { useNotesStore } from '../stores/useNotesStore';
 
 const BaseItem = ({type, item, isSelected, onSelect, onLongPress, screen}) => {
   const navigation = useNavigation();
-  const {
-    items,
-    videos,
-    validDeviceFiles,
-    setFolderStack,
-    folderStack,
-    nonFolderFiles,
-    nonFolderFilesInside,
-    setActiveItem,
-    setActiveNoteId,
-    setSelectedNote,
-    setSelectedCategory,
-  } = useAppState();
+const {
+  items,
+  videos,
+  validDeviceFiles,
+  setFolderStack,
+  folderStack,
+  nonFolderFiles,
+  nonFolderFilesInside,
+} = useMediaStore(
+  useShallow(state => ({
+    items: state.items,
+    videos: state.videos,
+    validDeviceFiles: state.validDeviceFiles,
+    setFolderStack: state.setFolderStack,
+    folderStack: state.folderStack,
+    nonFolderFiles: state.nonFolderFiles,
+    nonFolderFilesInside: state.nonFolderFilesInside,
+  })),
+);
+
+const {setActiveItem, setSelectedCategory} =
+  useSelectionStore(
+    useShallow(state => ({
+      setActiveItem: state.setActiveItem,
+      setSelectedCategory: state.setSelectedCategory,
+    })),
+  );
+
+const {setActiveNoteId, setSelectedNote} =
+  useNotesStore(
+    useShallow(state => ({
+      setActiveNoteId: state.setActiveNoteId,
+      setSelectedNote: state.setSelectedNote,
+    })),
+  );
   const {setLoading} = useAppStateStore();
 
   const currentRoute = useNavigationState(

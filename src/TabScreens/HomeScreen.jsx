@@ -12,10 +12,23 @@ import {
 import {isAssignmentPending} from '../appMentorBackend/assignmentsMgt';
 import {BASE_URL} from '../appMentorBackend/userMgt';
 import HomeTabs from './HomeTabs';
+import { useSelectionStore } from '../stores/useSelectionStore';
+import { useShallow } from 'zustand/react/shallow';
 
 const HomeScreen = () => {
-  const {setCategories, selectedCategory, setSelectedCategory, userInfo} =
-    useAppState();
+ const {
+  setCategories,
+  selectedCategory,
+  setSelectedCategory,
+} = useSelectionStore(
+  useShallow(state => ({
+    setCategories: state.setCategories,
+    selectedCategory: state.selectedCategory,
+    setSelectedCategory: state.setSelectedCategory,
+  })),
+);
+
+const {userInfo} = useAppState();
 
   const {setMentors, setMentees, activeMentee, activeMentor} =
     useMentorMenteeStore();

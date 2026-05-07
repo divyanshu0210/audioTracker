@@ -8,15 +8,24 @@ import {useNavigation} from '@react-navigation/core';
 import CustomDropdown from '../../components/dropdowns/CustomDropdown';
 import {useAppState} from '../../contexts/AppStateContext';
 import useMentorMenteeStore from '../../appMentor/useMentorMenteeStore';
+import { useSelectionStore } from '../../stores/useSelectionStore';
+import { useShallow } from 'zustand/react/shallow';
 
 const MainHeader = ({}) => {
   const navigation = useNavigation();
-  const {
-    categories,
-    userInfo,
-    selectedCategory,
-    setSelectedCategory,
-  } = useAppState();
+const {
+  categories,
+  selectedCategory,
+  setSelectedCategory,
+} = useSelectionStore(
+  useShallow(state => ({
+    categories: state.categories,
+    selectedCategory: state.selectedCategory,
+    setSelectedCategory: state.setSelectedCategory,
+  })),
+);
+
+const {userInfo} = useAppState();
   const {activeMentee, activeMentor} = useMentorMenteeStore();
   const isActive = activeMentee || activeMentor;
 

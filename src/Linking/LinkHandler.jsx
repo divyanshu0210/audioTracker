@@ -5,9 +5,23 @@ import { Linking } from 'react-native';
 import { handleLinkSubmit } from './utils/handleLinkSubmit';
 import { useNavigation } from '@react-navigation/native';
 import { useAppState } from '../contexts/AppStateContext';
+import { useMediaStore } from '../stores/useMediaStore';
+import { useShallow } from 'zustand/react/shallow';
 
 const useLinkHandler = () => {
-  const { setDriveLinksList, setItems,setDeviceFiles, userInfo } = useAppState();
+ const {
+  setDriveLinksList,
+  setItems,
+  setDeviceFiles,
+} = useMediaStore(
+  useShallow(state => ({
+    setDriveLinksList: state.setDriveLinksList,
+    setItems: state.setItems,
+    setDeviceFiles: state.setDeviceFiles,
+  })),
+);
+
+const {userInfo} = useAppState();
   const navigation = useNavigation();
   const hasHandledInitialUrl = useRef(false); // <--- Add this
   const pendingUrlRef = useRef(null);

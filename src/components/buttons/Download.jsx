@@ -6,11 +6,18 @@ import CircularProgress from 'react-native-circular-progress-indicator';
 import {DRIVE_API_KEY} from '@env';
 import {updateFilePath, updateItemFields} from '../../database/U';
 import {useAppState} from '../../contexts/AppStateContext';
+import { useMediaStore } from '../../stores/useMediaStore';
+import { useShallow } from 'zustand/react/shallow';
 
 export const DownloadButton = ({file}) => {
   const [downloadingFileId, setDownloadingFileId] = useState(null);
   const [progress, setProgress] = useState(0);
-  const {setDriveLinksList, setData} = useAppState();
+ const {setDriveLinksList, setData} = useMediaStore(
+  useShallow(state => ({
+    setDriveLinksList: state.setDriveLinksList,
+    setData: state.setData,
+  })),
+);
   const currentDownloadJobId = useRef(null);
 
   const getLocalFilePath = (sourceId, fileName) => {

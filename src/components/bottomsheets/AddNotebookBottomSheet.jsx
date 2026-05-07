@@ -19,12 +19,25 @@ import {updateNotebook} from '../../database/U';
 import {useAppState} from '../../contexts/AppStateContext';
 import {useNavigation} from '@react-navigation/core';
 import useDbStore from '../../database/dbStore';
+import { useNotesStore } from '../../stores/useNotesStore';
+import { useShallow } from 'zustand/react/shallow';
 
 const AddNotebookBottomSheet = forwardRef(({}, ref) => {
   const [notebookName, setNotebookName] = useState('');
   const [selectedColor, setSelectedColor] = useState('#0000FF');
-  const {notebooks, setNotebooks, editingNotebook, setEditingNotebook} =
-    useAppState();
+ const {
+  notebooks,
+  setNotebooks,
+  editingNotebook,
+  setEditingNotebook,
+} = useNotesStore(
+  useShallow(state => ({
+    notebooks: state.notebooks,
+    setNotebooks: state.setNotebooks,
+    editingNotebook: state.editingNotebook,
+    setEditingNotebook: state.setEditingNotebook,
+  })),
+);
   const {inserting, setInserting} = useDbStore();
   const navigation = useNavigation();
 

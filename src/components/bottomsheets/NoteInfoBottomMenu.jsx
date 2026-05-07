@@ -2,10 +2,14 @@ import React, { forwardRef, useCallback, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import BottomSheet, { BottomSheetBackdrop, BottomSheetView } from '@gorhom/bottom-sheet';
 import { useAppState } from '../../contexts/AppStateContext';
+import { useNotesStore } from '../../stores/useNotesStore';
 
 const NoteInfoBottomMenu = forwardRef(({  }, ref) => {
   const snapPoints = ['50%'];
-    const {selectedNote} = useAppState();
+  
+const selectedNote = useNotesStore(
+  state => state.selectedNote,
+);
 
     // Custom backdrop component
   const renderBackdrop = useCallback(

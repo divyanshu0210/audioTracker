@@ -4,9 +4,32 @@ import {useAppState} from '../../contexts/AppStateContext';
 import {fetchAssignmentsForMentee} from '../../appMentorBackend/assignmentsMgt';
 import MaterialIcons from'react-native-vector-icons/MaterialIcons'
 import useNotificationStore from '../../appNotification/useNotificationStore';
+import { useMediaStore } from '../../stores/useMediaStore';
+import { useSelectionStore } from '../../stores/useSelectionStore';
+import { useShallow } from 'zustand/react/shallow';
 
 const NewAssignmentsBtn = () => {
-  const {setDriveLinksList, setItems, userInfo, setDeviceFiles,setCategories,setSelectedCategory} = useAppState();
+const {
+  setDriveLinksList,
+  setItems,
+  setDeviceFiles,
+} = useMediaStore(
+  useShallow(state => ({
+    setDriveLinksList: state.setDriveLinksList,
+    setItems: state.setItems,
+    setDeviceFiles: state.setDeviceFiles,
+  })),
+);
+
+const {setCategories, setSelectedCategory} =
+  useSelectionStore(
+    useShallow(state => ({
+      setCategories: state.setCategories,
+      setSelectedCategory: state.setSelectedCategory,
+    })),
+  );
+
+const {userInfo} = useAppState();
   const {newAssignmentsFlag} = useNotificationStore();
 
   if (!newAssignmentsFlag) return null;

@@ -17,6 +17,7 @@ import {useAppState} from '../contexts/AppStateContext';
 import {addCategory} from '../categories/catDB';
 import {TabView, SceneMap} from 'react-native-tab-view';
 import Ionicons from 'react-native-vector-icons/Ionicons';
+import {useSelectionStore} from '../stores/useSelectionStore';
 
 const CustomTabBar = ({navigationState, setIndex}) => {
   return (
@@ -55,7 +56,9 @@ const MentorMenteeDrawer = () => {
     activeMentee,
     isLoading,
   } = useMentorMenteeStore();
-  const {setSelectedCategory} = useAppState();
+  const setSelectedCategory = useSelectionStore(
+    state => state.setSelectedCategory,
+  );
   const navigation = useNavigation();
 
   const [drawerVisible, setDrawerVisible] = useState(false);

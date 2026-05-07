@@ -9,12 +9,25 @@ import {
 import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
 import {useAppState} from '../../contexts/AppStateContext';
 import CustomDropdown from '../dropdowns/CustomDropdown';
+import { useSelectionStore } from '../../stores/useSelectionStore';
+import { useShallow } from 'zustand/react/shallow';
 
 const DriveLinkModal = ({closeModal, onSubmit}) => {
   const [text, setText] = useState('');
 
-  const {categories, setCategories, selectedCategory, setSelectedCategory} =
-    useAppState();
+const {
+  categories,
+  setCategories,
+  selectedCategory,
+  setSelectedCategory,
+} = useSelectionStore(
+  useShallow(state => ({
+    categories: state.categories,
+    setCategories: state.setCategories,
+    selectedCategory: state.selectedCategory,
+    setSelectedCategory: state.setSelectedCategory,
+  })),
+);
 
   // useEffect(() => {
   //   setSelectedCategory(null); // Reset selectedCategory on mount

@@ -2,13 +2,27 @@ import {useEffect, useRef} from 'react';
 import {updateNote, updateNoteTitle, deleteNoteById} from './richDB';
 import {createNewNote} from './richDB';
 import {useAppState} from '../contexts/AppStateContext';
+import { unstable_batchedUpdates } from 'react-native';
+import { useNotesStore } from '../stores/useNotesStore';
+import { useShallow } from 'zustand/react/shallow';
 
 export const generateId = () =>
   Date.now() * 1000 + Math.floor(Math.random() * 1000);
 
 export const useNoteController = () => {
-  const {setNotesList, notesList, setMainNotesList, setSelectedNote} =
-    useAppState();
+const {
+  setNotesList,
+  notesList,
+  setMainNotesList,
+  setSelectedNote,
+} = useNotesStore(
+  useShallow(state => ({
+    setNotesList: state.setNotesList,
+    notesList: state.notesList,
+    setMainNotesList: state.setMainNotesList,
+    setSelectedNote: state.setSelectedNote,
+  })),
+);
 
   // 🚀 Instant note creation
   const createNoteInstant = async (
@@ -43,15 +57,15 @@ export const useNoteController = () => {
       updateNote(noteId, html, text);
     }, 0);
 
-    updateNoteInState(noteId, {
-      content: html,
-      text_content: text,
-    });
+    // updateNoteInState(noteId, {
+    //   content: html,
+    //   text_content: text,
+    // });
   };
 
   const saveTitle = async (noteId, title) => {
     await updateNoteTitle(noteId, title);
-    updateNoteInState(noteId, {noteTitle: title});
+    // updateNoteInState(noteId, {noteTitle: title});
   };
 
   const deleteNote = async noteId => {
@@ -63,6 +77,8 @@ export const useNoteController = () => {
 
   const updateNoteInState = (noteId, updatedFields) => {
     console.log('UPDATING NOTELIST', notesList, noteId);
+
+  unstable_batchedUpdates(() => {
     setNotesList(prevNotes =>
       prevNotes.map(note =>
         note.rowid === noteId ? {...note, ...updatedFields} : note,
@@ -78,7 +94,8 @@ export const useNoteController = () => {
     setSelectedNote(prev =>
       prev?.rowid === noteId ? {...prev, ...updatedFields} : prev,
     );
-  };
+  });
+};
 
   return {
     createNoteInstant,

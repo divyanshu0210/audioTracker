@@ -25,6 +25,8 @@ import BaseMediaListComponent from './BaseMediaListComponent';
 import {ItemTypes, ScreenTypes} from '../contexts/constants';
 import useAppStateStore from '../contexts/appStateStore';
 import AppHeader from '../components/headers/AppHeader';
+import { useMediaStore } from '../stores/useMediaStore';
+import { useShallow } from 'zustand/react/shallow';
 
 export const fetchDriveItems = async (
   source_id,
@@ -141,7 +143,15 @@ const GoogleDriveViewer = () => {
   const {driveInfo, folderStack: passedStack} = route.params || {};
   const {loading, setLoading} = useAppStateStore();
   const breadcrumbListRef = useRef(null);
-  const {data, setData, folderStack, setFolderStack} = useAppState();
+const {data, setData, folderStack, setFolderStack} =
+  useMediaStore(
+    useShallow(state => ({
+      data: state.data,
+      setData: state.setData,
+      folderStack: state.folderStack,
+      setFolderStack: state.setFolderStack,
+    })),
+  )
   const folderCache = useAppStateStore(state => state.folderCache);
   const setFolderCache = useAppStateStore(state => state.setFolderCache);
   const getFolderFromCache = useAppStateStore(

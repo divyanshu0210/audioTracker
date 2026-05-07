@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, {useCallback, useEffect, useState} from 'react';
 import {
   Alert,
   AppState,
@@ -6,22 +6,33 @@ import {
   Pressable,
   StyleSheet,
   Text,
-  View
+  View,
 } from 'react-native';
 import DriveLinkModal from '../modules/DriveLink';
 import MyModal from '../MyModal';
 
-import { useFocusEffect, useNavigation } from '@react-navigation/native';
-import { pick, types } from 'react-native-document-picker';
-import { useAppState } from '../../contexts/AppStateContext';
+import {useFocusEffect, useNavigation} from '@react-navigation/native';
+import {pick, types} from 'react-native-document-picker';
+import {useAppState} from '../../contexts/AppStateContext';
 import {
   handleFileProcessing,
   handleLinkSubmit,
 } from '../../Linking/utils/handleLinkSubmit';
 import PlusButton from './PlusButton';
+import {useMediaStore} from '../../stores/useMediaStore';
+import {useShallow} from 'zustand/react/shallow';
+import {useSelectionStore} from '../../stores/useSelectionStore';
 
 const AddDriveBtn = () => {
-  const {setDriveLinksList, setItems, setDeviceFiles,selectedCategory, userInfo} = useAppState();
+  const {setDriveLinksList, setItems, setDeviceFiles} = useMediaStore(
+    useShallow(state => ({
+      setDriveLinksList: state.setDriveLinksList,
+      setItems: state.setItems,
+      setDeviceFiles: state.setDeviceFiles,
+    })),
+  );
+
+  const selectedCategory = useSelectionStore(state => state.selectedCategory);
   const navigation = useNavigation();
 
   const [modalVisible, setModalVisible] = useState(false);
@@ -67,7 +78,7 @@ const AddDriveBtn = () => {
       setItems,
       setDeviceFiles,
       navigation,
-      selectedCategory
+      selectedCategory,
     });
 
     setModalVisible(false);

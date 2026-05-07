@@ -7,11 +7,23 @@ import {getAllCategories} from './catDB';
 import AppHeader from '../components/headers/AppHeader';
 import {ItemTypes} from '../contexts/constants';
 import BaseMediaListComponent from '../StackScreens/BaseMediaListComponent';
+import { useSelectionStore } from '../stores/useSelectionStore';
+import { useShallow } from 'zustand/react/shallow';
 
 export default function CategoriesView({mode = 'full'}) {
   const navigation = useNavigation();
-  const {categories, setCategories, setCreateCategoryModalVisible} =
-    useAppState();
+const {
+  categories,
+  setCategories,
+  setCreateCategoryModalVisible,
+} = useSelectionStore(
+  useShallow(state => ({
+    categories: state.categories,
+    setCategories: state.setCategories,
+    setCreateCategoryModalVisible:
+      state.setCreateCategoryModalVisible,
+  })),
+);
 
   const isPreview = mode === 'preview';
 

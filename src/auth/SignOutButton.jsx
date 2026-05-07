@@ -10,10 +10,27 @@ import useSettingsStore from '../Settings/settingsStore';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { MenuOption } from 'react-native-popup-menu';
 import useBackupStore from '../stores/backupStore';
+import { useMediaStore } from '../stores/useMediaStore';
+import { useSelectionStore } from '../stores/useSelectionStore';
+import { useShallow } from 'zustand/react/shallow';
 
 export default function SignOutButton({ label = 'LogOut' }) {
   const navigation = useNavigation();
-  const { setUserInfo,setItems,setDriveLinksList,setSelectedItems } = useAppState();
+ 
+const {setUserInfo} = useAppState();
+
+const {setItems, setDriveLinksList} = useMediaStore(
+  useShallow(state => ({
+    setItems: state.setItems,
+    setDriveLinksList: state.setDriveLinksList,
+  })),
+);
+
+const {setSelectedItems} = useSelectionStore(
+  useShallow(state => ({
+    setSelectedItems: state.setSelectedItems,
+  })),
+);
   const { closeDb, setLoading } = useDbStore();
   const { settings } = useSettingsStore();
 

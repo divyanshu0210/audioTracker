@@ -16,20 +16,34 @@ import {
 import {Picker} from '@react-native-picker/picker';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import {useAppState} from '../../contexts/AppStateContext';
+import { useSelectionStore } from '../../stores/useSelectionStore';
+import { useShallow } from 'zustand/react/shallow';
 
 const CategorySelectionModal = () => {
   const [categoriesLocal, setCategoriesLocal] = useState([]);
   const [selectedCategory, setSelectedCategory] = useState(null);
   const [loading, setLoading] = useState(false);
   const [alreadyAddedCategories, setAlreadyAddedCategories] = useState([]);
-  const {
-    categories,
-    setCategories,
-    activeItem,
-    addToCategoryModalVisible,
-    setAddToCategoryModalVisible,
-    setCreateCategoryModalVisible,
-  } = useAppState();
+const {
+  categories,
+  setCategories,
+  activeItem,
+  addToCategoryModalVisible,
+  setAddToCategoryModalVisible,
+  setCreateCategoryModalVisible,
+} = useSelectionStore(
+  useShallow(state => ({
+    categories: state.categories,
+    setCategories: state.setCategories,
+    activeItem: state.activeItem,
+    addToCategoryModalVisible:
+      state.addToCategoryModalVisible,
+    setAddToCategoryModalVisible:
+      state.setAddToCategoryModalVisible,
+    setCreateCategoryModalVisible:
+      state.setCreateCategoryModalVisible,
+  })),
+);
   const sourceId = activeItem?.sourceId;
   const sourceType = activeItem?.sourceType;
 

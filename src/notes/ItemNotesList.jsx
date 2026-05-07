@@ -5,9 +5,12 @@ import {fetchNotes} from '../database/R';
 import NotesListComponent from './notesListing/NotesListComponent';
 import {useAppState} from '../contexts/AppStateContext';
 import {ScreenTypes} from '../contexts/constants';
+import { useSelectionStore } from '../stores/useSelectionStore';
 
 const ItemNotesScreen = ({route}) => {
-  const {activeItem} = useAppState();
+ const activeItem = useSelectionStore(
+  state => state.activeItem,
+);
   const [notes, setNotes] = useState([]); // ← LOCAL STATE
   const [loading, setLoading] = useState(false);
   

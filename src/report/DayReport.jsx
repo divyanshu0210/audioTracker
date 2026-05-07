@@ -18,12 +18,19 @@ import {useAppState} from '../contexts/AppStateContext';
 import {fetchWatchHistoryByDatefromBackend} from '../appMentorBackend/reportMgt';
 import VideoReportItem from './VideoReportItem';
 import SummaryCard from './SummaryCard';
+import { useNotesStore } from '../stores/useNotesStore';
+import { useShallow } from 'zustand/react/shallow';
 
 const DayReport = ({route, navigation}) => {
   const [isLoading, setIsLoading] = useState(true);
   const {date, watchData, mentee} = route.params;
   const [videos, setVideos] = useState([]);
-  const {notesList, setNotesList} = useAppState();
+const {notesList, setNotesList} = useNotesStore(
+  useShallow(state => ({
+    notesList: state.notesList,
+    setNotesList: state.setNotesList,
+  })),
+);
   const [showNotes, setShowNotes] = useState(false);
   const {settings} = useSettingsStore();
 

@@ -7,9 +7,17 @@ import {deleteNotebook} from '../../database/D';
 import {moveNotesToDefaultNotebook} from '../../database/C';
 import {fetchNotebooks} from '../../database/R';
 import {useAppState} from '../../contexts/AppStateContext';
+import { useNotesStore } from '../../stores/useNotesStore';
+import { useShallow } from 'zustand/react/shallow';
 
 const NBMenuItems = ({item, hideMenu}) => {
-  const {setNotebooks, setEditingNotebook} = useAppState();
+const {setNotebooks, setEditingNotebook} =
+  useNotesStore(
+    useShallow(state => ({
+      setNotebooks: state.setNotebooks,
+      setEditingNotebook: state.setEditingNotebook,
+    })),
+  );
 
   // Handle Edit
   const handleEdit = () => {

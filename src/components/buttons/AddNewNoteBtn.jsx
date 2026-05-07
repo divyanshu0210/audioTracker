@@ -5,10 +5,18 @@ import {useNavigation} from '@react-navigation/native';
 import {createNewNote} from '../../notes/richDB';
 import {useAppState} from '../../contexts/AppStateContext';
 import {generateId, useNoteController} from '../../notes/useNoteController';
+import { useSelectionStore } from '../../stores/useSelectionStore';
+import { useNotesStore } from '../../stores/useNotesStore';
 
 const AddNewNoteBtn = forwardRef(
   ({renderItem, onNoteAdded, beforeNoteCreated, disabled}, ref) => {
-    const {activeItem, setActiveNoteId} = useAppState();
+   const activeItem = useSelectionStore(
+  state => state.activeItem,
+);
+
+const setActiveNoteId = useNotesStore(
+  state => state.setActiveNoteId,
+);
     const {createNoteInstant} = useNoteController();
 
     const isNoteSource = activeItem?.sourceType === 'note';

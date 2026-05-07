@@ -15,12 +15,15 @@ import Ionicons from 'react-native-vector-icons/Ionicons';
 import ColorPallete from '../ColorPallete';
 import { addCategory } from '../../categories/catDB';
 import { useAppState } from '../../contexts/AppStateContext';
+import { useSelectionStore } from '../../stores/useSelectionStore';
 
 const CreateCategoryModal = ({ visible, onClose, onCategoryCreated }) => {
   const [newCategoryName, setNewCategoryName] = useState('');
   const [selectedColor, setSelectedColor] = useState('#007AFF');
   const [addingCategory, setAddingCategory] = useState(false);
-  const {setSelectedCategory} = useAppState();
+const setSelectedCategory = useSelectionStore(
+  state => state.setSelectedCategory,
+);
 
   const handleCreateCategory = async () => {
     if (!newCategoryName.trim()) {

@@ -4,9 +4,23 @@ import ShareMenu from 'react-native-share-menu';
 import { handleLinkSubmit } from './utils/handleLinkSubmit'; // The logic for handling the shared content
 import { useAppState } from '../contexts/AppStateContext'; // Access app state, e.g., userInfo
 import { useNavigation } from '@react-navigation/native';
+import { useMediaStore } from '../stores/useMediaStore';
+import { useShallow } from 'zustand/react/shallow';
 
 const useSharedContentHandler = () => {
-  const { setDriveLinksList, setItems, setDeviceFiles, userInfo } = useAppState();
+const {
+  setDriveLinksList,
+  setItems,
+  setDeviceFiles,
+} = useMediaStore(
+  useShallow(state => ({
+    setDriveLinksList: state.setDriveLinksList,
+    setItems: state.setItems,
+    setDeviceFiles: state.setDeviceFiles,
+  })),
+);
+
+const {userInfo} = useAppState();
   const navigation = useNavigation();
   
   const pendingSharedDataRef = useRef(null); // To store pending shared data

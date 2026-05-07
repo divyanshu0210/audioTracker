@@ -3,6 +3,8 @@ import {SafeAreaView, StyleSheet} from 'react-native';
 import {useAppState} from '../../contexts/AppStateContext';
 import {ItemTypes, ScreenTypes} from '../../contexts/constants';
 import BaseMediaListComponent from '../../StackScreens/BaseMediaListComponent';
+import { useNotesStore } from '../../stores/useNotesStore';
+import { useShallow } from 'zustand/react/shallow';
 
 const NotesListComponent = ({
   notes,
@@ -13,8 +15,12 @@ const NotesListComponent = ({
   showMenu = true,
   screen,
 }) => {
-  const {notesList, mainNotesList} = useAppState();
-
+const {notesList, mainNotesList} = useNotesStore(
+  useShallow(state => ({
+    notesList: state.notesList,
+    mainNotesList: state.mainNotesList,
+  })),
+);
   // Determine data source
   const dataSource =
     notes || (screen === ScreenTypes.MAIN ? mainNotesList : notesList);

@@ -11,6 +11,8 @@ import {convertToPdf} from '../../notes/utils/convertToPDF.js';
 import {convertToDocx} from '../../notes/utils/covertToDOCX.js';
 import SelectNotebookModal from '../modals/SelectNotebookModal.jsx';
 import CommonMenuItems from './CommonMenuItems.jsx';
+import { useNotesStore } from '../../stores/useNotesStore.js';
+import { useShallow } from 'zustand/react/shallow';
 
 export const handleExport = async (noteId, format) => {
   try {
@@ -55,8 +57,15 @@ export const handleExport = async (noteId, format) => {
 };
 
 const NoteMenuItems = ({item, hideMenu}) => {
-  const {setNotesList,setMainNotesList, bottomSheetRef} = useAppState();
+const {setNotesList, setMainNotesList} =
+  useNotesStore(
+    useShallow(state => ({
+      setNotesList: state.setNotesList,
+      setMainNotesList: state.setMainNotesList,
+    })),
+  );
 
+const {bottomSheetRef} = useAppState();
 
   const [moveModalVisible, setMoveModalVisible] = useState(false);
 

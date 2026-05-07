@@ -6,10 +6,17 @@ import BaseMenu from '../components/menu/BaseMenu';
 import {ItemTypes} from '../contexts/constants';
 import {useAppState} from '../contexts/AppStateContext';
 import {getFileIcon} from '../contexts/fileIconHelper';
+import { useMediaStore } from '../stores/useMediaStore';
+import { useShallow } from 'zustand/react/shallow';
 
 const DriveItem = ({item, screen}) => {
   const [fileExists, setFileExists] = useState(false);
-  const {driveLinksList, data} = useAppState();
+  const {driveLinksList, data} = useMediaStore(
+  useShallow(state => ({
+    driveLinksList: state.driveLinksList,
+    data: state.data,
+  })),
+);
 
   const isFolder = item?.mimeType === 'application/vnd.google-apps.folder';
   const isVideo = item?.mimeType?.startsWith('video/');

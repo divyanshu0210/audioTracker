@@ -8,9 +8,12 @@ import NotesListComponent from './notesListing/NotesListComponent';
 import {useAppState} from '../contexts/AppStateContext';
 import {ScreenTypes} from '../contexts/constants';
 import { fetchNotes } from '../database/R';
+import { useNotesStore } from '../stores/useNotesStore';
 
 const AllNotesScreen = ({categoryId}) => {
-  const {setMainNotesList} = useAppState();
+  const setMainNotesList = useNotesStore(
+  state => state.setMainNotesList,
+);
 
   const [offset, setOffset] = useState(0);
   const [hasMore, setHasMore] = useState(true);

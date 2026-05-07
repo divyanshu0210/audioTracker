@@ -27,6 +27,9 @@ import VLCPlayerComponent from './VLCPlayer/VLCPlayerComponent';
 import YouTubePlayerComponent from './VLCPlayer/YouTubePlayerComponent ';
 import AddNewNoteBtn from '../components/buttons/AddNewNoteBtn';
 import {saveDatatoBackend} from '../appMentorBackend/reportMgt';
+import { useNotesStore } from '../stores/useNotesStore';
+import { useShallow } from 'zustand/react/shallow';
+import { useSelectionStore } from '../stores/useSelectionStore';
 // const {PipModule} = NativeModules;
 
 const isAudioFile = mimeType => {
@@ -87,8 +90,23 @@ const BacePlayer = () => {
   // Notes context
   const [showNotes, setShowNotes] = useState(false);
   const [isCreatingNote, setIsCreatingNote] = useState(false);
-  const {activeNoteId, setActiveNoteId, setNotesList, setActiveItem} =
-    useAppState();
+const {
+  activeNoteId,
+  setActiveNoteId,
+  setNotesList,
+} = useNotesStore(
+  useShallow(state => ({
+    activeNoteId: state.activeNoteId,
+    setActiveNoteId: state.setActiveNoteId,
+    setNotesList: state.setNotesList,
+  })),
+);
+
+const {setActiveItem} = useSelectionStore(
+  useShallow(state => ({
+    setActiveItem: state.setActiveItem,
+  })),
+);
 
   // Helper function to get item properties
   const getItemProperties = item => {

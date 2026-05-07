@@ -13,10 +13,20 @@ import {useFocusEffect, useNavigation} from '@react-navigation/core';
 import useMentorMenteeStore from './useMentorMenteeStore';
 import {addCategory, addItemToCategory} from '../categories/catDB';
 import { BASE_URL } from '../appMentorBackend/userMgt';
+import { useSelectionStore } from '../stores/useSelectionStore';
+import { useShallow } from 'zustand/react/shallow';
 
 const AssignScreen = () => {
-  const {selectedItems, setSelectedItems, userInfo, setSelectionMode} =
-    useAppState();
+const {selectedItems, setSelectedItems, setSelectionMode} =
+  useSelectionStore(
+    useShallow(state => ({
+      selectedItems: state.selectedItems,
+      setSelectedItems: state.setSelectedItems,
+      setSelectionMode: state.setSelectionMode,
+    })),
+  );
+
+const {userInfo} = useAppState();
   const {selectedUsers, setSelectedUsers, setUserSelectionMode} =
     useMentorMenteeStore();
   const navigation = useNavigation();

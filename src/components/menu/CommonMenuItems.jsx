@@ -6,6 +6,25 @@ import { MenuDivider, MenuItem } from 'react-native-material-menu';
 import { removeItemFromCategory } from '../../categories/catDB';
 import { useAppState } from '../../contexts/AppStateContext';
 import AddNewNoteBtn from '../buttons/AddNewNoteBtn';
+import { useSelectionStore } from '../../stores/useSelectionStore';
+import { useShallow } from 'zustand/react/shallow';
+import { useMediaStore } from '../../stores/useMediaStore';
+import { useNotesStore } from '../../stores/useNotesStore';
+
+
+export const filterAndSet = (type, id) => {
+  const mediaTypes = ['youtube', 'device', 'drive'];
+  const notesTypes = ['note', 'notebook'];
+
+  if (mediaTypes.includes(type)) {
+    useMediaStore.getState().removeItem(type, id);
+    return;
+  }
+
+  if (notesTypes.includes(type)) {
+    useNotesStore.getState().removeItem(type, id);
+  }
+};
 
 const CommonMenuItems = ({
   item,
@@ -17,8 +36,16 @@ const CommonMenuItems = ({
   showRemove = true,
 }) => {
   const navigation = useNavigation();
-  const {selectedCategory, setAddToCategoryModalVisible, filterAndSet} =
-    useAppState();
+const {
+  selectedCategory,
+  setAddToCategoryModalVisible,
+} = useSelectionStore(
+  useShallow(state => ({
+    selectedCategory: state.selectedCategory,
+    setAddToCategoryModalVisible:
+      state.setAddToCategoryModalVisible,
+  })),
+);
 
   const handleAddToCategory = () => {
     setAddToCategoryModalVisible(true);

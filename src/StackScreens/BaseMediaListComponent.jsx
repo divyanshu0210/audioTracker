@@ -15,6 +15,8 @@ import {useAppState} from '../contexts/AppStateContext';
 import {useNavigation} from '@react-navigation/core';
 import {convertTypetoItemType, ScreenTypes} from '../contexts/constants';
 import NewAssignmentsBtn from '../components/buttons/NewAssignmentsBtn';
+import { useSelectionStore } from '../stores/useSelectionStore';
+import { useShallow } from 'zustand/react/shallow';
 
 export const getItemId = item =>
   item?.rowid || item?.source_id || item?.id?.toString();
@@ -31,9 +33,19 @@ const BaseMediaListComponent = ({
   screen = ScreenTypes.MAIN,
   useSections = true,
 }) => {
-  const {selectedItems, setSelectedItems, selectionMode, setSelectionMode} =
-    useAppState();
-
+const {
+  selectedItems,
+  setSelectedItems,
+  selectionMode,
+  setSelectionMode,
+} = useSelectionStore(
+  useShallow(state => ({
+    selectedItems: state.selectedItems,
+    setSelectedItems: state.setSelectedItems,
+    selectionMode: state.selectionMode,
+    setSelectionMode: state.setSelectionMode,
+  })),
+);
   const navigation = useNavigation();
 
   const isSelected = (id, listType) =>

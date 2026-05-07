@@ -3,9 +3,16 @@ import {Alert, StyleSheet, Text, View} from 'react-native';
 import {MenuDivider, MenuItem} from 'react-native-material-menu';
 import {useAppState} from '../../contexts/AppStateContext';
 import {deleteYTItemFromDB, softDeleteItem} from '../../database/D';
+import { useShallow } from 'zustand/react/shallow';
+import { useMediaStore } from '../../stores/useMediaStore';
 
 const YTMenuItems = ({item, screen, hideMenu}) => {
-  const {setItems,items} = useAppState();
+  const {setItems, items} = useMediaStore(
+  useShallow(state => ({
+    setItems: state.setItems,
+    items: state.items,
+  })),
+);
 
   const confirmDelete = item => {
     Alert.alert(

@@ -27,6 +27,10 @@ import useDbStore from '../../database/dbStore';
 import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
 import FontAwesome5 from 'react-native-vector-icons/FontAwesome5';
 import {generateId, useNoteController} from '../../notes/useNoteController';
+import { useMediaStore } from '../../stores/useMediaStore';
+import { useShallow } from 'zustand/react/shallow';
+import { useSelectionStore } from '../../stores/useSelectionStore';
+import { useNotesStore } from '../../stores/useNotesStore';
 
 const colors = ['#FFECB3', '#FFAB91', '#A5D6A7', '#90CAF9', '#CE93D8'];
 
@@ -36,16 +40,20 @@ const HomeFABBtn = () => {
   const navigation = useNavigation();
   const primaryColor = '#0F56B3';
 
-  const {
-    setDriveLinksList,
-    setItems,
-    setDeviceFiles,
-    selectedCategory,
-    setActiveNoteId,
-    defaultNotebookId,
-    addNBbottomSheetRef,
-    mentorMenteeRequestBottomSheetRef,
-  } = useAppState();
+  const {setDriveLinksList, setItems, setDeviceFiles} = useMediaStore(
+    useShallow(state => ({
+      setDriveLinksList: state.setDriveLinksList,
+      setItems: state.setItems,
+      setDeviceFiles: state.setDeviceFiles,
+    })),
+  );
+
+  const selectedCategory = useSelectionStore(state => state.selectedCategory);
+
+  const setActiveNoteId = useNotesStore(state => state.setActiveNoteId);
+
+  const {addNBbottomSheetRef, mentorMenteeRequestBottomSheetRef} =
+    useAppState();
   const {createNoteInstant} = useNoteController();
   const {setInserting} = useDbStore();
   //  Media ---------------------

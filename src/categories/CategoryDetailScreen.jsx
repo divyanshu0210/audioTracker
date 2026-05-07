@@ -1,12 +1,14 @@
 import {View, Text} from 'react-native';
 import React, {useEffect} from 'react';
 import HomeTabs from '../TabScreens/HomeTabs';
-import {useAppState} from '../contexts/AppStateContext';
 import AppHeader from '../components/headers/AppHeader';
+import { useSelectionStore } from '../stores/useSelectionStore';
 
 const CategoryDetailScreen = ({navigation, route}) => {
   const {item} = route.params;
-  const {setHomeReloadKey} = useAppState();
+ const setHomeReloadKey = useSelectionStore(
+  state => state.setHomeReloadKey,
+);
 
   const emailMatch = item.name.match(/\(([^)]+)\)/);
   const hasEmail = !!emailMatch;

@@ -2,6 +2,8 @@ import React, {useState} from 'react';
 import {View, Text, FlatList, StyleSheet, TouchableOpacity} from 'react-native';
 import useMentorMenteeStore from './useMentorMenteeStore';
 import {useAppState} from '../contexts/AppStateContext';
+import { useSelectionStore } from '../stores/useSelectionStore';
+import { useShallow } from 'zustand/react/shallow';
 
 export default UserList = ({
   users = [],
@@ -19,7 +21,12 @@ export default UserList = ({
     activeMentor,
   } = useMentorMenteeStore();
 
-  const {selectedItems, setSelectedCategory} = useAppState();
+const {selectedItems, setSelectedCategory} = useSelectionStore(
+  useShallow(state => ({
+    selectedItems: state.selectedItems,
+    setSelectedCategory: state.setSelectedCategory,
+  })),
+);
   const getUserId = item => item.id?.toString() ?? item.email;
 
   const isSelected = id => {

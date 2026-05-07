@@ -17,12 +17,19 @@ import {getChildrenByParent} from '../database/R';
 import BaseMediaListComponent from './BaseMediaListComponent';
 import {ItemTypes, ScreenTypes} from '../contexts/constants';
 import AppHeader from '../components/headers/AppHeader';
+import { useMediaStore } from '../stores/useMediaStore';
+import { useShallow } from 'zustand/react/shallow';
 
 export default function PlaylistView() {
   const navigation = useNavigation();
   const route = useRoute();
   const {playListId, playListInfo} = route.params;
-  const {videos, setVideos} = useAppState();
+const {videos, setVideos} = useMediaStore(
+  useShallow(state => ({
+    videos: state.videos,
+    setVideos: state.setVideos,
+  })),
+);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false); // NEW state for refresh button
 

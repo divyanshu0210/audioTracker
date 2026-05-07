@@ -9,23 +9,38 @@ import DeviceFilesView from '../StackScreens/DeviceFilesView';
 import DriveFilesView from '../StackScreens/DriveFilesView';
 import MainYouTubeView from '../StackScreens/MainYouTubeView';
 import NotebookScreen from '../StackScreens/NoteBook/NoteBookScreen';
-import {useAppState} from '../contexts/AppStateContext';
 import useDbStore from '../database/dbStore';
 import {useFocusEffect} from '@react-navigation/core';
-import { LoadingBar } from '../components/LoadingBar';
+import {LoadingBar} from '../components/LoadingBar';
 import useRestoreStore from '../backupRestore/restoreStore';
+import {useMediaStore} from '../stores/useMediaStore';
+import {useShallow} from 'zustand/react/shallow';
+import {useSelectionStore} from '../stores/useSelectionStore';
+import {useNotesStore} from '../stores/useNotesStore';
 
 const Tab = createMaterialTopTabNavigator();
 
 const HomeTabs = ({categoryId}) => {
-  const {setDriveLinksList, setItems, setDeviceFiles, setNotebooks} =
-    useAppState();
+  // Actions
+  const setDriveLinksList = useMediaStore(state => state.setDriveLinksList);
+  const setItems = useMediaStore(state => state.setItems);
+  const setDeviceFiles = useMediaStore(state => state.setDeviceFiles);
+  const setNotebooks = useNotesStore(state => state.setNotebooks);
 
-  const {driveLinksList, items, validDeviceFiles, deviceFiles, notebooks} =
-    useAppState();
- const {homeReloadKey} = useAppState();
-  const {inserting} = useDbStore();
-  const {isRestoring} = useRestoreStore();
+  //States
+  const {driveLinksList, items, validDeviceFiles, deviceFiles} = useMediaStore(
+    useShallow(state => ({
+      driveLinksList: state.driveLinksList,
+      items: state.items,
+      validDeviceFiles: state.validDeviceFiles,
+      deviceFiles: state.deviceFiles,
+    })),
+  );
+  const notebooks = useNotesStore(state => state.notebooks);
+  const homeReloadKey = useSelectionStore(state => state.homeReloadKey);
+
+  const inserting = useDbStore(state => state.inserting);
+  const isRestoring = useRestoreStore(state => state.isRestoring);
 
   const [loading, setLoading] = useState(true);
 
@@ -115,12 +130,12 @@ const HomeTabs = ({categoryId}) => {
     }
   }, [categoryId]);
 
-useEffect(() => {
- if (!isRestoring) {
-        loadAllData();
-      }
-}, [categoryId, isRestoring, homeReloadKey]);
-  
+  useEffect(() => {
+    if (!isRestoring) {
+      loadAllData();
+    }
+  }, [categoryId, isRestoring, homeReloadKey]);
+
   // Tab content wrapper
   const renderTabContent = (ScreenComponent, props) => (
     <>
@@ -188,8 +203,8 @@ useEffect(() => {
           </Tab.Screen>
 
           <Tab.Screen name={categoryId ? `Notes` : 'All Notes'}>
-            {() =>
-              renderTabContent(AllNotesScreen, {categoryId})
+            {
+              () => renderTabContent(AllNotesScreen, {categoryId})
               // renderTabContent(AllNotesScreen, {categoryId, key: homeReloadKey+categoryId})
             }
           </Tab.Screen>
@@ -200,4 +215,3 @@ useEffect(() => {
 };
 
 export default HomeTabs;
-

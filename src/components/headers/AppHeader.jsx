@@ -3,6 +3,7 @@ import {View, Text, TouchableOpacity, FlatList, StyleSheet} from 'react-native';
 import {useNavigation} from '@react-navigation/native';
 import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
 import {useAppState} from '../../contexts/AppStateContext';
+import { useSelectionStore } from '../../stores/useSelectionStore';
 
 const AppHeader = ({
   title,
@@ -20,7 +21,9 @@ const AppHeader = ({
 }) => {
   const navigation = useNavigation();
 
-  const {selectionMode} = useAppState();
+const selectionMode = useSelectionStore(
+  state => state.selectionMode,
+);
 
   if (selectionMode) return null;
 

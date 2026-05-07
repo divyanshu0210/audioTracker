@@ -7,10 +7,22 @@ import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityI
 import {useAppState} from '../../contexts/AppStateContext';
 import {softDeleteItem} from '../../database/D';
 import {updateItemFields} from '../../database/U';
+import { useMediaStore } from '../../stores/useMediaStore';
+import { useShallow } from 'zustand/react/shallow';
 
 const DriveMenuItems = ({item, screen, hideMenu}) => {
   const navigation = useNavigation();
-  const {setDriveLinksList, setDeviceFiles, setData} = useAppState();
+const {
+  setDriveLinksList,
+  setDeviceFiles,
+  setData,
+} = useMediaStore(
+  useShallow(state => ({
+    setDriveLinksList: state.setDriveLinksList,
+    setDeviceFiles: state.setDeviceFiles,
+    setData: state.setData,
+  })),
+);
 
   console.log(item);
   const isFolder = item.type === 'drive_folder';

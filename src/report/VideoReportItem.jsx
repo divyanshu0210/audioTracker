@@ -4,6 +4,7 @@ import {View, Text, TouchableOpacity, StyleSheet} from 'react-native';
 import {getFileIcon} from '../contexts/fileIconHelper';
 import {useNavigation} from '@react-navigation/core';
 import {useAppState} from '../contexts/AppStateContext';
+import { useSelectionStore } from '../stores/useSelectionStore';
 
 const formatTime = seconds => {
   const mins = Math.floor(seconds / 60);
@@ -31,7 +32,9 @@ const VideoReportItem = ({
 }) => {
   const [expandedVideoId, setExpandedVideoId] = useState(null);
   const navigation = useNavigation();
-  const {setActiveItem} = useAppState();
+const setActiveItem = useSelectionStore(
+  state => state.setActiveItem,
+);
 
   const isExpanded = expandedVideoId === item.id;
   return (

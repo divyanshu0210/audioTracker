@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import {useAppState} from '../../contexts/AppStateContext';
+import { useSelectionStore } from '../../stores/useSelectionStore';
 
 const CustomDropdown = ({
   selectedValue,
@@ -22,7 +23,10 @@ const CustomDropdown = ({
 }) => {
   const [visible, setVisible] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const {setCreateCategoryModalVisible} = useAppState();
+const setCreateCategoryModalVisible =
+  useSelectionStore(
+    state => state.setCreateCategoryModalVisible,
+  );
 
   const filteredCategories = categories.filter(
     item =>

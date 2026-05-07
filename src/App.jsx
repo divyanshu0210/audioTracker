@@ -4,7 +4,15 @@ import {createDrawerNavigator} from '@react-navigation/drawer';
 import {NavigationContainer, useNavigation} from '@react-navigation/native';
 import {createStackNavigator} from '@react-navigation/stack';
 import React, {useEffect} from 'react';
-import {ActivityIndicator, Button, NativeEventEmitter, NativeModules, StyleSheet, Text, View} from 'react-native';
+import {
+  ActivityIndicator,
+  Button,
+  NativeEventEmitter,
+  NativeModules,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import {GestureHandlerRootView} from 'react-native-gesture-handler';
 import {MenuProvider} from 'react-native-popup-menu';
 import 'react-native-reanimated';
@@ -57,6 +65,8 @@ import useBackupStore from './stores/backupStore';
 import useRestoreStore from './backupRestore/restoreStore';
 import ItemNotesScreen from './notes/ItemNotesList';
 import {createNativeStackNavigator} from '@react-navigation/native-stack';
+import {useSelectionStore} from './stores/useSelectionStore';
+import {useShallow} from 'zustand/react/shallow';
 
 // const Stack = createStackNavigator();
 const Stack = createNativeStackNavigator();
@@ -71,7 +81,13 @@ function RootNavigator() {
     createCategoryModalVisible,
     setCreateCategoryModalVisible,
     setCategories,
-  } = useAppState();
+  } = useSelectionStore(
+    useShallow(state => ({
+      createCategoryModalVisible: state.createCategoryModalVisible,
+      setCreateCategoryModalVisible: state.setCreateCategoryModalVisible,
+      setCategories: state.setCategories,
+    })),
+  );
   const navigation = useNavigation();
   // debugAsyncStorage()
 
@@ -90,12 +106,12 @@ function RootNavigator() {
     return () => unsubscribe(); // Cleanup the event listener
   }, [navigation]);
 
-useEffect(() => {
-  useBackupStore.getState().initializeEventListeners();
-  return () => {
-    useBackupStore.getState().cleanupEventListeners();
-  }
-}, []);
+  useEffect(() => {
+    useBackupStore.getState().initializeEventListeners();
+    return () => {
+      useBackupStore.getState().cleanupEventListeners();
+    };
+  }, []);
 
   return (
     <>
@@ -361,11 +377,11 @@ export default function App() {
           <MenuProvider>
             <NavigationContainer>
               <RootNavigator />
-             <Button
+              <Button
                 title="Debug"
                 onPress={() => {
                   copyDatabaseToAccessibleLocation();
-                }}></Button> 
+                }}></Button>
             </NavigationContainer>
           </MenuProvider>
         </GestureHandlerRootView>

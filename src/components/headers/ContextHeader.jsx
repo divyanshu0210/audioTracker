@@ -3,6 +3,7 @@ import {View, Text, TouchableOpacity} from 'react-native';
 import {useNavigation} from '@react-navigation/native';
 import {useAppState} from '../../contexts/AppStateContext';
 import AppHeader from '../../components/headers/AppHeader';
+import { useSelectionStore } from '../../stores/useSelectionStore';
 
 const sourceTypeLabels = {
   youtube: 'YouTube Video',
@@ -20,7 +21,9 @@ const sourceTypeColors = {
 
 const ContextHeader = ({}) => {
   const navigation = useNavigation();
-  const {activeItem} = useAppState();
+const activeItem = useSelectionStore(
+  state => state.activeItem,
+);
   console.log('CONEXT HEADER', activeItem);
 
   const isNoteSource = activeItem?.sourceType === 'note';

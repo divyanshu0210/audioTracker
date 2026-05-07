@@ -9,10 +9,23 @@ import NBMenuItems from './NBMenuItems';
 import NoteMenuItems from './NoteMenuItems';
 import YTMenuItems from './YTMenuItems';
 import {ItemTypes} from '../../contexts/constants';
+import { useSelectionStore } from '../../stores/useSelectionStore';
+import { useNotesStore } from '../../stores/useNotesStore';
+import { useShallow } from 'zustand/react/shallow';
 
 const BaseMenu = ({item, type, screen}) => {
   const [visible, setVisible] = useState(false);
-  const {setActiveItem, setSelectedNote} = useAppState();
+const {setActiveItem} = useSelectionStore(
+  useShallow(state => ({
+    setActiveItem: state.setActiveItem,
+  })),
+);
+
+const {setSelectedNote} = useNotesStore(
+  useShallow(state => ({
+    setSelectedNote: state.setSelectedNote,
+  })),
+);
   const sourceId =
     item?.rowid ||
     item?.source_id ||

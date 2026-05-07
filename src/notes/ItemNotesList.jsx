@@ -1,41 +1,48 @@
 // screens/ItemNotesScreen.js
 import React, {useEffect, useState} from 'react';
-import {ActivityIndicator, SafeAreaView, StyleSheet} from 'react-native';
+import {ActivityIndicator, Dimensions, StyleSheet, Text, View} from 'react-native';
 import {fetchNotes} from '../database/R';
 import NotesListComponent from './notesListing/NotesListComponent';
 import {useAppState} from '../contexts/AppStateContext';
 import {ScreenTypes} from '../contexts/constants';
 
-const ItemNotesScreen = ({useSpecial=false}) => {
-  const {activeItem, setNotesList} = useAppState();
+const ItemNotesScreen = ({route}) => {
+  const {activeItem} = useAppState();
+  const [notes, setNotes] = useState([]); // ← LOCAL STATE
   const [loading, setLoading] = useState(false);
-  let sourceId = activeItem?.sourceId;
-  let sourceType = activeItem?.sourceType;
+  
+  // Get item from route params or context
+  const item = route?.params?.item || activeItem;
+  
+  let sourceId = item?.source_id || item?.sourceId;
+  let sourceType = item?.source_type || item?.sourceType || item?.type;
+
 
   useEffect(() => {
-    console.log('Active Item changed:', activeItem);
+
     if (sourceType === 'note') {
-      sourceId = activeItem?.item?.source_id;
-      sourceType = activeItem?.item?.source_type;
+      sourceId = item?.item?.source_id;
+      sourceType = item?.item?.source_type;
     }
     if (sourceId && sourceType) {
       loadNotesForItem();
     }
-  }, []);
+  }, [sourceId, sourceType]);
 
   const loadNotesForItem = async () => {  
     setLoading(true);
 
     try {
-      const notes = await fetchNotes({
+      const fetchedNotes = await fetchNotes({
         offset: 0,
-        limit: 1000, // get everything for the item
+        limit: 1000,
         sortBy: 'created_at',
         sortOrder: 'DESC',
         sourceId,
         sourceType,
       });
-      setNotesList(notes);
+      console.log(`✅ Fetched ${fetchedNotes.length} notes`);
+      setNotes(fetchedNotes); // ← Set LOCAL state, not context
     } catch (error) {
       console.error('Error loading notes for item:', error);
     } finally {
@@ -43,23 +50,29 @@ const ItemNotesScreen = ({useSpecial=false}) => {
     }
   };
 
-  return (
-    <SafeAreaView style={styles.container}>
-      {loading ? (
+const { height: SCREEN_HEIGHT } = Dimensions.get('window');
+const SHEET_HEIGHT = SCREEN_HEIGHT * 0.70;
+
+return (
+  <View style={{ height: SHEET_HEIGHT, backgroundColor: '#fff' }}>
+    <Text style={styles.title}>Notes for this Item</Text>
+    <View style={{ flex: 1 }}>
+       {loading ? (
         <ActivityIndicator
           size="small"
           color="#0000ff"
           style={{marginTop: 20}}
         />
       ) : (
-        <NotesListComponent
-          loading={loading}
-          useSpecial={useSpecial}
-          screen={ScreenTypes.IN}
-        />
-      )}
-    </SafeAreaView>
-  );
+      <NotesListComponent
+        notes={notes}
+        loading={loading}
+        screen={ScreenTypes.IN}
+      />
+    )}
+    </View>
+  </View>
+);
 };
 
 export default ItemNotesScreen;
@@ -68,5 +81,13 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#fff',
+      height: 200,
+  },
+  title: {
+    textAlign: 'center',
+    marginVertical: 10,
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#000',
   },
 });

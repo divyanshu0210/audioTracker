@@ -5,6 +5,7 @@ import {
   Animated,
   AppState,
   Dimensions,
+  InteractionManager,
   Keyboard,
   NativeModules,
   PanResponder,
@@ -16,7 +17,6 @@ import {
 import Fontisto from 'react-native-vector-icons/Fontisto';
 import Icon from 'react-native-vector-icons/MaterialIcons';
 import ViewShot from 'react-native-view-shot';
-import BottomMenu from '../components/bottomsheets/BottomMenu';
 import {handleExport} from '../components/menu/NoteMenuItems';
 import {useAppState} from '../contexts/AppStateContext';
 import {fetchLatestWatchData} from '../database/R';
@@ -34,6 +34,7 @@ const isAudioFile = mimeType => {
 };
 
 const BacePlayer = () => {
+  console.log('🔄🔄🔄 BacePlayer RENDERING', new Date().toISOString());
   const navigation = useNavigation();
   const appState = useRef(AppState.currentState);
   const route = useRoute();
@@ -57,7 +58,6 @@ const BacePlayer = () => {
   const captureRef = useRef(null);
   const startFrom = useRef(null);
   const notesSectionRef = useRef(null);
-  const bottomSheetRef = useRef(null);
   const tracker = useRef(null);
   const playerRef = useRef(null);
 
@@ -165,7 +165,6 @@ const BacePlayer = () => {
     if (activeNoteId != null) {
       // pauseOnStart && hidePlayer();
       setShowNotes(true);
-      bottomSheetRef.current?.close();
       console.log('activeNoteId updated:', activeNoteId);
     }
   }, [activeNoteId]);
@@ -336,19 +335,13 @@ const BacePlayer = () => {
     }
   }, []);
 
-  const handleOpenBottomMenu = useCallback(() => {
-    Keyboard.dismiss();
-    const keyboardHideListener = Keyboard.addListener('keyboardDidHide', () => {
-      bottomSheetRef.current?.snapToIndex(0);
-      keyboardHideListener.remove();
-    });
-
-    setTimeout(() => {
-      keyboardHideListener.remove();
-      bottomSheetRef.current?.snapToIndex(0);
-    }, 300);
-  }, [bottomSheetRef]);
-
+const handleOpenBottomMenu = () => {
+  Keyboard.dismiss();
+  notesSectionRef.current?.blurEditor();
+  setTimeout(() => {
+    navigation.navigate('ItemNotesScreen');
+  }, 150);
+};
   const handleBackPress = useCallback(() => {
     setActiveItem(null);
     if (navigation.canGoBack()) {
@@ -625,7 +618,7 @@ const BacePlayer = () => {
           {renderDragHandle()}
 
           {showNotes && (
-            <View style={{flex: 1, marginTop: isHidden ? 5 : 50 }}>
+            <View style={{flex: 1, marginTop: isHidden ? 5 : 50}}>
               <RichTextEditor
                 ref={notesSectionRef}
                 noteId={activeNoteId}
@@ -637,21 +630,17 @@ const BacePlayer = () => {
                 }
                 showPlayerMinimized={showPlayerMinimized}
                 playerRef={playerRef}
-                {...(source_type === 'youtube_video'
-                  ? {
-                      webViewRef: playerRef.current?.webViewRef,
-                      ytTime: playerRef.current?.getCurrentTime(),
-                    }
-                  : {
-                      vlcTime: playerRef.current?.getCurrentTime() / 1000,
-                      seekToTime: time => playerRef.current?.handleSeek(time),
-                    })}
+                source_type={source_type}
+                webViewRef={
+                  source_type === 'youtube_video'
+                    ? playerRef.current?.webViewRef
+                    : null
+                }
                 isHidden={isHidden}
               />
             </View>
           )}
 
-          <BottomMenu ref={bottomSheetRef} />
         </>
       ) : (
         <Text>Loading...</Text>

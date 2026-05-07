@@ -166,7 +166,8 @@ const BaseItem = ({type, item, isSelected, onSelect, onLongPress, screen}) => {
     const targetScreen = 'BacePlayer';
     console.log('routeInfo', currentRoute);
     //WHY DOING THIS : bcz if already on bace player we dont want to switch screen
-    if (currentRoute === targetScreen) {
+    if (currentRoute === targetScreen || currentRoute==='ItemNotesScreen') {
+      navigation.goBack();
       setActiveNoteId(item.rowid);
     } else if (currentRoute === 'Notes' || currentRoute === 'All Notes') {
       navigation.navigate(targetScreen, {

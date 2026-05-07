@@ -55,8 +55,11 @@ import {initDatabase, resetDatabase} from './database/database';
 import BackupExplorerScreen from './Settings/BackupExplorerScreen';
 import useBackupStore from './stores/backupStore';
 import useRestoreStore from './backupRestore/restoreStore';
+import ItemNotesScreen from './notes/ItemNotesList';
+import {createNativeStackNavigator} from '@react-navigation/native-stack';
 
-const Stack = createStackNavigator();
+// const Stack = createStackNavigator();
+const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
 
 const emitter = new NativeEventEmitter(NativeModules.BackupModule);
@@ -143,7 +146,28 @@ useEffect(() => {
           component={NotebookNotesScreen}
           options={{headerShown: false}}
         />
-        <Stack.Screen name="BacePlayer" component={BacePlayer} />
+        <Stack.Screen
+          name="BacePlayer"
+          component={BacePlayer} // ← Use the wrapper
+          options={{headerShown: false}}
+        />
+        <Stack.Screen
+          name="ItemNotesScreen"
+          component={ItemNotesScreen}
+          options={{
+            headerShown: false,
+            presentation: 'formSheet',
+            sheetAllowedDetents: [0.75],
+            contentStyle: {
+              backgroundColor: 'white',
+            },
+            // sheetElevation: 10,
+            sheetLargestUndimmedDetentIndex: 0,
+            sheetExpandsWhenScrolledToEdge: false,
+            keyboardHandlingEnabled: true,
+          }}
+        />
+
         <Stack.Screen name="Settings" component={SettingsScreen} />
         <Stack.Screen name="DeviceFilesView" component={DeviceFilesView} />
         <Stack.Screen name="NotesListScreen" component={NotesListScreen} />

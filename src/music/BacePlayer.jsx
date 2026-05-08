@@ -64,11 +64,10 @@ const BacePlayer = () => {
   const tracker = useRef(null);
   const playerRef = useRef(null);
 
-  const [isPaused, setIsPaused] = useState(pauseOnStart ?? false);
-  const [currentTime, setCurrentTime] = useState(0);
   const currentTimeRef = useRef(0);
-  const [lastTime, setLastTime] = useState(0);
-  const [playbackSpeed, setPlaybackSpeed] = useState(1);
+  const lastTimeRef = useRef(0);
+  const playbackSpeedRef = useRef(1);
+  const isPausedRef = useRef(pauseOnStart ?? false);
   const durationRef = useRef(0);
 
   const [isAudio, setIsAudio] = useState(false);
@@ -216,7 +215,7 @@ const {setActiveItem} = useSelectionStore(
     }
   };
 
-  const cleanupPlayer = async () => {
+  const cleanupPlayer = useCallback(async () => {
     if (tracker.current) {
       console.log(
         'hitting pause on initiating saving for currTime',
@@ -231,7 +230,7 @@ const {setActiveItem} = useSelectionStore(
     } else {
       console.log('Tracker not initialized, skipping save.');
     }
-  };
+  }, [currentItem, TIME_FACTOR]);
 
   useEffect(() => {
     const handleAppStateChange = async nextAppState => {
@@ -254,52 +253,60 @@ const {setActiveItem} = useSelectionStore(
     };
   }, []);
 
-  // Handle time tracking
-  useEffect(() => {
-    if (!tracker.current) return; // Only run if tracker is initialized
-
-    console.log(
+  const handleCurrentTimeChange = useCallback((time) => {
+    // Track time jumps immediately when child updates
+    if (tracker.current) {
+       console.log(
       'video logs',
-      currentTime / TIME_FACTOR,
-      playbackSpeed,
-      isPaused,
+      currentTimeRef.current / TIME_FACTOR,
+      playbackSpeedRef.current,
+      isPausedRef.current,
     );
-
-    if (
-      Math.abs(currentTime - lastTime) /
+      const lastTime = lastTimeRef.current;
+      const playbackSpeed = playbackSpeedRef.current;
+         if (
+      Math.abs(time - lastTime) /
         (TIME_FACTOR * (source_type !== 'youtube_video' ? 1 : playbackSpeed)) >
       9
     ) {
-      console.log(
+        console.log(
         'video skipped',
         lastTime / TIME_FACTOR,
-        currentTime / TIME_FACTOR,
+        time / TIME_FACTOR,
       );
-      tracker.current?.onPause(lastTime / TIME_FACTOR);
-      console.log('Intervals', tracker.current?.getIntervals());
-      tracker.current?.onPlay(currentTime / TIME_FACTOR);
+        tracker.current?.onPause(lastTime / TIME_FACTOR);
+         console.log('Intervals', tracker.current?.getIntervals());
+        tracker.current?.onPlay(time / TIME_FACTOR);
+      }
     }
-
-    setLastTime(currentTime);
-    currentTimeRef.current = currentTime;
-  }, [currentTime, playbackSpeed, tracker.current]);
-
-  // Handle play/pause tracking
-  useEffect(() => {
-    if (!tracker.current) return; // Only run if tracker is initialized
-
-    console.log(
+    
+    currentTimeRef.current = time;
+    lastTimeRef.current = time;
+  }, [tracker, TIME_FACTOR, source_type]);
+  
+  const handleIsPausedChange = useCallback((paused) => {
+    isPausedRef.current = paused;
+    
+    // Handle play/pause tracking
+    if (tracker.current) {
+       console.log(
       'video logs on Play/pause',
-      currentTime / TIME_FACTOR,
-      playbackSpeed,
-      isPaused,
+      currentTimeRef.current / TIME_FACTOR,
+      playbackSpeedRef.current,
+      isPausedRef.current,
     );
-
-    isPaused
-      ? tracker.current?.onPause(currentTime / TIME_FACTOR)
-      : tracker.current?.onPlay(currentTime / TIME_FACTOR);
-    console.log('Intervals', tracker.current?.getIntervals());
-  }, [isPaused, tracker.current]);
+      const currentTime = currentTimeRef.current;
+      if (paused) {
+        tracker.current?.onPause(currentTime / TIME_FACTOR);
+      } else {
+        tracker.current?.onPlay(currentTime / TIME_FACTOR);
+      }
+    }
+  }, [tracker, TIME_FACTOR]);
+  
+  const handlePlaybackRateChange = useCallback((speed) => {
+    playbackSpeedRef.current = speed;
+  }, []);
 
   useEffect(() => {
     if (playerRef.current) {
@@ -560,9 +567,9 @@ const handleOpenBottomMenu = () => {
                   item={currentItem}
                   notesSectionRef={notesSectionRef}
                   onBack={handleBackPress}
-                  onCurrentTimeChange={setCurrentTime}
-                  onIsPausedChange={setIsPaused}
-                  onPlayBackRateChange={setPlaybackSpeed}
+                  onCurrentTimeChange={handleCurrentTimeChange}
+                  onIsPausedChange={handleIsPausedChange}
+                  onPlayBackRateChange={handlePlaybackRateChange}
                   pauseOnStart={pauseOnStart}
                   startTime={startFrom?.current}
                   onEnd={handleNext}
@@ -577,9 +584,9 @@ const handleOpenBottomMenu = () => {
                     onToggleSize={togglePlayerSize}
                     isMinimized={isMinimized}
                     onBack={handleBackPress}
-                    onCurrentTimeChange={setCurrentTime}
-                    onIsPausedChange={setIsPaused}
-                    onPlayBackRateChange={setPlaybackSpeed}
+                    onCurrentTimeChange={handleCurrentTimeChange}
+                    onIsPausedChange={handleIsPausedChange}
+                    onPlayBackRateChange={handlePlaybackRateChange}
                     pauseOnStart={pauseOnStart}
                     startTime={startFrom?.current}
                     onEnd={handleNext}

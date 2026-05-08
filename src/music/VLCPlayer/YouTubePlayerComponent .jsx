@@ -35,6 +35,7 @@ const YouTubePlayerComponent = forwardRef(
     },
     ref,
   ) => {
+      console.log('🔄🔄🔄🔄 YouTubePlayerComponent RENDERING', new Date().toISOString());
     const [isLoading, setIsLoading] = useState(true);
     const [isInPipMode, setIsInPipMode] = useState(false);
 
@@ -51,7 +52,7 @@ const YouTubePlayerComponent = forwardRef(
     }));
 
     useEffect(() => {
-      console.log(startTime);
+      console.log('startTime', startTime);
     }, [startTime]);
 
     const captureScreenshot = async () => {

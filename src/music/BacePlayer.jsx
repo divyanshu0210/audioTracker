@@ -27,9 +27,9 @@ import VLCPlayerComponent from './VLCPlayer/VLCPlayerComponent';
 import YouTubePlayerComponent from './VLCPlayer/YouTubePlayerComponent ';
 import AddNewNoteBtn from '../components/buttons/AddNewNoteBtn';
 import {saveDatatoBackend} from '../appMentorBackend/reportMgt';
-import { useNotesStore } from '../stores/useNotesStore';
-import { useShallow } from 'zustand/react/shallow';
-import { useSelectionStore } from '../stores/useSelectionStore';
+import {useNotesStore} from '../stores/useNotesStore';
+import {useShallow} from 'zustand/react/shallow';
+import {useSelectionStore} from '../stores/useSelectionStore';
 // const {PipModule} = NativeModules;
 
 const isAudioFile = mimeType => {
@@ -82,30 +82,26 @@ const BacePlayer = () => {
     new Animated.Value(MINIMIZED_HEIGHT._value),
   ).current;
   const pan = useRef(new Animated.Value(0)).current;
-  const [isDragging, setIsDragging] = useState(false);
+  // const [isDragging, setIsDragging] = useState(false);
   const [isMinimized, setIsMinimized] = useState(true);
   const [isHidden, setIsHidden] = useState(false);
 
   // Notes context
   const [showNotes, setShowNotes] = useState(false);
   const [isCreatingNote, setIsCreatingNote] = useState(false);
-const {
-  activeNoteId,
-  setActiveNoteId,
-  setNotesList,
-} = useNotesStore(
-  useShallow(state => ({
-    activeNoteId: state.activeNoteId,
-    setActiveNoteId: state.setActiveNoteId,
-    setNotesList: state.setNotesList,
-  })),
-);
+  const {activeNoteId, setActiveNoteId, setNotesList} = useNotesStore(
+    useShallow(state => ({
+      activeNoteId: state.activeNoteId,
+      setActiveNoteId: state.setActiveNoteId,
+      setNotesList: state.setNotesList,
+    })),
+  );
 
-const {setActiveItem} = useSelectionStore(
-  useShallow(state => ({
-    setActiveItem: state.setActiveItem,
-  })),
-);
+  const {setActiveItem} = useSelectionStore(
+    useShallow(state => ({
+      setActiveItem: state.setActiveItem,
+    })),
+  );
 
   // Helper function to get item properties
   const getItemProperties = item => {
@@ -253,64 +249,71 @@ const {setActiveItem} = useSelectionStore(
     };
   }, []);
 
-  const handleCurrentTimeChange = useCallback((time) => {
-    // Track time jumps immediately when child updates
-    if (tracker.current) {
-       console.log(
-      'video logs',
-      currentTimeRef.current / TIME_FACTOR,
-      playbackSpeedRef.current,
-      isPausedRef.current,
-    );
-      const lastTime = lastTimeRef.current;
-      const playbackSpeed = playbackSpeedRef.current;
-         if (
-      Math.abs(time - lastTime) /
-        (TIME_FACTOR * (source_type !== 'youtube_video' ? 1 : playbackSpeed)) >
-      9
-    ) {
+  const handleCurrentTimeChange = useCallback(
+    time => {
+      // Track time jumps immediately when child updates
+      if (tracker.current) {
         console.log(
-        'video skipped',
-        lastTime / TIME_FACTOR,
-        time / TIME_FACTOR,
-      );
-        tracker.current?.onPause(lastTime / TIME_FACTOR);
-         console.log('Intervals', tracker.current?.getIntervals());
-        tracker.current?.onPlay(time / TIME_FACTOR);
+          'video logs',
+          currentTimeRef.current / TIME_FACTOR,
+          playbackSpeedRef.current,
+          isPausedRef.current,
+        );
+        const lastTime = lastTimeRef.current;
+        const playbackSpeed = playbackSpeedRef.current;
+        if (
+          Math.abs(time - lastTime) /
+            (TIME_FACTOR *
+              (source_type !== 'youtube_video' ? 1 : playbackSpeed)) >
+          9
+        ) {
+          console.log(
+            'video skipped',
+            lastTime / TIME_FACTOR,
+            time / TIME_FACTOR,
+          );
+          tracker.current?.onPause(lastTime / TIME_FACTOR);
+          console.log('Intervals', tracker.current?.getIntervals());
+          tracker.current?.onPlay(time / TIME_FACTOR);
+        }
       }
-    }
-    
-    currentTimeRef.current = time;
-    lastTimeRef.current = time;
-  }, [tracker, TIME_FACTOR, source_type]);
-  
-  const handleIsPausedChange = useCallback((paused) => {
-    isPausedRef.current = paused;
-    
-    // Handle play/pause tracking
-    if (tracker.current) {
-       console.log(
-      'video logs on Play/pause',
-      currentTimeRef.current / TIME_FACTOR,
-      playbackSpeedRef.current,
-      isPausedRef.current,
-    );
-      const currentTime = currentTimeRef.current;
-      if (paused) {
-        tracker.current?.onPause(currentTime / TIME_FACTOR);
-      } else {
-        tracker.current?.onPlay(currentTime / TIME_FACTOR);
+
+      currentTimeRef.current = time;
+      lastTimeRef.current = time;
+    },
+    [tracker, TIME_FACTOR, source_type],
+  );
+
+  const handleIsPausedChange = useCallback(
+    paused => {
+      isPausedRef.current = paused;
+
+      // Handle play/pause tracking
+      if (tracker.current) {
+        console.log(
+          'video logs on Play/pause',
+          currentTimeRef.current / TIME_FACTOR,
+          playbackSpeedRef.current,
+          isPausedRef.current,
+        );
+        const currentTime = currentTimeRef.current;
+        if (paused) {
+          tracker.current?.onPause(currentTime / TIME_FACTOR);
+        } else {
+          tracker.current?.onPlay(currentTime / TIME_FACTOR);
+        }
       }
-    }
-  }, [tracker, TIME_FACTOR]);
-  
-  const handlePlaybackRateChange = useCallback((speed) => {
+    },
+    [tracker, TIME_FACTOR],
+  );
+
+  const handlePlaybackRateChange = useCallback(speed => {
     playbackSpeedRef.current = speed;
   }, []);
 
-  useEffect(() => {
+  const updateDuration = useCallback(async (duration) => {
     if (playerRef.current) {
-      durationRef.current = playerRef.current.getDuration();
+      durationRef.current = duration;
     }
   }, [playerRef.current]);
 
@@ -323,8 +326,8 @@ const {setActiveItem} = useSelectionStore(
       setActiveNoteId(null);
       setCurrentIndex(currentIndex + 1);
       setIsDataLoaded(false);
-      setCurrentTime(0);
-      setLastTime(0);
+      currentTimeRef.current = 0; 
+      lastTimeRef.current = 0; 
       setShowNotes(false);
       setIsMinimized(true);
     }
@@ -338,8 +341,8 @@ const {setActiveItem} = useSelectionStore(
       setActiveNoteId(null);
       setCurrentIndex(currentIndex - 1);
       setIsDataLoaded(false);
-      setCurrentTime(0);
-      setLastTime(0);
+      currentTimeRef.current = 0; 
+      lastTimeRef.current = 0;
       setShowNotes(false);
       setIsMinimized(true);
     }
@@ -358,13 +361,13 @@ const {setActiveItem} = useSelectionStore(
     }
   }, []);
 
-const handleOpenBottomMenu = () => {
-  Keyboard.dismiss();
-  notesSectionRef.current?.blurEditor();
-  setTimeout(() => {
-    navigation.navigate('ItemNotesScreen',{showHeader: true});
-  }, 150);
-};
+  const handleOpenBottomMenu = () => {
+    Keyboard.dismiss();
+    notesSectionRef.current?.blurEditor();
+    setTimeout(() => {
+      navigation.navigate('ItemNotesScreen', {showHeader: true});
+    }, 150);
+  };
   const handleBackPress = useCallback(() => {
     setActiveItem(null);
     if (navigation.canGoBack()) {
@@ -437,7 +440,7 @@ const handleOpenBottomMenu = () => {
       onPanResponderMove: (evt, gestureState) => {
         if (Math.abs(gestureState.dy) > 0) {
           pan.setValue(-gestureState.dy);
-          setIsDragging(true);
+          // setIsDragging(true);
         }
       },
       onPanResponderRelease: (evt, gestureState) => {
@@ -449,7 +452,9 @@ const handleOpenBottomMenu = () => {
         Animated.spring(pan, {
           toValue: 0,
           useNativeDriver: false,
-        }).start(() => setIsDragging(false));
+        }).start(() =>{ 
+          //setIsDragging(false) 
+          });
       },
     }),
   ).current;
@@ -570,6 +575,7 @@ const handleOpenBottomMenu = () => {
                   onCurrentTimeChange={handleCurrentTimeChange}
                   onIsPausedChange={handleIsPausedChange}
                   onPlayBackRateChange={handlePlaybackRateChange}
+                  updateDuration={updateDuration}
                   pauseOnStart={pauseOnStart}
                   startTime={startFrom?.current}
                   onEnd={handleNext}
@@ -587,6 +593,7 @@ const handleOpenBottomMenu = () => {
                     onCurrentTimeChange={handleCurrentTimeChange}
                     onIsPausedChange={handleIsPausedChange}
                     onPlayBackRateChange={handlePlaybackRateChange}
+                    updateDuration={updateDuration}
                     pauseOnStart={pauseOnStart}
                     startTime={startFrom?.current}
                     onEnd={handleNext}
@@ -663,7 +670,6 @@ const handleOpenBottomMenu = () => {
               />
             </View>
           )}
-
         </>
       ) : (
         <Text>Loading...</Text>

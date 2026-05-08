@@ -29,6 +29,7 @@ const YouTubePlayerComponent = forwardRef(
       onCurrentTimeChange,
       onIsPausedChange,
       onPlayBackRateChange,
+       updateDuration={updateDuration},
       pauseOnStart,
       startTime,
       onEnd,
@@ -179,6 +180,7 @@ const YouTubePlayerComponent = forwardRef(
             data.duration,
           );
           durationRef.current = data.duration;
+          updateDuration(data.duration)
           updateItemFields(item.id, {duration: data.duration});
         } else if (data.status !== undefined) {
           switch (data.status) {
@@ -262,7 +264,7 @@ const YouTubePlayerComponent = forwardRef(
   },
 );
 
-export default YouTubePlayerComponent;
+export default React.memo(YouTubePlayerComponent);
 
 const styles = StyleSheet.create({
   container: {

@@ -1,4 +1,5 @@
-// VLCPlayerComponent.js (simplified)
+// VLCPlayerComponent.jsx
+
 import React, {
   useRef,
   useState,
@@ -7,24 +8,18 @@ import React, {
   forwardRef,
   useImperativeHandle,
 } from 'react';
-import {
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  Animated,
-  View,
-  Dimensions,
-} from 'react-native';
+import {StyleSheet, Text, TouchableOpacity, Animated, View} from 'react-native';
 import {VLCPlayer} from 'react-native-vlc-media-player';
 import Icon from 'react-native-vector-icons/MaterialIcons';
+import SkipHandler from './SkipHandler';
 import SkipIndicator from './SkipIndicator';
+import PlayPauseOverlay from './PlayPauseOverlay';
 import PlayerSettings from './PlayerSettings';
+import SliderWithTime from './SliderWithTime';
 import {updateItemFields} from '../../database/U';
 import usePlayerTimeStore from './usePlayerTimeStore';
-import SliderWithTime from './SliderWithTime';
+import {useShallow} from 'zustand/react/shallow';
 
-const {width: SCREEN_WIDTH} = Dimensions.get('window');
-const DOUBLE_PRESS_DELAY = 300;
 const playbackRates = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
 
 const VLCPlayerComponent = forwardRef(
@@ -38,6 +33,7 @@ const VLCPlayerComponent = forwardRef(
       onCurrentTimeChange,
       onIsPausedChange,
       onPlayBackRateChange,
+      updateDuration,
       pauseOnStart,
       startTime,
       onEnd,
@@ -49,184 +45,140 @@ const VLCPlayerComponent = forwardRef(
       new Date().toISOString(),
     );
 
-    useImperativeHandle(ref, () => ({
-      handleSeek,
-      getCurrentTime: () => currentTimeRef.current,
-      getIsPaused: () => isPaused,
-      togglePlayPause,
-      getDuration: () => durationRef.current,
-    }));
+    console.log('startFrom', startTime);
 
-    // Zustand setters
-    const setCurrentTime = usePlayerTimeStore(state => state.setCurrentTime);
-    const setDuration = usePlayerTimeStore(state => state.setDuration);
+    const {
+      setCurrentTime,
+      setDuration,
+      setControlsVisible,
+      getCurrentTime,
+      getDuration,
+    } = usePlayerTimeStore(
+      useShallow(state => ({
+        setCurrentTime: state.setCurrentTime,
+        setDuration: state.setDuration,
+        setControlsVisible: state.setControlsVisible,
+        getCurrentTime: state.getCurrentTime,
+        getDuration: state.getDuration,
+      })),
+    );
 
-    // Refs
+    // ─── Imperative API ───────────────────────────────────────────────────────
+    useImperativeHandle(
+      ref,
+      () => ({
+        handleSeek,
+        getCurrentTime: () => currentTimeRef.current,
+        getIsPaused: () => isPaused,
+        togglePlayPause,
+        getDuration: () => durationRef.current,
+      }),
+      [handleSeek, togglePlayPause],
+    );
+
+    // ─── Refs ─────────────────────────────────────────────────────────────────
     const vlcPlayerRef = useRef(null);
-    const lastTap = useRef(0);
     const controlsTimeout = useRef(null);
     const durationRef = useRef(0);
     const currentTimeRef = useRef(0);
-
-    // Local state (non-time related)
-    const [isPaused, setIsPaused] = useState(false);
-    const [controlsVisible, setControlsVisible] = useState(true);
-    const [playbackRateIndex, setPlaybackRateIndex] = useState(2);
-    const [showSkipIndicator, setShowSkipIndicator] = useState(false);
-    const [skipDirection, setSkipDirection] = useState(null);
-
-    // Animations
-    const controlsOpacity = useRef(new Animated.Value(1)).current;
-    const skipIndicatorOpacity = useRef(new Animated.Value(0)).current;
-
     const settingsRef = useRef();
+
+    // ─── Animations ───────────────────────────────────────────────────────────
+    const controlsOpacity = useRef(new Animated.Value(1)).current;
+
+    // ─── Minimal local state ──────────────────────────────────────────────────
+    // Only playbackRateIndex remains local — it must re-render VLCPlayer to
+    // apply the new `rate` prop.
+    const [playbackRateIndex, setPlaybackRateIndex] = useState(2);
+    const [isPaused, setIsPaused] = useState(false);
+
+    // ─── Side-effects ─────────────────────────────────────────────────────────
+    useEffect(() => {
+      onIsPausedChange?.(isPaused);
+    }, [isPaused, onIsPausedChange]);
 
     useEffect(() => {
       onPlayBackRateChange?.(
-        settingsRef.current?.getPlaybackRate() ||
+        settingsRef.current?.getPlaybackRate() ??
           playbackRates[playbackRateIndex],
       );
-    }, [playbackRateIndex]);
+    }, [playbackRateIndex, onPlayBackRateChange]);
 
     useEffect(() => {
-      onIsPausedChange?.(isPaused);
-    }, [isPaused]);
+      setControlsVisible(true);
+    }, []);
 
-    // Auto-hide controls logic
-    useEffect(() => {
-      clearTimeout(controlsTimeout.current);
-      if (!isPaused && !isAudio && controlsVisible) {
-        controlsTimeout.current = setTimeout(hideControls, 3000);
-      } else if (isAudio) {
-        setControlsVisible(true);
-      }
-      return () => clearTimeout(controlsTimeout.current);
-    }, [isPaused, controlsVisible, isAudio]);
-
-    const hideControls = () => {
+    // ─── Controls visibility ──────────────────────────────────────────────────
+    const hideControls = useCallback(() => {
       Animated.timing(controlsOpacity, {
         toValue: 0,
         duration: 300,
         useNativeDriver: true,
-      }).start();
-    };
+      }).start(() => setControlsVisible(false));
+    }, [controlsOpacity]);
 
-    const showControls = () => {
+    const showControls = useCallback(() => {
+      setControlsVisible(true);
       Animated.timing(controlsOpacity, {
         toValue: 1,
         duration: 200,
         useNativeDriver: true,
       }).start();
+      clearTimeout(controlsTimeout.current);
       if (!isPaused) {
         controlsTimeout.current = setTimeout(hideControls, 3000);
       }
-    };
+    }, [controlsOpacity, hideControls, isPaused]);
 
-    const handleScreenTap = () => {
+    // ─── Handlers ─────────────────────────────────────────────────────────────
+    const handleScreenTap = useCallback(() => {
       if (isAudio) return;
       showControls();
       settingsRef.current?.closeSettingsModal?.();
-    };
-
-    const handleDoubleTap = useCallback(
-      event => {
-        const now = Date.now();
-        const {locationX} = event.nativeEvent;
-        if (lastTap.current && now - lastTap.current < DOUBLE_PRESS_DELAY) {
-          const screenThird = SCREEN_WIDTH / 3;
-          if (locationX < screenThird) {
-            skipTime(-10);
-            setSkipDirection('backward');
-          } else if (locationX > screenThird * 2) {
-            skipTime(10);
-            setSkipDirection('forward');
-          } else {
-            togglePlayPause();
-            return;
-          }
-          animateSkipIndicator();
-          lastTap.current = 0;
-        } else {
-          lastTap.current = now;
-        }
-      },
-      [skipTime, togglePlayPause],
-    );
-
-    const animateSkipIndicator = () => {
-      setShowSkipIndicator(true);
-      Animated.sequence([
-        Animated.timing(skipIndicatorOpacity, {
-          toValue: 1,
-          duration: 100,
-          useNativeDriver: true,
-        }),
-        Animated.timing(skipIndicatorOpacity, {
-          toValue: 0,
-          duration: 500,
-          delay: 300,
-          useNativeDriver: true,
-        }),
-      ]).start(() => setShowSkipIndicator(false));
-    };
-
-    const skipTime = useCallback(
-      seconds => {
-        if (vlcPlayerRef.current && durationRef.current) {
-          const newTime = Math.max(
-            0,
-            Math.min(
-              currentTimeRef.current + seconds * 1000,
-              durationRef.current,
-            ),
-          );
-          vlcPlayerRef.current.seek(newTime / durationRef.current);
-          setCurrentTime(newTime);
-        }
-      },
-      [setCurrentTime],
-    );
-
-    const togglePlayPause = useCallback(() => {
-      if (
-        currentTimeRef.current >= durationRef.current &&
-        durationRef.current > 0
-      ) {
-        handleReplay();
-      } else {
-        setIsPaused(prev => !prev);
-      }
-    }, []);
+    }, [isAudio, showControls]);
 
     const handleReplay = useCallback(() => {
       if (vlcPlayerRef.current) {
         setIsPaused(true);
-        onEnd();
+        onEnd?.();
       }
     }, [onEnd]);
 
-    const handleSeek = useCallback(
-      newTime => {
-        if (vlcPlayerRef.current && durationRef.current > 0) {
-          const seekPosition = newTime / durationRef.current;
-          vlcPlayerRef.current.seek(seekPosition);
-          setCurrentTime(newTime);
-        }
-      },
-      [setCurrentTime],
-    );
+    const togglePlayPause = useCallback(() => {
+      if (getCurrentTime() >= getDuration() && getDuration() > 0) {
+        handleReplay();
+      } else {
+        setIsPaused(!isPaused);
+      }
+    }, [handleReplay, isPaused]);
+
+    const handleSeek = useCallback(newTime => {
+      if (vlcPlayerRef.current && durationRef.current > 0) {
+        vlcPlayerRef.current.seek(newTime / durationRef.current);
+        setCurrentTime(newTime);
+      }
+    }, []);
+
+    const skipTime = useCallback(seconds => {
+      if (!vlcPlayerRef.current || !durationRef.current) return;
+      const newTime = Math.max(
+        0,
+        Math.min(getCurrentTime() + seconds * 1000, getDuration()),
+      );
+      vlcPlayerRef.current.seek(newTime / durationRef.current);
+      setCurrentTime(newTime);
+    }, []);
 
     const changePlaybackRate = useCallback(() => {
-      const newIndex = (playbackRateIndex + 1) % playbackRates.length;
-      setPlaybackRateIndex(newIndex);
-    }, [playbackRateIndex]);
+      setPlaybackRateIndex(prev => (prev + 1) % playbackRates.length);
+    }, []);
 
+    // ─── Render ───────────────────────────────────────────────────────────────
     return (
-      <TouchableOpacity
-        activeOpacity={1}
-        onPress={handleScreenTap}
-        onPressOut={handleDoubleTap}
-        style={styles.touchable}>
+      <SkipHandler
+        vlcPlayerRef={vlcPlayerRef}
+        onSingleTap={handleScreenTap}
+        onCenterDoubleTap={togglePlayPause}>
         {/* Header */}
         <Animated.View
           style={[styles.headerOverlay, {opacity: controlsOpacity}]}>
@@ -240,7 +192,7 @@ const VLCPlayerComponent = forwardRef(
           </View>
         </Animated.View>
 
-        {/* Player */}
+        {/* VLCPlayer — re-renders only when isPaused or playbackRateIndex change */}
         <VLCPlayer
           ref={vlcPlayerRef}
           source={{uri: item.file_path}}
@@ -248,15 +200,17 @@ const VLCPlayerComponent = forwardRef(
           autoplay={true}
           paused={isPaused}
           onProgress={event => {
-            setCurrentTime(event.currentTime);
-            currentTimeRef.current = event.currentTime;
-            onCurrentTimeChange?.(event.currentTime);
             if (event.duration > 0 && !durationRef.current) {
               pauseOnStart && setIsPaused(true);
               durationRef.current = event.duration;
-              setDuration(event.duration);
+              console.log('updating duration', durationRef.current);
+              updateDuration(event.duration / 1000);
               updateItemFields(item.id, {duration: event.duration / 1000});
+              setDuration(event.duration);
             }
+            setCurrentTime(event.currentTime);
+            currentTimeRef.current = event.currentTime;
+            onCurrentTimeChange?.(event.currentTime);
           }}
           onOpen={() => {
             if (item.duration > 0 && startTime) {
@@ -266,116 +220,126 @@ const VLCPlayerComponent = forwardRef(
           playInBackground={true}
           videoAspectRatio={settingsRef.current?.getAspectRatio?.()}
           rate={
-            settingsRef.current?.getPlaybackRate?.() ||
+            settingsRef.current?.getPlaybackRate?.() ??
             playbackRates[playbackRateIndex]
           }
           repeat={true}
           onEnd={handleReplay}
         />
 
-        {/* Play/Pause Overlay */}
-        {controlsVisible && !isAudio && (
-          <Animated.View
-            style={[styles.overlayControls, {opacity: controlsOpacity}]}>
-            <TouchableOpacity
-              style={styles.playPauseButton}
-              onPress={togglePlayPause}>
-              <Icon
-                name={isPaused ? 'play-arrow' : 'pause'}
-                size={50}
-                color="white"
-              />
-            </TouchableOpacity>
-          </Animated.View>
-        )}
-
-        <SkipIndicator
-          visible={showSkipIndicator}
-          direction={skipDirection}
-          opacity={skipIndicatorOpacity}
+        {/* Each child below re-renders independently via its own store subscription */}
+        <PlayPauseOverlay
+          controlsOpacity={controlsOpacity}
+          onTogglePlayPause={togglePlayPause}
+          isAudio={isAudio}
+          isPaused={isPaused}
         />
 
-        {/* Bottom Controls */}
-        {controlsVisible && (
-          <Animated.View
-            style={[styles.bottomControls, {opacity: controlsOpacity}]}>
-            {isAudio && (
-              <View style={styles.audioButtonRow}>
-                <TouchableOpacity
-                  style={styles.audioControlButton}
-                  onPress={() => skipTime(-10)}>
-                  <Icon name="replay-10" size={30} color="white" />
-                </TouchableOpacity>
-                
-                <TouchableOpacity
-                  style={styles.audioMainButton}
-                  onPress={togglePlayPause}>
-                  <Icon
-                    name={isPaused ? 'play-arrow' : 'pause'}
-                    size={30}
-                    color="white"
-                  />
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.audioControlButton}
-                  onPress={() => skipTime(10)}>
-                  <Icon name="forward-10" size={30} color="white" />
-                </TouchableOpacity>
-                
-        
-              </View>
-            )}
-            <View style={styles.bottomRow}>
-              {/* Single component handles all time display and seeking */}
-              <SliderWithTime
-                style={styles.timeControlsContainer}
-                sliderStyle={styles.sliderInline}
-                onSeek={handleSeek}
-              />
+        <SkipIndicator />
 
-              {!isAudio ? (
-                <View style={styles.inlineButtonRow}>
-                  <PlayerSettings ref={settingsRef} />
-                  <TouchableOpacity
-                    style={styles.controlButton}
-                    onPress={onToggleSize}>
-                    <Icon
-                      name={isMinimized ? 'fullscreen' : 'fullscreen-exit'}
-                      size={28}
-                      color="white"
-                    />
-                  </TouchableOpacity>
-                </View>
-              ) : (
-                <TouchableOpacity
-                  style={styles.audioControlButton}
-                  onPress={changePlaybackRate}>
-                  <Text style={styles.speedText}>
-                    {playbackRates[playbackRateIndex]}x
-                  </Text>
-                </TouchableOpacity>
-              )}
-            </View>
-          </Animated.View>
-        )}
-      </TouchableOpacity>
+        <BottomControls
+          controlsOpacity={controlsOpacity}
+          isAudio={isAudio}
+          isMinimized={isMinimized}
+          onToggleSize={onToggleSize}
+          onSeek={handleSeek}
+          onSkip={skipTime}
+          onTogglePlayPause={togglePlayPause}
+          onChangePlaybackRate={changePlaybackRate}
+          playbackRateIndex={playbackRateIndex}
+          settingsRef={settingsRef}
+          isPaused={isPaused}
+        />
+      </SkipHandler>
     );
   },
 );
 
+// ─── BottomControls ───────────────────────────────────────────────────────────
+// Subscribes to controlsVisible + isPaused independently.
+const BottomControls = React.memo(
+  ({
+    controlsOpacity,
+    isAudio,
+    isMinimized,
+    onToggleSize,
+    onSeek,
+    onSkip,
+    onTogglePlayPause,
+    onChangePlaybackRate,
+    playbackRateIndex,
+    settingsRef,
+    isPaused,
+  }) => {
+    const controlsVisible = usePlayerTimeStore(state => state.controlsVisible);
+
+    if (!controlsVisible) return null;
+
+    return (
+      <Animated.View
+        style={[styles.bottomControls, {opacity: controlsOpacity}]}>
+        {isAudio && (
+          <View style={styles.audioButtonRow}>
+            <TouchableOpacity
+              style={styles.audioControlButton}
+              onPress={() => onSkip(-10)}>
+              <Icon name="replay-10" size={30} color="white" />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.audioMainButton}
+              onPress={onTogglePlayPause}>
+              <Icon
+                name={isPaused ? 'play-arrow' : 'pause'}
+                size={30}
+                color="white"
+              />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.audioControlButton}
+              onPress={() => onSkip(10)}>
+              <Icon name="forward-10" size={30} color="white" />
+            </TouchableOpacity>
+          </View>
+        )}
+
+        <View style={styles.bottomRow}>
+          <SliderWithTime
+            style={styles.timeControlsContainer}
+            sliderStyle={styles.sliderInline}
+            onSeek={onSeek}
+          />
+          {!isAudio ? (
+            <View style={styles.inlineButtonRow}>
+              <PlayerSettings ref={settingsRef} />
+              <TouchableOpacity
+                style={styles.controlButton}
+                onPress={onToggleSize}>
+                <Icon
+                  name={isMinimized ? 'fullscreen' : 'fullscreen-exit'}
+                  size={28}
+                  color="white"
+                />
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <TouchableOpacity
+              style={styles.audioControlButton}
+              onPress={onChangePlaybackRate}>
+              <Text style={styles.speedText}>
+                {playbackRates[playbackRateIndex]}x
+              </Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      </Animated.View>
+    );
+  },
+);
+
+// ─── Styles ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  touchable: {
-    flex: 1,
-    justifyContent: 'center',
-  },
-  videoPlayer: {
-    flex: 1,
-    width: '100%',
-  },
-  audioPlayer: {
-    height: 100,
-    width: '100%',
-  },
+  videoPlayer: {flex: 1, width: '100%'},
+  audioPlayer: {height: 100, width: '100%'},
   headerOverlay: {
     position: 'absolute',
     top: 0,
@@ -387,30 +351,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 15,
     zIndex: 20,
   },
-  headerContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  backButton: {
-    marginRight: 15,
-  },
-  title: {
-    color: 'white',
-    fontSize: 16,
-    fontWeight: '500',
-    flex: 1,
-  },
-  overlayControls: {
-    ...StyleSheet.absoluteFillObject,
-    justifyContent: 'center',
-    alignItems: 'center',
-    zIndex: 10,
-  },
-  playPauseButton: {
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    borderRadius: 50,
-    padding: 3,
-  },
+  headerContent: {flexDirection: 'row', alignItems: 'center'},
+  backButton: {marginRight: 15},
+  title: {color: 'white', fontSize: 16, fontWeight: '500', flex: 1},
   bottomControls: {
     position: 'absolute',
     bottom: 0,
@@ -426,31 +369,17 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 10,
   },
-  timeControlsContainer: {
-    flex: 1,
-  },
-  sliderInline: {
-    flex: 1,
-    marginHorizontal: 8,
-  },
-  inlineButtonRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginLeft: 8,
-  },
-  controlButton: {
-    padding: 7,
-  },
+  timeControlsContainer: {flex: 1},
+  sliderInline: {flex: 1, marginHorizontal: 8},
+  inlineButtonRow: {flexDirection: 'row', alignItems: 'center', marginLeft: 8},
+  controlButton: {padding: 7},
   audioButtonRow: {
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 5,
   },
-  audioControlButton: {
-    padding: 10,
-    marginHorizontal: 15,
-  },
+  audioControlButton: {padding: 10, marginHorizontal: 15},
   audioMainButton: {
     padding: 10,
     marginHorizontal: 15,
@@ -465,4 +394,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default VLCPlayerComponent;
+export default React.memo(VLCPlayerComponent);

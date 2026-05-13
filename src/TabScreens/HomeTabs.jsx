@@ -16,8 +16,8 @@ import useRestoreStore from '../backupRestore/restoreStore';
 import {useMediaStore} from '../stores/useMediaStore';
 import {useSelectionStore} from '../stores/useSelectionStore';
 import {useNotesStore} from '../stores/useNotesStore';
-import useAppStateStore from '../contexts/appStateStore';
 import {track} from '../utils/rerenderTracker';
+import useLoadingStore from '../stores/useLoadingStore';
 
 const Tab = createMaterialTopTabNavigator();
 
@@ -29,12 +29,13 @@ const HomeTabs = ({categoryId}) => {
   const setNotebooks = useNotesStore(state => state.setNotebooks);
 
   const isRestoring = useRestoreStore(state => state.isRestoring);
-  const setLoading = useAppStateStore(state => state.setHomeTabLoading);
+   const setLoadingState = useLoadingStore(state => state.setLoadingState); // Changed
+
 
   // Data loading functions
   const loadFilesFromDB = useCallback(
     async (loader = true) => {
-      loader && setLoading(true);
+      loader && setLoadingState('device', true);
       try {
         const files = categoryId
           ? await getCategoryData(categoryId, ['device_file'])
@@ -43,7 +44,7 @@ const HomeTabs = ({categoryId}) => {
       } catch (err) {
         console.error('Error loading files from DB:', err);
       } finally {
-        loader && setLoading(false);
+        loader && setLoadingState('device', false);
       }
     },
     [categoryId],
@@ -51,7 +52,7 @@ const HomeTabs = ({categoryId}) => {
 
   const loadMainYTFromDB = useCallback(
     async (loader = true) => {
-      loader && setLoading(true);
+      loader && setLoadingState('youtube', true);
       try {
         const storedItems = categoryId
           ? await getCategoryData(categoryId, [
@@ -67,7 +68,7 @@ const HomeTabs = ({categoryId}) => {
       } catch (error) {
         console.error('Error loading folders from DB:', error);
       } finally {
-        loader && setLoading(false);
+        loader && setLoadingState('youtube', false);
       }
     },
     [categoryId],
@@ -75,7 +76,7 @@ const HomeTabs = ({categoryId}) => {
 
   const loadDriveItemsfromDB = useCallback(
     async (loader = true) => {
-      loader && setLoading(true);
+      loader && setLoadingState('drive', true);
       try {
         const storedItems = categoryId
           ? await getCategoryData(categoryId, ['drive_folder', 'drive_file'])
@@ -85,7 +86,7 @@ const HomeTabs = ({categoryId}) => {
       } catch (error) {
         console.error('Error loading folders from DB:', error);
       } finally {
-        loader && setLoading(false);
+        loader && setLoadingState('drive', false);
       }
     },
     [categoryId],
@@ -93,7 +94,7 @@ const HomeTabs = ({categoryId}) => {
 
   const loadNotebooks = useCallback(
     async (loader = true) => {
-      loader && setLoading(true);
+      loader && setLoadingState('notebooks', true);
       try {
         const storedItems = categoryId
           ? await getCategoryData(categoryId, ['notebook'])
@@ -102,7 +103,7 @@ const HomeTabs = ({categoryId}) => {
       } catch (error) {
         console.error('Error fetching notebooks:', error);
       } finally {
-        loader && setLoading(false);
+        loader && setLoadingState('notebooks', false);
       }
     },
     [categoryId],
@@ -125,7 +126,7 @@ const HomeTabs = ({categoryId}) => {
   }, [loadNotebooks]);
 
   const loadAllData = useCallback(async () => {
-    setLoading(true);
+    useLoadingStore.getState().setAllLoadingStates(true);
     setDriveLinksList([]);
     setItems([]);
     setDeviceFiles([]);
@@ -140,7 +141,7 @@ const HomeTabs = ({categoryId}) => {
     } catch (err) {
       console.error('Failed to load data', err);
     } finally {
-      setLoading(false);
+      useLoadingStore.getState().setAllLoadingStates(false);
     }
   }, [categoryId]);
 

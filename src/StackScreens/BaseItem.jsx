@@ -1,5 +1,5 @@
 import {StyleSheet, View, Pressable, Alert} from 'react-native';
-import React, {useCallback, useMemo, useRef} from 'react';
+import React, {useCallback, useRef} from 'react';
 import RNFS from 'react-native-fs';
 import {isAudioOrVideo} from '../Linking/utils/handleLinkSubmit';
 import YouTubeItem from './YouTubeItem';
@@ -10,7 +10,7 @@ import FileViewer from 'react-native-file-viewer';
 import {ItemTypes, ScreenTypes} from '../contexts/constants';
 import BaseMenu from '../components/menu/BaseMenu';
 import NoteItem from '../notes/notesListing/NoteItem';
-import useAppStateStore from '../contexts/appStateStore';
+import useAppStateStore from '../stores/appStateStore';
 import {CategoryItem} from '../categories/CategoryItem';
 import {useMediaStore} from '../stores/useMediaStore';
 import {useSelectionStore} from '../stores/useSelectionStore';
@@ -19,7 +19,7 @@ import {navigationRef} from '../handlers/navigationRef';
 import {useShallow} from 'zustand/react/shallow';
 import {StackActions, useNavigationState} from '@react-navigation/core';
 
-const BaseItem = ({type, item, subtype, screen}) => {
+const BaseItem = ({type, item, subtype, screen, onFolderPress}) => {
   const {setFolderStack} = useMediaStore(
     useShallow(state => ({
       setFolderStack: state.setFolderStack,
@@ -46,7 +46,6 @@ const BaseItem = ({type, item, subtype, screen}) => {
       setSelectedNote: state.setSelectedNote,
     })),
   );
-  const {setLoading} = useAppStateStore();
 
   const sourceId = item?.rowid || item?.source_id || item?.id?.toString();
 
@@ -122,30 +121,35 @@ const BaseItem = ({type, item, subtype, screen}) => {
   const handleDrivePress = useCallback(() => {
     console.log(item);
     if (item.mimeType === 'application/vnd.google-apps.folder') {
-      setLoading(true);
-      requestAnimationFrame(() => {
-        setTimeout(() => {
-          setFolderStack(prevStack => {
-            const last = prevStack[prevStack.length - 1];
-            if (last && last.source_id === item.source_id) {
-              return prevStack; // Prevent duplicate
-            }
-            return [
-              ...prevStack,
-              {source_id: item.source_id, title: item.title},
-            ];
-          });
-          navigationRef.dispatch(
-            StackActions.push('GoogleDriveViewer', {
-              driveInfo: item,
-            }),
-          );
-        }, 0);
-      });
+      //   onFolderPress is passed down: GoogleDriveViewer → BaseMediaListComponent → BaseItem
+      if (onFolderPress) {
+        onFolderPress(item);
+      } else {
+        // Fallback: old behaviour for any context that doesn't pass onFolderPress.
+        // (e.g. search results screen rendering drive items)
+        useAppStateStore.setState({loading: true});
+        requestAnimationFrame(() => {
+          setTimeout(() => {
+            setFolderStack(prevStack => {
+              const last = prevStack[prevStack.length - 1];
+              if (last && last.source_id === item.source_id) return prevStack;
+              return [
+                ...prevStack,
+                {source_id: item.source_id, title: item.title},
+              ];
+            });
+            navigationRef.dispatch(
+              StackActions.push('GoogleDriveViewer', {
+                driveInfo: item,
+              }),
+            );
+          }, 0);
+        });
+      }
     } else {
       handleDriveFilePress();
     }
-  }, [item]);
+  }, [item, onFolderPress]);
 
   const handleDriveFilePress = useCallback(async () => {
     const {nonFolderFiles, nonFolderFilesInside} = useMediaStore.getState();
@@ -164,7 +168,6 @@ const BaseItem = ({type, item, subtype, screen}) => {
       const startingIndex = dataSource.findIndex(
         f => f.source_id === item.source_id,
       );
-
       navigationRef.navigate('BacePlayer', {
         items: dataSource,
         currentIndex: startingIndex,
@@ -200,8 +203,6 @@ const BaseItem = ({type, item, subtype, screen}) => {
 
   const handleCategoryPress = useCallback(() => {
     navigationRef.navigate('CategoryDetailScreen', {item});
-    // setSelectedCategory(item.id);
-    // navigationRef.navigate('MainApp')
   }, [item]);
 
   const handleMediaNotePress = useCallback(() => {
@@ -213,7 +214,6 @@ const BaseItem = ({type, item, subtype, screen}) => {
 
     const targetScreen = 'BacePlayer';
     console.log('routeInfo', currentRoute);
-    //WHY DOING THIS : bcz if already on bace player we dont want to switch screen
     if (currentRoute === targetScreen || currentRoute === 'ItemNotesScreen') {
       navigationRef.goBack();
       setActiveNoteId(item.rowid);
@@ -328,22 +328,7 @@ const BaseItem = ({type, item, subtype, screen}) => {
   );
 };
 
-const areEqual = (prevProps, nextProps) => {
-  const prevId =
-    prevProps.item?.rowid || prevProps.item?.source_id || prevProps.item?.id;
-
-  const nextId =
-    nextProps.item?.rowid || nextProps.item?.source_id || nextProps.item?.id;
-
-  return (
-    prevId === nextId &&
-    prevProps.type === nextProps.type &&
-    prevProps.screen === nextProps.screen &&
-    prevProps.subtype === nextProps.subtype
-  );
-};
-
-export default React.memo(BaseItem, areEqual);
+export default React.memo(BaseItem);
 const styles = StyleSheet.create({
   wrapper: {
     flexDirection: 'row',
@@ -353,7 +338,6 @@ const styles = StyleSheet.create({
     paddingLeft: 10,
     borderBottomWidth: 0.5,
     borderBottomColor: '#ccc',
-    // borderBottomColor: '#E5E7EB',
     backgroundColor: '#fff',
   },
   menuWrapper: {

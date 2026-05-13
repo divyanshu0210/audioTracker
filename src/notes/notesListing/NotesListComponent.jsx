@@ -1,29 +1,35 @@
 import React from 'react';
 import {SafeAreaView, StyleSheet} from 'react-native';
-import {useAppState} from '../../contexts/AppStateContext';
 import {ItemTypes, ScreenTypes} from '../../contexts/constants';
 import BaseMediaListComponent from '../../StackScreens/BaseMediaListComponent';
-import { useNotesStore } from '../../stores/useNotesStore';
-import { useShallow } from 'zustand/react/shallow';
+import {useNotesStore} from '../../stores/useNotesStore';
+import {useShallow} from 'zustand/react/shallow';
+import useLoadingStore from '../../stores/useLoadingStore';
 
 const NotesListComponent = ({
   notes,
-  loading,
-  loadingMore,
   loadMoreData,
   loadInitialData,
-  showMenu = true,
   screen,
 }) => {
-const {notesList, mainNotesList} = useNotesStore(
-  useShallow(state => ({
-    notesList: state.notesList,
-    mainNotesList: state.mainNotesList,
-  })),
-);
+  const isMainScreen = screen === ScreenTypes.MAIN;
+  const {storedNotes} = useNotesStore(
+    useShallow(state => ({
+      storedNotes: isMainScreen ? state.mainNotesList : state.notesList,
+    })),
+  );
+
+  const {loading, loadingMore} = useLoadingStore(
+    useShallow(state => ({
+      loading: isMainScreen
+        ? state.loadingStates.mainNotes
+        : state.loadingStates.itemNotes,
+      loadingMore: isMainScreen ? state.loadingStates.mainMoreNotes : false,
+    })),
+  );
+
   // Determine data source
-  const dataSource =
-    notes || (screen === ScreenTypes.MAIN ? mainNotesList : notesList);
+  const dataSource = notes || storedNotes || [];
   console.log(
     'Rendering NotesListComponent with notes count:',
     dataSource.length,

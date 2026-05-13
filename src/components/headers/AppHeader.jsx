@@ -1,9 +1,10 @@
+// AppHeader.jsx
 import React from 'react';
-import {View, Text, TouchableOpacity, FlatList, StyleSheet} from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
-import {useAppState} from '../../contexts/AppStateContext';
 import { useSelectionStore } from '../../stores/useSelectionStore';
 import { navigationRef } from '../../handlers/navigationRef';
+import BreadcrumbComponent from '../BreadcrumbComponent';
 
 const AppHeader = ({
   title,
@@ -14,15 +15,12 @@ const AppHeader = ({
   onBackPress,
   rightComponent,
   accentColor,
-  breadcrumbs = null, // [{id, title}]
+  breadcrumbs = null,
   onBreadcrumbPress,
   enableSearch = false,
   searchParams = null,
 }) => {
-
-const selectionMode = useSelectionStore(
-  state => state.selectionMode,
-);
+  const selectionMode = useSelectionStore(state => state.selectionMode);
 
   if (selectionMode) return null;
 
@@ -37,40 +35,10 @@ const selectionMode = useSelectionStore(
       )}
 
       <View style={styles.centerSection}>
-        {breadcrumbs ? (
-          <FlatList
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            data={breadcrumbs}
-            keyExtractor={item => item.id}
-            renderItem={({item, index}) => {
-              const isLast = index === breadcrumbs.length - 1;
-
-              return (
-                <View style={styles.breadcrumbItem}>
-                  {index > 0 && (
-                    <MaterialIcons
-                      name="chevron-right"
-                      size={14}
-                      color="#bbb"
-                    />
-                  )}
-
-                  <TouchableOpacity
-                    disabled={isLast}
-                    onPress={() => onBreadcrumbPress?.(item.id)}>
-                    <Text
-                      style={[
-                        styles.breadcrumbText,
-                        isLast && styles.activeBreadcrumb,
-                      ]}
-                      numberOfLines={1}>
-                      {item.title}
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-              );
-            }}
+        {breadcrumbs && breadcrumbs.length > 0 ? (
+          <BreadcrumbComponent
+            breadcrumbs={breadcrumbs} 
+            onBreadcrumbPress={onBreadcrumbPress} 
           />
         ) : (
           <>
@@ -87,8 +55,8 @@ const selectionMode = useSelectionStore(
           <TouchableOpacity
             onPress={() =>
               navigationRef.navigate('SearchWrapper', {
-                ...searchParams, // your search filters, query etc.
-                title: breadcrumbs? breadcrumbs[breadcrumbs.length-1].title:title, // for placeholder text
+                ...searchParams,
+                title: breadcrumbs ? breadcrumbs[breadcrumbs.length-1].title : title,
               })
             }
             style={styles.iconButton}>
@@ -117,6 +85,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderColor: '#eee',
     position: 'relative',
+    minHeight: 60,
   },
   backButton: {
     height: 36,
@@ -129,6 +98,7 @@ const styles = StyleSheet.create({
   },
   centerSection: {
     flex: 1,
+    justifyContent: 'center',
   },
   title: {
     fontSize: 18,
@@ -143,6 +113,7 @@ const styles = StyleSheet.create({
   rightSection: {
     marginLeft: 10,
     flexDirection: 'row',
+    alignItems: 'center',
   },
   accentBar: {
     width: 4,
@@ -150,19 +121,6 @@ const styles = StyleSheet.create({
     right: 0,
     top: 0,
     bottom: 0,
-  },
-  breadcrumbItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  breadcrumbText: {
-    fontSize: 14,
-    color: '#666',
-    marginHorizontal: 4,
-  },
-  activeBreadcrumb: {
-    fontWeight: '700',
-    color: '#111',
   },
   iconButton: {
     padding: 8,

@@ -5,6 +5,7 @@ import {useAppState} from '../contexts/AppStateContext';
 import {ScreenTypes} from '../contexts/constants';
 import {fetchNotes} from '../database/R';
 import {useNotesStore} from '../stores/useNotesStore';
+import useLoadingStore from '../stores/useLoadingStore';
 
 const AllNotesScreen = ({categoryId}) => {
   const setMainNotesList = useNotesStore(state => state.setMainNotesList);
@@ -12,15 +13,14 @@ const AllNotesScreen = ({categoryId}) => {
   const offsetRef = useRef(0);
   const hasMoreRef = useRef(true);
 
-  const [loading, setLoading] = useState(false);
-  const [loadingMore, setLoadingMore] = useState(false);
+  const setLoadingState = useLoadingStore(state => state.setLoadingState);
 
   useEffect(() => {
     loadInitialData();
   }, [loadInitialData]);
 
   const loadInitialData = useCallback(async () => {
-    setLoading(true);
+    setLoadingState('mainNotes', true);
     try {
       const limit = 20;
       let notes = [];
@@ -35,24 +35,22 @@ const AllNotesScreen = ({categoryId}) => {
           sortOrder: 'DESC',
         });
         offsetRef.current = notes.length;
-        // setOffset(notes.length);
         hasMoreRef.current = notes.length === limit;
-        // setHasMore(notes.length === limit);
       }
-
       setMainNotesList(notes);
     } catch (error) {
       console.error('Error loading initial notes:', error);
     } finally {
-      setLoading(false);
+      setLoadingState('mainNotes', false);
     }
   }, [categoryId]);
 
   const loadMoreData = useCallback(async () => {
+    const loading = useLoadingStore.getState().loadingStates.mainNotes;
+    const loadingMore = useLoadingStore.getState().loadingStates.mainMoreNotes;
     if (loading || loadingMore || !hasMoreRef.current || categoryId) return;
-    // if (loading || loadingMore || !hasMore || categoryId) return;
 
-    setLoadingMore(true);
+    setLoadingState('mainMoreNotes', true);
     try {
       const limit = 20;
       const newNotes = await fetchNotes({
@@ -70,15 +68,13 @@ const AllNotesScreen = ({categoryId}) => {
     } catch (error) {
       console.error('Error loading more notes:', error);
     } finally {
-      setLoadingMore(false);
+      setLoadingState('mainMoreNotes', false);
     }
-  }, [categoryId, loading, loadingMore]);
+  }, [categoryId]);
 
   return (
     <SafeAreaView style={styles.container}>
       <NotesListComponent
-        loading={loading}
-        loadingMore={loadingMore}
         loadInitialData={loadInitialData}
         loadMoreData={loadMoreData}
         screen={ScreenTypes.MAIN}

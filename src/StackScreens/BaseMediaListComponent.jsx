@@ -9,7 +9,7 @@ import {
 } from 'react-native';
 import {groupItemsByDate} from './utils/grouppByDate';
 import BaseItem from './BaseItem';
-import {convertTypetoItemType, ScreenTypes} from '../contexts/constants';
+import {convertTypetoItemType, ItemTypes, ScreenTypes} from '../contexts/constants';
 import NewAssignmentsBtn from '../components/buttons/NewAssignmentsBtn';
 import {useSelectionStore} from '../stores/useSelectionStore';
 import {useShallow} from 'zustand/react/shallow';
@@ -29,6 +29,7 @@ const BaseMediaListComponent = ({
   type = null,
   screen = ScreenTypes.MAIN,
   useSections = true,
+  onFolderPress,  
 }) => {
   const renderCount = useRef(0);
   renderCount.current++;
@@ -48,6 +49,7 @@ const BaseMediaListComponent = ({
           item={item}
           subtype={subtype}
           screen={screen}
+          onFolderPress={screen===ScreenTypes.IN && type===ItemTypes.DRIVE? onFolderPress : undefined}
         />
       );
     },

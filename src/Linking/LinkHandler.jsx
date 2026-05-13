@@ -3,7 +3,6 @@
 import { useEffect, useRef } from 'react';
 import { Linking } from 'react-native';
 import { handleLinkSubmit } from './utils/handleLinkSubmit';
-import { useNavigation } from '@react-navigation/native';
 import { useAppState } from '../contexts/AppStateContext';
 import { useMediaStore } from '../stores/useMediaStore';
 import { useShallow } from 'zustand/react/shallow';
@@ -22,7 +21,6 @@ const useLinkHandler = () => {
 );
 
 const {userInfo} = useAppState();
-  const navigation = useNavigation();
   const hasHandledInitialUrl = useRef(false); // <--- Add this
   const pendingUrlRef = useRef(null);
 
@@ -33,7 +31,7 @@ const {userInfo} = useAppState();
         if (userInfo && !hasHandledInitialUrl.current) {
           console.log('Initial URL got user:', url);
           // hasHandledInitialUrl.current = true;
-          handleLinkSubmit(url, { setDriveLinksList, setItems,setDeviceFiles,navigation });
+          handleLinkSubmit(url, { setDriveLinksList, setItems,setDeviceFiles });
         } else {
           console.log('Initial URL waiting for user:', url);
           pendingUrlRef.current = url;
@@ -45,7 +43,7 @@ const {userInfo} = useAppState();
       console.log('URL opened while running:', url,userInfo);
       if (userInfo && !hasHandledInitialUrl.current) {
         // hasHandledInitialUrl.current = true;
-        handleLinkSubmit(url, { setDriveLinksList, setItems, setDeviceFiles,navigation });
+        handleLinkSubmit(url, { setDriveLinksList, setItems, setDeviceFiles });
       } else {
         pendingUrlRef.current = url;
       }
@@ -55,16 +53,16 @@ const {userInfo} = useAppState();
     const subscription = Linking.addListener('url', handleURL);
 
     return () => subscription.remove();
-  }, [userInfo, setDriveLinksList, setItems,setDeviceFiles, navigation]);
+  }, [userInfo, setDriveLinksList, setItems,setDeviceFiles]);
 
   // useEffect(() => {
   //   if (userInfo && pendingUrlRef.current && !hasHandledInitialUrl.current) {
   //     console.log('User info now available, handling pending URL:',userInfo, pendingUrlRef.current);
   //     // hasHandledInitialUrl.current = true;
-  //     handleLinkSubmit(pendingUrlRef.current, { setDriveLinksList, setItems,setDeviceFiles, navigation });
+  //     handleLinkSubmit(pendingUrlRef.current, { setDriveLinksList, setItems,setDeviceFiles });
   //     pendingUrlRef.current = null;
   //   }
-  // }, [userInfo, setDriveLinksList, setItems, navigation]);
+  // }, [userInfo, setDriveLinksList, setItems]);
 };
 
 export default useLinkHandler;

@@ -1,6 +1,6 @@
 import React, {useCallback} from 'react';
 import {View, Text, TouchableOpacity, StyleSheet} from 'react-native';
-import {useFocusEffect, useNavigation} from '@react-navigation/native';
+import {useFocusEffect} from '@react-navigation/native';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import {useAppState} from '../contexts/AppStateContext';
 import {getAllCategories} from './catDB';
@@ -9,9 +9,9 @@ import {ItemTypes} from '../contexts/constants';
 import BaseMediaListComponent from '../StackScreens/BaseMediaListComponent';
 import { useSelectionStore } from '../stores/useSelectionStore';
 import { useShallow } from 'zustand/react/shallow';
+import { navigationRef } from '../handlers/navigationRef';
 
 export default function CategoriesView({mode = 'full'}) {
-  const navigation = useNavigation();
 const {
   categories,
   setCategories,
@@ -93,7 +93,7 @@ const {
               </TouchableOpacity>
               {isPreview && (
                 <TouchableOpacity
-                  onPress={() => navigation.navigate('CategoriesView')}>
+                  onPress={() => navigationRef.navigate('CategoriesView')}>
                   <Text style={styles.viewAll}>View All</Text>
                 </TouchableOpacity>
               )}

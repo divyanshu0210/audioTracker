@@ -2,7 +2,7 @@
 import React from 'react';
 import { Text, StyleSheet, TouchableOpacity, Alert } from 'react-native';
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
-import { CommonActions, useNavigation } from '@react-navigation/native';
+import { CommonActions } from '@react-navigation/native';
 import { useAppState } from '../contexts/AppStateContext';
 import { closeUserDatabase } from '../database/userDBSetupService';
 import useDbStore from '../database/dbStore';
@@ -13,9 +13,9 @@ import useBackupStore from '../stores/backupStore';
 import { useMediaStore } from '../stores/useMediaStore';
 import { useSelectionStore } from '../stores/useSelectionStore';
 import { useShallow } from 'zustand/react/shallow';
+import { navigationRef } from '../handlers/navigationRef';
 
 export default function SignOutButton({ label = 'LogOut' }) {
-  const navigation = useNavigation();
  
 const {setUserInfo} = useAppState();
 
@@ -52,7 +52,7 @@ const {setSelectedItems} = useSelectionStore(
       //also remove the user from set preference of backup module to prevent backup issues when another user logs in
       await useBackupStore.getState().setNativePreference('userId', null);
 
-      navigation.dispatch(
+      navigationRef.dispatch(
         CommonActions.reset({
           index: 0,
           routes: [{ name: 'GoogleLoginScreen' }],

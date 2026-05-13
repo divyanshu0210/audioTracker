@@ -2,9 +2,9 @@
 import React, {useState} from 'react';
 import {View, Text, TouchableOpacity, StyleSheet} from 'react-native';
 import {getFileIcon} from '../contexts/fileIconHelper';
-import {useNavigation} from '@react-navigation/core';
 import {useAppState} from '../contexts/AppStateContext';
 import { useSelectionStore } from '../stores/useSelectionStore';
+import { navigationRef } from '../handlers/navigationRef';
 
 const formatTime = seconds => {
   const mins = Math.floor(seconds / 60);
@@ -31,7 +31,6 @@ const VideoReportItem = ({
   intervals,
 }) => {
   const [expandedVideoId, setExpandedVideoId] = useState(null);
-  const navigation = useNavigation();
 const setActiveItem = useSelectionStore(
   state => state.setActiveItem,
 );
@@ -46,7 +45,7 @@ const setActiveItem = useSelectionStore(
             sourceType: item?.type || type,
             item: item,
           });
-          navigation.navigate('BacePlayer', {item: item});
+          navigationRef.navigate('BacePlayer', {item: item});
         }}>
         <View style={{padding: 12}}>
           <View style={styles.videoHeader}>

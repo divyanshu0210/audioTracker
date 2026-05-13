@@ -8,10 +8,11 @@ import {
   Image,
   Dimensions,
 } from 'react-native';
-import {useFocusEffect, useNavigation} from '@react-navigation/core';
+import {useFocusEffect} from '@react-navigation/core';
 import ShimmerPlaceholder from 'react-native-shimmer-placeholder';
 import {HistoryItem} from './HistoryCard';
 import { getRecentlyWatchedVideos } from '../database/R';
+import { navigationRef } from '../handlers/navigationRef';
 
 const ShimmerHistoryItem = () => {
   return (
@@ -34,7 +35,6 @@ const ShimmerHistoryItem = () => {
 const HistoryComponent = () => {
   const [recentVideos, setRecentVideos] = useState([]);
   const [loading, setLoading] = useState(true);
-  const navigation = useNavigation();
 
   useFocusEffect(
     useCallback(() => {
@@ -83,7 +83,7 @@ const HistoryComponent = () => {
         {recentVideos.length > 0 && (
           <TouchableOpacity
             onPress={() => {
-              navigation.navigate('FullHistoryScreen', {
+              navigationRef.navigate('FullHistoryScreen', {
                 fullHistory: recentVideos,
               });
             }}>

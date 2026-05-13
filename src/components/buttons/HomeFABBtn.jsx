@@ -1,4 +1,4 @@
-import {useFocusEffect, useNavigation} from '@react-navigation/native';
+import {useFocusEffect} from '@react-navigation/native';
 import React, {useCallback, useEffect, useState} from 'react';
 import {
   Alert,
@@ -31,13 +31,13 @@ import { useMediaStore } from '../../stores/useMediaStore';
 import { useShallow } from 'zustand/react/shallow';
 import { useSelectionStore } from '../../stores/useSelectionStore';
 import { useNotesStore } from '../../stores/useNotesStore';
+import { navigationRef } from '../../handlers/navigationRef';
 
 const colors = ['#FFECB3', '#FFAB91', '#A5D6A7', '#90CAF9', '#CE93D8'];
 
 const HomeFABBtn = () => {
   const [open, setOpen] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
-  const navigation = useNavigation();
   const primaryColor = '#0F56B3';
 
   const {setDriveLinksList, setItems, setDeviceFiles} = useMediaStore(
@@ -86,7 +86,6 @@ const HomeFABBtn = () => {
       setDriveLinksList,
       setItems,
       setDeviceFiles,
-      navigation,
       selectedCategory,
     });
     setModalVisible(false);
@@ -100,7 +99,7 @@ const HomeFABBtn = () => {
       });
 
       for (const file of results) {
-        await handleFileProcessing(file, setDeviceFiles, navigation);
+        await handleFileProcessing(file, setDeviceFiles);
       }
     } catch (err) {
       if (err?.code !== 'DOCUMENT_PICKER_CANCELED') {
@@ -126,7 +125,7 @@ const HomeFABBtn = () => {
         },
         noteId,
       );
-      navigation.navigate('NotesSectionWithBack');
+      navigationRef.navigate('NotesSectionWithBack');
     } catch (error) {
       console.error('Note creation failed:', error);
     } finally {

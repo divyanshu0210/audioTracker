@@ -3,7 +3,6 @@ import { Linking } from 'react-native';
 import ShareMenu from 'react-native-share-menu';
 import { handleLinkSubmit } from './utils/handleLinkSubmit'; // The logic for handling the shared content
 import { useAppState } from '../contexts/AppStateContext'; // Access app state, e.g., userInfo
-import { useNavigation } from '@react-navigation/native';
 import { useMediaStore } from '../stores/useMediaStore';
 import { useShallow } from 'zustand/react/shallow';
 
@@ -21,8 +20,6 @@ const {
 );
 
 const {userInfo} = useAppState();
-  const navigation = useNavigation();
-  
   const pendingSharedDataRef = useRef(null); // To store pending shared data
   const hasHandledInitialUrl = useRef(false); // <--- Add this
   useEffect(() => {
@@ -35,7 +32,7 @@ console.log(item)
       if (userInfo && !hasHandledInitialUrl.current) {
         console.log('Shared data received for user:', data, mimeType);
         // hasHandledInitialUrl.current = true;
-        handleLinkSubmit(data, { setDriveLinksList, setItems, setDeviceFiles, navigation });
+        handleLinkSubmit(data, { setDriveLinksList, setItems, setDeviceFiles });
       } else {
         console.log('Waiting for user info, storing shared data:', data, mimeType);
         pendingSharedDataRef.current = item; // Store shared content until user is available
@@ -52,17 +49,17 @@ console.log(item)
     return () => {
       shareListener?.remove();
     };
-  }, [userInfo, setDriveLinksList, setItems, setDeviceFiles, navigation]);
+  }, [userInfo, setDriveLinksList, setItems, setDeviceFiles]);
 
   // This effect runs when the user info becomes available
   useEffect(() => {
     if (userInfo && pendingSharedDataRef.current && !hasHandledInitialUrl.current) {
       console.log('User info is available, processing pending shared content:', userInfo, pendingSharedDataRef.current);
       // hasHandledInitialUrl.current = true;
-      handleLinkSubmit(pendingSharedDataRef.current.data, { setDriveLinksList, setItems, setDeviceFiles, navigation });
+      handleLinkSubmit(pendingSharedDataRef.current.data, { setDriveLinksList, setItems, setDeviceFiles });
       pendingSharedDataRef.current = null; // Clear pending shared data after processing
     }
-  }, [userInfo, setDriveLinksList, setItems, setDeviceFiles, navigation]);
+  }, [userInfo, setDriveLinksList, setItems, setDeviceFiles]);
 };
 
 export default useSharedContentHandler;

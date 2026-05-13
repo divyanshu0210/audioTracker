@@ -16,11 +16,10 @@ import ColorPallete from '../ColorPallete';
 import {addNotebook} from '../../database/C';
 import {fetchNotebooks} from '../../database/R';
 import {updateNotebook} from '../../database/U';
-import {useAppState} from '../../contexts/AppStateContext';
-import {useNavigation} from '@react-navigation/core';
 import useDbStore from '../../database/dbStore';
 import { useNotesStore } from '../../stores/useNotesStore';
 import { useShallow } from 'zustand/react/shallow';
+import { navigationRef } from '../../handlers/navigationRef';
 
 const AddNotebookBottomSheet = forwardRef(({}, ref) => {
   const [notebookName, setNotebookName] = useState('');
@@ -39,7 +38,6 @@ const AddNotebookBottomSheet = forwardRef(({}, ref) => {
   })),
 );
   const {inserting, setInserting} = useDbStore();
-  const navigation = useNavigation();
 
   const snapPoints = ['30%'];
 
@@ -84,7 +82,7 @@ const AddNotebookBottomSheet = forwardRef(({}, ref) => {
       fetchNotebooks(setNotebooks);
       setInserting(false);
     });
-   navigation.navigate('MainApp', {
+   navigationRef.navigate('MainApp', {
         screen: 'Home',
         params: {
           screen: 'HomeScreen',

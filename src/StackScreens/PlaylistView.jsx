@@ -21,7 +21,6 @@ import { useMediaStore } from '../stores/useMediaStore';
 import { useShallow } from 'zustand/react/shallow';
 
 export default function PlaylistView() {
-  const navigation = useNavigation();
   const route = useRoute();
   const {playListId, playListInfo} = route.params;
 const {videos, setVideos} = useMediaStore(

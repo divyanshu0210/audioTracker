@@ -1,5 +1,5 @@
-import {useNavigation} from '@react-navigation/core';
 import {Image, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
+import { navigationRef } from '../handlers/navigationRef';
 
 const SegmentedProgressBar = ({intervals, duration}) => {
   if (!duration) return null;
@@ -49,7 +49,6 @@ export const HistoryItem = ({
   item,
   variant = 'card', // "card" | "list"
 }) => {
-  const navigation = useNavigation();
   let thumbnailSource = null;
 
   if (item.type === 'youtube_video') {
@@ -69,7 +68,7 @@ export const HistoryItem = ({
 
   return (
     <TouchableOpacity
-      onPress={() => navigation.navigate('BacePlayer', {item: item})}
+      onPress={() => navigationRef.navigate('BacePlayer', {item: item})}
       style={[isList ? styles.listContainer : styles.cardContainer]}>
       {/* Thumbnail */}
       <View

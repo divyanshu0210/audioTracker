@@ -1,13 +1,12 @@
 import {StyleSheet, Text, TouchableOpacity, View} from 'react-native';
 import React from 'react';
 import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
-import { useNavigation } from '@react-navigation/core';
+import { navigationRef } from '../../handlers/navigationRef';
 const BackButton = () => {
-    const navigation = useNavigation();   
   return (
     <TouchableOpacity
       onPress={() => {
-        navigation.goBack();
+        navigationRef.goBack();
       }}
       style={{marginHorizontal: 10, marginTop: 10}}>
       <MaterialIcons

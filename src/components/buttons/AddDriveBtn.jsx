@@ -11,7 +11,7 @@ import {
 import DriveLinkModal from '../modules/DriveLink';
 import MyModal from '../MyModal';
 
-import {useFocusEffect, useNavigation} from '@react-navigation/native';
+import {useFocusEffect} from '@react-navigation/native';
 import {pick, types} from 'react-native-document-picker';
 import {useAppState} from '../../contexts/AppStateContext';
 import {
@@ -33,7 +33,6 @@ const AddDriveBtn = () => {
   );
 
   const selectedCategory = useSelectionStore(state => state.selectedCategory);
-  const navigation = useNavigation();
 
   const [modalVisible, setModalVisible] = useState(false);
 
@@ -77,7 +76,6 @@ const AddDriveBtn = () => {
       setDriveLinksList,
       setItems,
       setDeviceFiles,
-      navigation,
       selectedCategory,
     });
 
@@ -93,7 +91,7 @@ const AddDriveBtn = () => {
 
       for (const file of results) {
         console.log(file);
-        await handleFileProcessing(file, setDeviceFiles, navigation);
+        await handleFileProcessing(file, setDeviceFiles);
       }
     } catch (err) {
       if (err?.code === 'DOCUMENT_PICKER_CANCELED') {

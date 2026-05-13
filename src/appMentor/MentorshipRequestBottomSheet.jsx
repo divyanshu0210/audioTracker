@@ -16,7 +16,7 @@ import BottomSheet, {
 import AntDesign from 'react-native-vector-icons/AntDesign';
 import {useAppState} from '../contexts/AppStateContext';
 import {BASE_URL} from '../appMentorBackend/userMgt';
-import {useNavigation} from '@react-navigation/core';
+import { navigationRef } from '../handlers/navigationRef';
 
 const MentorshipRequestBottomSheet = forwardRef(({}, ref) => {
   const [email, setEmail] = useState('');
@@ -25,7 +25,6 @@ const MentorshipRequestBottomSheet = forwardRef(({}, ref) => {
   const [checking, setChecking] = useState(false);
   const [loading, setLoading] = useState(false);
   const {userInfo} = useAppState();
-  const navigation = useNavigation();
 
   const snapPoints = ['40%'];
 
@@ -83,7 +82,7 @@ const MentorshipRequestBottomSheet = forwardRef(({}, ref) => {
         setUserExists(false);
         setUserFullName('');
         ref?.current?.close();
-        navigation.navigate('Notifications');
+        navigationRef.navigate('Notifications');
         Alert.alert('Success', data.message);
       } else {
         Alert.alert('Error', data.error || 'Failed to send request');

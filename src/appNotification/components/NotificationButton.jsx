@@ -1,20 +1,18 @@
 import {StyleSheet, Text, TouchableOpacity, View} from 'react-native';
 import React from 'react';
 import Ionicons from 'react-native-vector-icons/Ionicons';
-import {useNavigation} from '@react-navigation/core';
 import {useAppState} from '../../contexts/AppStateContext';
 import useNotificationStore from '../useNotificationStore';
+import { navigationRef } from '../../handlers/navigationRef';
 
 const NotificationButton = () => {
-  const navigation = useNavigation();
-  const {userInfo} = useAppState(); // assuming this holds unread count
   const {notificationsCount} = useNotificationStore();
 
   return (
     <View>
       <TouchableOpacity
         onPress={() => {
-          navigation.navigate('Notifications');
+          navigationRef.navigate('Notifications');
         }}
         style={styles.iconButton}>
         <Ionicons name="notifications-outline" size={24} color="#fff" />

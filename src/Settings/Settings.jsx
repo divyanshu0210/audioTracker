@@ -12,11 +12,13 @@ import {Button} from 'react-native-paper';
 import {ScrollView} from 'react-native-gesture-handler';
 import useSettingsStore from './settingsStore';
 import SignOutButton from '../auth/SignOutButton';
-import {useNavigation} from '@react-navigation/core';
 import useBackupStore from '../stores/backupStore';
+import { navigationRef } from '../handlers/navigationRef';
+import { useNavigation } from '@react-navigation/core';
 const SettingsScreen = () => {
-  const navigation = useNavigation();
   const {settings, updateSettings} = useSettingsStore();
+    const navigation = useNavigation();
+
 
   const {
   loading,
@@ -58,7 +60,7 @@ const SettingsScreen = () => {
       title: 'Settings',
       headerRight: () => <SignOutButton />,
     });
-  }, [navigation]);
+  }, []);
 
   // Automatically update settings whenever they change
   // For general settings
@@ -151,7 +153,7 @@ const SettingsScreen = () => {
         </Button>      
         <Button
           mode="contained"
-          onPress={() => navigation.navigate('BackupExplorerScreen')}
+          onPress={() => navigationRef.navigate('BackupExplorerScreen')}
           style={[styles.saveButton, {marginTop: 10}]}
           labelStyle={styles.buttonText}>
           Explore Backups

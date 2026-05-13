@@ -12,6 +12,7 @@ import {addItemToCategory} from '../../categories/catDB';
 import useDbStore from '../../database/dbStore';
 import {updateItemFields} from '../../database/U';
 import { getGoogleAccessToken } from '../../auth/tokenManager';
+import { navigationRef } from '../../handlers/navigationRef';
 
 const {FileMeta} = NativeModules;
 const {setInserting} = useDbStore.getState();
@@ -41,7 +42,6 @@ export const handleLinkSubmit = async (
     setDriveLinksList,
     setItems,
     setDeviceFiles,
-    navigation,
     selectedCategory = null,
   },
 ) => {
@@ -52,7 +52,6 @@ export const handleLinkSubmit = async (
       await handleDeviceFileFromUri(
         inputLink,
         setDeviceFiles,
-        navigation,
         selectedCategory,
       );
       return;
@@ -62,11 +61,10 @@ export const handleLinkSubmit = async (
       await handleDriveLink(
         extracted.id,
         setDriveLinksList,
-        navigation,
         selectedCategory,
       );
     } else {
-      await fetchYTData(extracted, setItems, navigation, selectedCategory);
+      await fetchYTData(extracted, setItems, selectedCategory);
     }
   } finally {
     console.log('Stopping loader...');
@@ -77,7 +75,6 @@ export const handleLinkSubmit = async (
 export const fetchYTData = async (
   extracted,
   setItems,
-  navigation,
   selectedCategory,
 ) => {
   try {
@@ -98,7 +95,7 @@ export const fetchYTData = async (
       }
 
       if (type === 'youtube_video') {
-        navigation?.navigate('BacePlayer', {item: updatedItem});
+        navigationRef.navigate('BacePlayer', {item: updatedItem});
       }
 
       console.log('✅ Item existed → updated out_show only');
@@ -137,7 +134,7 @@ export const fetchYTData = async (
         addItemToCategory(selectedCategory, fullItem.source_id, fullItem.type);
       }
 
-      navigation?.navigate('BacePlayer', {item: fullItem});
+      navigationRef.navigate('BacePlayer', {item: fullItem});
     } else if (type === 'youtube_playlist') {
       const response = await axios.get(
         `https://www.googleapis.com/youtube/v3/playlists?part=snippet&id=${id}&key=${YOUTUBE_API_KEY}`,
@@ -174,7 +171,7 @@ export const fetchYTData = async (
     Alert.alert('Error', 'Failed to fetch YouTube data.');
   } finally {
     if (extracted.type === 'youtube_playlist') {
-      navigation?.navigate('HomeScreen', {screen: 'YouTube'});
+      navigationRef.navigate('HomeScreen', {screen: 'YouTube'});
     }
   }
 };
@@ -182,7 +179,6 @@ export const fetchYTData = async (
 export const handleDriveLink = async (
   driveId,
   setDriveLinksList,
-  navigation,
   selectedCategory,
 ) => {
   try {
@@ -254,7 +250,7 @@ export const handleDriveLink = async (
     }
 
     // Navigate (same for both existing & new)
-    navigation?.navigate('HomeScreen', {screen: 'Drive'});
+    navigationRef.navigate('HomeScreen', {screen: 'Drive'});
   } catch (error) {
     console.error('Drive handle error:', error);
 
@@ -324,7 +320,6 @@ export const extractFileId = url => {
 const handleDeviceFileFromUri = async (
   uri,
   setDeviceFiles,
-  navigation,
   selectedCategory,
 ) => {
   try {
@@ -345,7 +340,6 @@ const handleDeviceFileFromUri = async (
     await handleFileProcessing(
       {uri, name: fileName, type: mimeType},
       setDeviceFiles,
-      navigation,
       selectedCategory,
       true,
     );
@@ -358,7 +352,6 @@ const handleDeviceFileFromUri = async (
 export const handleFileProcessing = async (
   file,
   setDeviceFiles,
-  navigation,
   selectedCategory,
   navigateToPlayer = false,
 ) => {
@@ -394,9 +387,9 @@ export const handleFileProcessing = async (
     setDeviceFiles(prev => [fullItem, ...prev]);
 
     if (navigateToPlayer) {
-      navigation.navigate('BacePlayer', {item: fullItem});
+      navigationRef.navigate('BacePlayer', {item: fullItem});
     } else {
-      navigation.navigate('HomeScreen', {screen: 'Device'});
+      navigationRef.navigate('HomeScreen', {screen: 'Device'});
     }
     console.log(`✅ Inserted ${fileName} into device_files table`);
   } catch (dbError) {

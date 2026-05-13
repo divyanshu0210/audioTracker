@@ -1,5 +1,4 @@
 // components/CommonMenuItems.js
-import { useNavigation } from '@react-navigation/core';
 import React from 'react';
 import { Alert, StyleSheet, Text, TouchableOpacity } from 'react-native';
 import { MenuDivider, MenuItem } from 'react-native-material-menu';
@@ -10,6 +9,7 @@ import { useSelectionStore } from '../../stores/useSelectionStore';
 import { useShallow } from 'zustand/react/shallow';
 import { useMediaStore } from '../../stores/useMediaStore';
 import { useNotesStore } from '../../stores/useNotesStore';
+import { navigationRef } from '../../handlers/navigationRef';
 
 
 export const filterAndSet = (type, id) => {
@@ -35,7 +35,6 @@ const CommonMenuItems = ({
   showAddNote = true,
   showRemove = true,
 }) => {
-  const navigation = useNavigation();
 const {
   selectedCategory,
   setAddToCategoryModalVisible,
@@ -88,7 +87,7 @@ const {
                 <Text style={styles.menuItemText}>Add Notes</Text>
               )}
               onNoteAdded={noteId => {
-                navigation.navigate('BacePlayer', {
+                navigationRef.navigate('BacePlayer', {
                   item: item,
                   currentNoteId: noteId,
                   pauseOnStart: true,
@@ -101,7 +100,7 @@ const {
             <TouchableOpacity
               onPress={() => {
                 hideMenu();
-                navigation.navigate('NotesListScreen');
+                navigationRef.navigate('NotesListScreen');
               }}>
               <Text style={styles.menuItemText}>Show All Notes</Text>
             </TouchableOpacity>

@@ -1,4 +1,4 @@
-import { useNavigation, useRoute } from '@react-navigation/native';
+import {useRoute } from '@react-navigation/native';
 import React from 'react';
 import { StyleSheet, TouchableOpacity, View } from 'react-native';
 import Fontisto from 'react-native-vector-icons/Fontisto';
@@ -7,9 +7,9 @@ import { handleExport } from '../components/menu/NoteMenuItems';
 import RichTextEditor from './richEditor/RichTextEditor';
 import { useAppState } from '../contexts/AppStateContext';
 import { useNotesStore } from '../stores/useNotesStore';
+import { navigationRef } from '../handlers/navigationRef';
 
 const NotesSectionWithBack = () => {
-  const navigation = useNavigation();
   const route = useRoute();
 const activeNoteId = useNotesStore(
   state => state.activeNoteId,
@@ -20,7 +20,7 @@ const activeNoteId = useNotesStore(
       <View style={{flexDirection: 'row', justifyContent: 'space-around'}}>
         <TouchableOpacity
           onPress={() => {
-            navigation.goBack();
+            navigationRef.goBack();
           }}
           style={{marginHorizontal: 10, marginTop: 10}}>
           <MaterialIcons

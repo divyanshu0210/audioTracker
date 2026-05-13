@@ -9,7 +9,7 @@ import {
 import {Calendar} from 'react-native-calendars';
 import {generateWatchData} from './utils/ProgressDataCollector';
 import {getSumOfWatchTimesByDate} from '../database/R';
-import {useFocusEffect, useNavigation} from '@react-navigation/native';
+import {useFocusEffect} from '@react-navigation/native';
 import {SafeAreaView} from 'react-native-safe-area-context';
 import WatchTimeChart from './WatchTimeChart';
 import {ScrollView} from 'react-native-gesture-handler';
@@ -24,6 +24,7 @@ import {
   getMonthlyWatchTimefromBackend,
   getWatchTimefromBackend,
 } from '../appMentorBackend/reportMgt';
+import { navigationRef } from '../handlers/navigationRef';
 
 const ACHIEVEMENT_BANDS = [
   {min: 100, color: '#1B5E20'}, // Goal crushed
@@ -66,7 +67,6 @@ const getLegendWithTime = target => {
 
 const CalendarProgress = () => {
   const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
-  const navigation = useNavigation();
   const [data, setData] = useState({});
   const [selectedDate, setSelectedDate] = useState(
     new Date().toISOString().slice(0, 10),
@@ -248,7 +248,7 @@ const CalendarProgress = () => {
       totalNewWatchTime: 0,
       totalUnfltrdWatchTime: 0,
     };
-    navigation.navigate('DayReport', {
+    navigationRef.navigate('DayReport', {
       date: day.dateString,
       watchData: dayData,
       mentee: mentee,

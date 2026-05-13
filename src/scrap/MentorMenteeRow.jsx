@@ -1,24 +1,23 @@
 import React from 'react';
 import {View, Text, TouchableOpacity, StyleSheet} from 'react-native';
-import {useNavigation} from '@react-navigation/core';
 import useMentorMenteeStore from '../appMentor/useMentorMenteeStore';
+import { navigationRef } from '../handlers/navigationRef';
 
 const MentorMenteeRow = () => {
-  const navigation = useNavigation();
   const {mentors, mentees} = useMentorMenteeStore(); // assuming arrays
 
   return (
     <View style={styles.container}>
       <TouchableOpacity
         style={[styles.connectionBox, styles.leftButton]}
-        onPress={() => navigation.navigate('MentorshipRequestScreen')}>
+        onPress={() => navigationRef.navigate('MentorshipRequestScreen')}>
         <Text style={styles.connectionNumber}>{mentors?.length ?? 0}</Text>
         <Text style={styles.connectionLabel}>Mentors</Text>
       </TouchableOpacity>
 
       <TouchableOpacity
         style={[styles.connectionBox, styles.rightButton]}
-        onPress={() => navigation.navigate('MentorshipRequestScreen')}>
+        onPress={() => navigationRef.navigate('MentorshipRequestScreen')}>
         <Text style={styles.connectionNumber}>{mentees?.length ?? 0}</Text>
         <Text style={styles.connectionLabel}>Mentees</Text>
       </TouchableOpacity>

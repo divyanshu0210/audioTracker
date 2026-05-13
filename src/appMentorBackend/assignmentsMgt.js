@@ -56,19 +56,21 @@ export const fetchAssignmentsForMentee = async (
 
             if (extracted.type === 'youtube') {
               extracted.type = getYouTubeIdType(extracted.id);
-              await fetchYTData(extracted, setItems, null, categoryId);
+              await fetchYTData(extracted, setItems, categoryId);
             } else if (extracted.type === 'drive') {
               await handleDriveLink(
                 extracted.id,
                 setDriveLinksList,
-                null,
                 categoryId,
               );
             }
           }
           //Create toast here . ..
           videos.length > 0 &&
-            ToastAndroid.show(`${videos.length} New Assignments Added`, ToastAndroid.SHORT);
+            ToastAndroid.show(
+              `${videos.length} New Assignments Added`,
+              ToastAndroid.SHORT,
+            );
         } catch (error) {
           console.warn(
             `❌ Error processing category for ${mentorKey}:`,
@@ -96,24 +98,21 @@ export const fetchAssignmentsForMentee = async (
 };
 
 // to display the assignment btn on app start
-export const isAssignmentPending =async ()=>{
-  const count = await  pendingAssignmentCount();
-   setNewAssignmentsFlag(count>0);
+export const isAssignmentPending = async () => {
+  const count = await pendingAssignmentCount();
+  setNewAssignmentsFlag(count > 0);
+};
 
-}
-
-export const pendingAssignmentCount =async ()=>{
-
+export const pendingAssignmentCount = async () => {
   const userId = await AsyncStorage.getItem('userId');
 
-    const response = await fetch(
-      `${BASE_URL}/assign/assignments-count-for-mentee/?mentee_id=${userId}`,
-    );
-    const data = await response.json();
-    // console.log(data);
-    if (response.ok) {
-      return data.pending_assignments_count
-    }
-    return 0;
-
-}
+  const response = await fetch(
+    `${BASE_URL}/assign/assignments-count-for-mentee/?mentee_id=${userId}`,
+  );
+  const data = await response.json();
+  // console.log(data);
+  if (response.ok) {
+    return data.pending_assignments_count;
+  }
+  return 0;
+};

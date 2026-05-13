@@ -9,7 +9,6 @@ import {
   ActivityIndicator,
   Platform,
 } from 'react-native';
-import {useNavigation} from '@react-navigation/core';
 import Modal from 'react-native-modal';
 import useMentorMenteeStore from './useMentorMenteeStore';
 import UserList from './UserList';
@@ -18,6 +17,7 @@ import {addCategory} from '../categories/catDB';
 import {TabView, SceneMap} from 'react-native-tab-view';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import {useSelectionStore} from '../stores/useSelectionStore';
+import { navigationRef } from '../handlers/navigationRef';
 
 const CustomTabBar = ({navigationState, setIndex}) => {
   return (
@@ -59,7 +59,6 @@ const MentorMenteeDrawer = () => {
   const setSelectedCategory = useSelectionStore(
     state => state.setSelectedCategory,
   );
-  const navigation = useNavigation();
 
   const [drawerVisible, setDrawerVisible] = useState(false);
   const [searchText, setSearchText] = useState('');
@@ -104,7 +103,7 @@ const MentorMenteeDrawer = () => {
 
   const navigateToHome = () => {
     // Navigate immediately so UI feels responsive
-    navigation.navigate('MainApp', {
+    navigationRef.navigate('MainApp', {
       screen: 'Home', // Target the Home tab in MainApp
       params: {
         screen: 'HomeScreen', // Target the HomeScreen in HomeStack
@@ -164,7 +163,7 @@ const MentorMenteeDrawer = () => {
         })();
       }
     },
-    [navigation, setActiveMentee, setSelectedCategory],
+    [setActiveMentee, setSelectedCategory],
   );
 
   const MentorList = useCallback(

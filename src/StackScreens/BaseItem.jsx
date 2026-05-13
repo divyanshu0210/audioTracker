@@ -17,7 +17,7 @@ import {useSelectionStore} from '../stores/useSelectionStore';
 import {useNotesStore} from '../stores/useNotesStore';
 import {navigationRef} from '../handlers/navigationRef';
 import {useShallow} from 'zustand/react/shallow';
-import {useNavigationState} from '@react-navigation/core';
+import {StackActions, useNavigationState} from '@react-navigation/core';
 
 const BaseItem = ({type, item, subtype, screen}) => {
   const {setFolderStack} = useMediaStore(
@@ -47,7 +47,6 @@ const BaseItem = ({type, item, subtype, screen}) => {
     })),
   );
   const {setLoading} = useAppStateStore();
-
 
   const sourceId = item?.rowid || item?.source_id || item?.id?.toString();
 
@@ -136,7 +135,11 @@ const BaseItem = ({type, item, subtype, screen}) => {
               {source_id: item.source_id, title: item.title},
             ];
           });
-          navigationRef.push('GoogleDriveViewer', {driveInfo: item});
+          navigationRef.dispatch(
+            StackActions.push('GoogleDriveViewer', {
+              driveInfo: item,
+            }),
+          );
         }, 0);
       });
     } else {
@@ -203,10 +206,10 @@ const BaseItem = ({type, item, subtype, screen}) => {
 
   const handleMediaNotePress = useCallback(() => {
     setSelectedNote(item);
-    
-  const currentRoute = useNavigationState(
-    state => state.routes[state.index].name,
-  );
+
+    const currentRoute = useNavigationState(
+      state => state.routes[state.index].name,
+    );
 
     const targetScreen = 'BacePlayer';
     console.log('routeInfo', currentRoute);
@@ -221,11 +224,13 @@ const BaseItem = ({type, item, subtype, screen}) => {
         pauseOnStart: true,
       });
     } else {
-      navigationRef.replace(targetScreen, {
-        item: item.relatedItem,
-        currentNoteId: item.rowid,
-        pauseOnStart: true,
-      });
+      navigationRef.dispatch(
+        StackActions.replace(targetScreen, {
+          item: item.relatedItem,
+          currentNoteId: item.rowid,
+          pauseOnStart: true,
+        }),
+      );
     }
   }, [item]);
 
@@ -325,14 +330,10 @@ const BaseItem = ({type, item, subtype, screen}) => {
 
 const areEqual = (prevProps, nextProps) => {
   const prevId =
-    prevProps.item?.rowid ||
-    prevProps.item?.source_id ||
-    prevProps.item?.id;
+    prevProps.item?.rowid || prevProps.item?.source_id || prevProps.item?.id;
 
   const nextId =
-    nextProps.item?.rowid ||
-    nextProps.item?.source_id ||
-    nextProps.item?.id;
+    nextProps.item?.rowid || nextProps.item?.source_id || nextProps.item?.id;
 
   return (
     prevId === nextId &&

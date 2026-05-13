@@ -1,4 +1,4 @@
-import {useNavigation, useRoute} from '@react-navigation/native';
+import { useRoute} from '@react-navigation/native';
 import React, {useCallback, useEffect, useRef, useState} from 'react';
 import {
   ActivityIndicator,
@@ -30,6 +30,7 @@ import {saveDatatoBackend} from '../appMentorBackend/reportMgt';
 import {useNotesStore} from '../stores/useNotesStore';
 import {useShallow} from 'zustand/react/shallow';
 import {useSelectionStore} from '../stores/useSelectionStore';
+import { navigationRef } from '../handlers/navigationRef';
 // const {PipModule} = NativeModules;
 
 const isAudioFile = mimeType => {
@@ -38,7 +39,6 @@ const isAudioFile = mimeType => {
 
 const BacePlayer = () => {
   console.log('🔄🔄🔄 BacePlayer RENDERING', new Date().toISOString());
-  const navigation = useNavigation();
   const appState = useRef(AppState.currentState);
   const route = useRoute();
   const {
@@ -151,9 +151,9 @@ const BacePlayer = () => {
       hidePlayer();
     }
 
-    navigation.getParent()?.setOptions({tabBarStyle: {display: 'none'}});
+    navigationRef.getParent()?.setOptions({tabBarStyle: {display: 'none'}});
     return () => {
-      navigation.getParent()?.setOptions({tabBarStyle: {display: 'flex'}});
+      navigationRef.getParent()?.setOptions({tabBarStyle: {display: 'flex'}});
       cleanupPlayer();
       setActiveNoteId(null);
     };
@@ -365,15 +365,15 @@ const BacePlayer = () => {
     Keyboard.dismiss();
     notesSectionRef.current?.blurEditor();
     setTimeout(() => {
-      navigation.navigate('ItemNotesScreen', {showHeader: true});
+      navigationRef.navigate('ItemNotesScreen', {showHeader: true});
     }, 150);
   };
   const handleBackPress = useCallback(() => {
     setActiveItem(null);
-    if (navigation.canGoBack()) {
-      navigation.goBack();
+    if (navigationRef.canGoBack()) {
+      navigationRef.goBack();
     } else {
-      navigation.reset({
+      navigationRef.reset({
         index: 0,
         routes: [
           {
@@ -386,7 +386,7 @@ const BacePlayer = () => {
         ],
       });
     }
-  }, [navigation]);
+  }, []);
 
   // Player size management
   const hidePlayer = useCallback(() => {

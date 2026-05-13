@@ -1,22 +1,8 @@
 import {DRIVE_API_KEY} from '@env';
-import {
-  useFocusEffect,
-  useNavigation,
-  useRoute,
-} from '@react-navigation/native';
+import {StackActions, useFocusEffect, useNavigation, useRoute} from '@react-navigation/native';
 import axios from 'axios';
 import React, {useCallback, useEffect, useRef, useState} from 'react';
-import {
-  ActivityIndicator,
-  Alert,
-  FlatList,
-  InteractionManager,
-  SafeAreaView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import {ActivityIndicator, Alert, SafeAreaView, StyleSheet} from 'react-native';
 import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
 import {useAppState} from '../contexts/AppStateContext';
 import {getItemBySourceId, upsertItem} from '../database/C';
@@ -25,8 +11,9 @@ import BaseMediaListComponent from './BaseMediaListComponent';
 import {ItemTypes, ScreenTypes} from '../contexts/constants';
 import useAppStateStore from '../contexts/appStateStore';
 import AppHeader from '../components/headers/AppHeader';
-import { useMediaStore } from '../stores/useMediaStore';
-import { useShallow } from 'zustand/react/shallow';
+import {useMediaStore} from '../stores/useMediaStore';
+import {useShallow} from 'zustand/react/shallow';
+import {navigationRef} from '../handlers/navigationRef';
 
 export const fetchDriveItems = async (
   source_id,
@@ -137,21 +124,21 @@ const storeInDB = async (files, parentInternalId) => {
 };
 
 const GoogleDriveViewer = () => {
-  const navigation = useNavigation();
   const route = useRoute();
+  const navigation = useNavigation();
+
 
   const {driveInfo, folderStack: passedStack} = route.params || {};
   const {loading, setLoading} = useAppStateStore();
   const breadcrumbListRef = useRef(null);
-const {data, setData, folderStack, setFolderStack} =
-  useMediaStore(
+  const {data, setData, folderStack, setFolderStack} = useMediaStore(
     useShallow(state => ({
       data: state.data,
       setData: state.setData,
       folderStack: state.folderStack,
       setFolderStack: state.setFolderStack,
     })),
-  )
+  );
   const folderCache = useAppStateStore(state => state.folderCache);
   const setFolderCache = useAppStateStore(state => state.setFolderCache);
   const getFolderFromCache = useAppStateStore(
@@ -167,7 +154,7 @@ const {data, setData, folderStack, setFolderStack} =
           return;
         }
         if (folderStack.length > 0) {
-          handleBackPress((navigate = false));
+          handleBackPress( false);
         }
       };
       const unsubscribe = navigation.addListener(
@@ -175,7 +162,7 @@ const {data, setData, folderStack, setFolderStack} =
         onBeforeRemove,
       );
       return () => unsubscribe();
-    }, [navigation, folderStack]),
+    }, [folderStack,navigation]),
   );
 
   useFocusEffect(
@@ -220,7 +207,7 @@ const {data, setData, folderStack, setFolderStack} =
   };
 
   const doNavigation = folderId => {
-    const state = navigation.getState();
+    const state = navigationRef.getState();
     const routes = state.routes;
 
     const targetIndex = routes.findIndex(
@@ -238,8 +225,7 @@ const {data, setData, folderStack, setFolderStack} =
         if (indexInStack === -1) return prevStack;
         return prevStack.slice(0, indexInStack + 1);
       });
-
-      navigation.pop(popCount);
+      navigationRef.dispatch(StackActions.pop(popCount));
     }
   };
 
@@ -248,7 +234,7 @@ const {data, setData, folderStack, setFolderStack} =
     newStack.pop();
     setFolderStack(newStack);
     if (navigate) {
-      navigation.goBack();
+      navigationRef.goBack();
     }
   };
 
@@ -266,7 +252,7 @@ const {data, setData, folderStack, setFolderStack} =
           initialSearchActive: true,
           mode: 'items',
           sourceId: driveInfo.id,
-          initialActiveFilters:['drive_file','drive_folder']
+          initialActiveFilters: ['drive_file', 'drive_folder'],
         }}
       />
 

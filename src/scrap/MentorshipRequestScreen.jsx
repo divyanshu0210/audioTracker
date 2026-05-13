@@ -16,12 +16,11 @@ import {useAppState} from '../contexts/AppStateContext';
 import SearchBarToggle from '../appMentor/SearchBarToggle';
 import {BASE_URL} from '../appMentorBackend/userMgt';
 import NotificationList from '../appNotification/screens/NotificationList';
-import {useNavigation} from '@react-navigation/core';
 import BackButton from '../components/buttons/BackButton';
+import { navigationRef } from '../handlers/navigationRef';
 
 const MentorshipRequestScreen = () => {
   const searchBarRef = useRef();
-  const navigation = useNavigation();
 
   const [email, setEmail] = useState('');
   const [userExists, setUserExists] = useState(false);
@@ -83,7 +82,7 @@ const MentorshipRequestScreen = () => {
       const data = await res.json();
       if (res.ok) {
         closeSearchBar();
-        navigation.navigate('Home', {
+        navigationRef.navigate('Home', {
           screen: 'Notifications',
         });
         Alert.alert('Success', data.message);

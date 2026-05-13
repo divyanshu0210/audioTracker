@@ -20,7 +20,6 @@ const sourceTypeColors = {
 };
 
 const ContextHeader = ({}) => {
-  const navigation = useNavigation();
 const activeItem = useSelectionStore(
   state => state.activeItem,
 );

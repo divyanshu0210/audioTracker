@@ -68,17 +68,16 @@ import {createNativeStackNavigator} from '@react-navigation/native-stack';
 import {useSelectionStore} from './stores/useSelectionStore';
 import {useShallow} from 'zustand/react/shallow';
 import GlobalModals from './components/modals/GlobalModals';
-import { navigationRef } from './handlers/navigationRef';
+import {navigationRef} from './handlers/navigationRef';
 import GlobalOverlays from './components/modals/GlobalOverlays';
 import GlobalListeners from './handlers/GlobalLinkHandlers';
-import { track } from './utils/rerenderTracker';
+import {track} from './utils/rerenderTracker';
 
 // const Stack = createStackNavigator();
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
 
 const RootNavigator = track(function RootNavigator() {
-
   useEffect(() => {
     useBackupStore.getState().initializeEventListeners();
     return () => {
@@ -159,7 +158,11 @@ const RootNavigator = track(function RootNavigator() {
 
         <Stack.Screen name="Settings" component={SettingsScreen} />
         <Stack.Screen name="DeviceFilesView" component={DeviceFilesView} />
-        <Stack.Screen name="NotesListScreen" component={NotesListScreen} />
+        <Stack.Screen
+          name="NotesListScreen"
+          component={NotesListScreen}
+          options={{headerShown: false}}
+        />
         <Stack.Screen
           name="AssignScreen"
           component={AssignScreen}
@@ -211,7 +214,7 @@ const RootNavigator = track(function RootNavigator() {
       </Stack.Navigator>
     </>
   );
-})
+});
 
 // 🔹 Main App (Tabs)
 const MainApp = track(function MainApp() {
@@ -256,21 +259,20 @@ const MainApp = track(function MainApp() {
       )} */}
     </>
   );
-})
+});
 
 // 🔹 Home Stack Navigator (Stack inside Home)
 function HomeStack() {
-  // const navigation = useNavigation(); // <-- this is missing in your code
   // useEffect(() => {
-  //   const unsubscribe = navigation.addListener('tabPress', e => {
+  //   const unsubscribe = navigationRef.addListener('tabPress', e => {
   //     // Reset to a specific screen when Home tab is pressed
-  //     navigation.navigate('Home', {
+  //     navigationRef.navigate('Home', {
   //       screen: 'HomeScreen', // <-- name of the screen inside HomeStack
   //     });
   //   });
 
   //   return unsubscribe;
-  // }, [navigation]);
+  // }, []);
   return (
     <Stack.Navigator>
       <Stack.Screen
@@ -303,8 +305,8 @@ export default App = track(function App() {
               <RootNavigator />
               <GlobalModals />
               <GlobalBottomSheets />
-              <GlobalListeners/>
-              <GlobalOverlays/>
+              <GlobalListeners />
+              <GlobalOverlays />
 
               <Button
                 title="Debug"
@@ -326,8 +328,6 @@ export default App = track(function App() {
       )} */}
     </>
   );
-})
-
-const styles = StyleSheet.create({
-
 });
+
+const styles = StyleSheet.create({});

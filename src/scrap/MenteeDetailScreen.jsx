@@ -4,15 +4,16 @@ import ReportScreen from '../report/ReportScreen';
 import HomeTabs from '../TabScreens/HomeTabs';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import useMentorMenteeStore from '../appMentor/useMentorMenteeStore';
-import {useNavigation} from '@react-navigation/native';
 import { useAppState } from '../contexts/AppStateContext';
+import { useNavigation } from '@react-navigation/core';
 
 const Tab = createBottomTabNavigator();
 
 export default function MenteeDetailScreen() {
   const {activeMentee, setActiveMentee} = useMentorMenteeStore();
   const {setSelectedCategory} = useAppState()
-  const navigation = useNavigation();
+    const navigation = useNavigation();
+
 
   useEffect(() => {
     const unsubscribe = navigation.addListener('beforeRemove', e => {

@@ -1,9 +1,9 @@
 import { useNavigation } from "@react-navigation/core";
 import notifee, {AndroidImportance, EventType} from '@notifee/react-native';
 import { useEffect } from "react";
+import { navigationRef } from "./navigationRef";
 
 export function NotificationHandler() {
-  const navigation = useNavigation();
 
   useEffect(() => {
     const unsubscribe = notifee.onForegroundEvent(({type, detail}) => {
@@ -11,12 +11,12 @@ export function NotificationHandler() {
         type === EventType.PRESS &&
         detail.pressAction?.id === 'open-notifications'
       ) {
-        navigation.navigate('Notifications');
+        navigationRef.navigate('Notifications');
       }
     });
 
     return unsubscribe;
-  }, [navigation]);
+  }, []);
 
   return null;
 }

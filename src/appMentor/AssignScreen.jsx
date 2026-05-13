@@ -9,12 +9,13 @@ import React, {useCallback} from 'react';
 import MenteeList from './MenteeList';
 import {useAppState} from '../contexts/AppStateContext';
 import Ionicons from 'react-native-vector-icons/Ionicons';
-import {useFocusEffect, useNavigation} from '@react-navigation/core';
+import {useFocusEffect} from '@react-navigation/core';
 import useMentorMenteeStore from './useMentorMenteeStore';
 import {addCategory, addItemToCategory} from '../categories/catDB';
 import { BASE_URL } from '../appMentorBackend/userMgt';
 import { useSelectionStore } from '../stores/useSelectionStore';
 import { useShallow } from 'zustand/react/shallow';
+import { navigationRef } from '../handlers/navigationRef';
 
 const AssignScreen = () => {
 const {selectedItems, setSelectedItems, setSelectionMode} =
@@ -29,7 +30,6 @@ const {selectedItems, setSelectedItems, setSelectionMode} =
 const {userInfo} = useAppState();
   const {selectedUsers, setSelectedUsers, setUserSelectionMode} =
     useMentorMenteeStore();
-  const navigation = useNavigation();
 
   useFocusEffect(
     useCallback(() => {
@@ -70,7 +70,7 @@ const {userInfo} = useAppState();
       console.warn('Missing mentor ID, selected mentees, or videos.');
       return;
     }
-    navigation.goBack();
+    navigationRef.goBack();
     setSelectionMode(false);
     setUserSelectionMode(false);
 

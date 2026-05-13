@@ -1,4 +1,3 @@
-import {useNavigation, useRoute} from '@react-navigation/core';
 import React from 'react';
 import {SafeAreaView, StyleSheet, View} from 'react-native';
 import AddNewNoteBtn from '../../components/buttons/AddNewNoteBtn';
@@ -6,9 +5,9 @@ import PlusButtonLayout from '../../components/buttons/PlusButtonLayout ';
 import {useAppState} from '../../contexts/AppStateContext';
 import ItemNotesScreen from '../../notes/ItemNotesList';
 import ContextHeader from '../../components/headers/ContextHeader';
+import { navigationRef } from '../../handlers/navigationRef';
 
 export default function NotebookNotesScreen() {
-  const navigation= useNavigation();
 
   return (
     <SafeAreaView style={styles.safeContainer}>
@@ -20,7 +19,7 @@ export default function NotebookNotesScreen() {
         <AddNewNoteBtn
           renderItem={() => <PlusButtonLayout />}
           onNoteAdded={noteId => {
-            navigation.navigate('NotesSectionWithBack');
+            navigationRef.navigate('NotesSectionWithBack');
           }}
         />
  

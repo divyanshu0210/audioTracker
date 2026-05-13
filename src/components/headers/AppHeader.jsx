@@ -1,9 +1,9 @@
 import React from 'react';
 import {View, Text, TouchableOpacity, FlatList, StyleSheet} from 'react-native';
-import {useNavigation} from '@react-navigation/native';
 import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
 import {useAppState} from '../../contexts/AppStateContext';
 import { useSelectionStore } from '../../stores/useSelectionStore';
+import { navigationRef } from '../../handlers/navigationRef';
 
 const AppHeader = ({
   title,
@@ -19,7 +19,6 @@ const AppHeader = ({
   enableSearch = false,
   searchParams = null,
 }) => {
-  const navigation = useNavigation();
 
 const selectionMode = useSelectionStore(
   state => state.selectionMode,
@@ -31,7 +30,7 @@ const selectionMode = useSelectionStore(
     <View style={[styles.container, headerStyle]}>
       {showBack && (
         <TouchableOpacity
-          onPress={onBackPress || navigation.goBack}
+          onPress={onBackPress || navigationRef.goBack}
           style={styles.backButton}>
           <MaterialIcons name="arrow-back" size={24} color="#222" />
         </TouchableOpacity>
@@ -87,7 +86,7 @@ const selectionMode = useSelectionStore(
         {enableSearch && (
           <TouchableOpacity
             onPress={() =>
-              navigation.navigate('SearchWrapper', {
+              navigationRef.navigate('SearchWrapper', {
                 ...searchParams, // your search filters, query etc.
                 title: breadcrumbs? breadcrumbs[breadcrumbs.length-1].title:title, // for placeholder text
               })

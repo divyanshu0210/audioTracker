@@ -4,15 +4,14 @@ import NotificationButton from '../../appNotification/components/NotificationBut
 import MentorMenteeDrawer from '../../appMentor/MentorMenteeDrawer';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
 import Ionicons from 'react-native-vector-icons/Ionicons';
-import {useNavigation} from '@react-navigation/core';
 import CustomDropdown from '../../components/dropdowns/CustomDropdown';
 import {useAppState} from '../../contexts/AppStateContext';
 import useMentorMenteeStore from '../../appMentor/useMentorMenteeStore';
 import { useSelectionStore } from '../../stores/useSelectionStore';
 import { useShallow } from 'zustand/react/shallow';
+import { navigationRef } from '../../handlers/navigationRef';
 
 const MainHeader = ({}) => {
-  const navigation = useNavigation();
 const {
   categories,
   selectedCategory,
@@ -50,7 +49,7 @@ const {userInfo} = useAppState();
               <>
                 <TouchableOpacity
                   onPress={() => {
-                    navigation.navigate('SearchWrapper', {
+                    navigationRef.navigate('SearchWrapper', {
                       initialSearchActive: true,
                       mode: 'all',
                     });
@@ -60,7 +59,7 @@ const {userInfo} = useAppState();
                 </TouchableOpacity>
                 <TouchableOpacity
                   onPress={() => {
-                    navigation.navigate('ProfileTab');
+                    navigationRef.navigate('ProfileTab');
                   }}
                   style={styles.iconButton}>
                   {/* <MaterialCommunityIcons

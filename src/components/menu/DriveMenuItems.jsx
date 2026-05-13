@@ -1,4 +1,3 @@
-import {useNavigation} from '@react-navigation/native';
 import React, {useState} from 'react';
 import {Alert, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
 import RNFS from 'react-native-fs';
@@ -9,9 +8,9 @@ import {softDeleteItem} from '../../database/D';
 import {updateItemFields} from '../../database/U';
 import { useMediaStore } from '../../stores/useMediaStore';
 import { useShallow } from 'zustand/react/shallow';
+import { navigationRef } from '../../handlers/navigationRef';
 
 const DriveMenuItems = ({item, screen, hideMenu}) => {
-  const navigation = useNavigation();
 const {
   setDriveLinksList,
   setDeviceFiles,
@@ -117,7 +116,7 @@ const {
         <TouchableOpacity
           onPress={() => {
             hideMenu();
-            navigation.navigate('GDriveFolderOverview', {
+            navigationRef.navigate('GDriveFolderOverview', {
               driveLink: item.source_id,
             });
           }}>

@@ -1,12 +1,11 @@
 import {Image, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
 import React from 'react';
-import {useNavigation} from '@react-navigation/core';
 import Ionicons from 'react-native-vector-icons/Ionicons';
-import { useAppState } from '../../contexts/AppStateContext';
+import {useAppState} from '../../contexts/AppStateContext';
+import {navigationRef} from '../../handlers/navigationRef';
 
 const ProfileHeader = () => {
   const {userInfo} = useAppState();
-  const navigation = useNavigation();
 
   return (
     <View style={styles.headerContainer}>
@@ -16,21 +15,20 @@ const ProfileHeader = () => {
           <Text style={styles.nameText}>{userInfo?.name ?? ''}</Text>
           <Text style={styles.emailText}>{userInfo?.email ?? ''}</Text>
         </View>
-        <View style={{flexDirection:'row',gap:15}}>
-
-        {/* <TouchableOpacity
+        <View style={{flexDirection: 'row', gap: 15}}>
+          {/* <TouchableOpacity
           onPress={() => {
             navigation.navigate('MyReportScreen');
           }}>
            <Ionicons name="stats-chart" size={20} color="#000" />
         </TouchableOpacity>  */}
-        <TouchableOpacity
-          onPress={() => {
-            navigation.navigate('Settings');
-          }}>
-          <Ionicons name="settings-sharp" size={22} color="#333" />
-        </TouchableOpacity>
-            </View>
+          <TouchableOpacity
+            onPress={() => {
+              navigationRef.navigate('Settings');
+            }}>
+            <Ionicons name="settings-sharp" size={22} color="#333" />
+          </TouchableOpacity>
+        </View>
       </View>
     </View>
   );

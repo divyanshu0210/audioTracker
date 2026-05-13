@@ -17,9 +17,11 @@ import {useSelectionStore} from '../stores/useSelectionStore';
 import {useNotesStore} from '../stores/useNotesStore';
 import {navigationRef} from '../handlers/navigationRef';
 import {useShallow} from 'zustand/react/shallow';
-import {StackActions, useNavigationState} from '@react-navigation/core';
+import {StackActions, useNavigationState, useRoute} from '@react-navigation/core';
 
 const BaseItem = ({type, item, subtype, screen, onFolderPress}) => {
+   const route = useRoute();
+  const currentRoute = route.name;
   const {setFolderStack} = useMediaStore(
     useShallow(state => ({
       setFolderStack: state.setFolderStack,
@@ -207,11 +209,6 @@ const BaseItem = ({type, item, subtype, screen, onFolderPress}) => {
 
   const handleMediaNotePress = useCallback(() => {
     setSelectedNote(item);
-
-    const currentRoute = useNavigationState(
-      state => state.routes[state.index].name,
-    );
-
     const targetScreen = 'BacePlayer';
     console.log('routeInfo', currentRoute);
     if (currentRoute === targetScreen || currentRoute === 'ItemNotesScreen') {

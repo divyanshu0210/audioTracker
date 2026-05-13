@@ -27,10 +27,10 @@ const HomeTabs = ({categoryId}) => {
   const setItems = useMediaStore(state => state.setItems);
   const setDeviceFiles = useMediaStore(state => state.setDeviceFiles);
   const setNotebooks = useNotesStore(state => state.setNotebooks);
+  const setMainNotesList = useNotesStore(state => state.setMainNotesList);
 
   const isRestoring = useRestoreStore(state => state.isRestoring);
-   const setLoadingState = useLoadingStore(state => state.setLoadingState); // Changed
-
+  const setLoadingState = useLoadingStore(state => state.setLoadingState); // Changed
 
   // Data loading functions
   const loadFilesFromDB = useCallback(
@@ -131,6 +131,7 @@ const HomeTabs = ({categoryId}) => {
     setItems([]);
     setDeviceFiles([]);
     setNotebooks([]);
+    setMainNotesList([]);
     try {
       await Promise.all([
         loadMainYTFromDB(false),

@@ -1,5 +1,5 @@
 import React, {useCallback, useEffect, useRef, useState} from 'react';
-import {ActivityIndicator, SafeAreaView, StyleSheet} from 'react-native';
+import {ActivityIndicator, SafeAreaView, StyleSheet, unstable_batchedUpdates} from 'react-native';
 import NotesListComponent from './notesListing/NotesListComponent';
 import {useAppState} from '../contexts/AppStateContext';
 import {ScreenTypes} from '../contexts/constants';
@@ -17,10 +17,13 @@ const AllNotesScreen = ({categoryId}) => {
 
   useEffect(() => {
     loadInitialData();
-  }, [loadInitialData]);
+  }, [loadInitialData,categoryId]);
 
   const loadInitialData = useCallback(async () => {
-    setLoadingState('mainNotes', true);
+    unstable_batchedUpdates(() => {
+      setMainNotesList([]);
+      setLoadingState('mainNotes', true);
+    });
     try {
       const limit = 20;
       let notes = [];

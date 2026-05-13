@@ -193,6 +193,7 @@ const GoogleDriveViewer = () => {
   // See note below about how BaseItem calls this.
   const openFolder = useCallback(
     folder => {
+    setCurrentItems([]); // Clear current items immediately for better UX
       // folder = { source_id, title, mimeType, ... }
       setFolderStack(prev => {
         const last = prev[prev.length - 1];
@@ -237,6 +238,7 @@ const GoogleDriveViewer = () => {
   // ── Breadcrumb jump: tap any ancestor folder ───────────────────────────────
   const handleBreadcrumbPress = useCallback(
   folderId => {
+    setCurrentItems([]); // Clear current items immediately for better UX
     const targetIndex = folderStack.findIndex(f => f.source_id === folderId);
     if (targetIndex === -1 || targetIndex === folderStack.length - 1) return;
 

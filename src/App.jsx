@@ -3,7 +3,7 @@ import {createBottomTabNavigator} from '@react-navigation/bottom-tabs';
 import {createDrawerNavigator} from '@react-navigation/drawer';
 import {NavigationContainer, useNavigation} from '@react-navigation/native';
 import {createStackNavigator} from '@react-navigation/stack';
-import React, {useEffect} from 'react';
+import React, {useEffect, useRef} from 'react';
 import {
   ActivityIndicator,
   Button,
@@ -67,44 +67,17 @@ import ItemNotesScreen from './notes/ItemNotesList';
 import {createNativeStackNavigator} from '@react-navigation/native-stack';
 import {useSelectionStore} from './stores/useSelectionStore';
 import {useShallow} from 'zustand/react/shallow';
+import GlobalModals from './components/modals/GlobalModals';
+import { navigationRef } from './handlers/navigationRef';
+import GlobalOverlays from './components/modals/GlobalOverlays';
+import GlobalListeners from './handlers/GlobalLinkHandlers';
+import { track } from './utils/rerenderTracker';
 
 // const Stack = createStackNavigator();
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
 
-const emitter = new NativeEventEmitter(NativeModules.BackupModule);
-
-function RootNavigator() {
-  useLinkHandler(); // Now has access to navigation + context
-  useSharedContentHandler();
-  const {
-    createCategoryModalVisible,
-    setCreateCategoryModalVisible,
-    setCategories,
-  } = useSelectionStore(
-    useShallow(state => ({
-      createCategoryModalVisible: state.createCategoryModalVisible,
-      setCreateCategoryModalVisible: state.setCreateCategoryModalVisible,
-      setCategories: state.setCategories,
-    })),
-  );
-  const navigation = useNavigation();
-  // debugAsyncStorage()
-
-  useEffect(() => {
-    // Handle foreground notification press events
-    const unsubscribe = notifee.onForegroundEvent(({type, detail}) => {
-      if (
-        type === EventType.PRESS &&
-        detail.pressAction?.id === 'open-notifications'
-      ) {
-        // Navigate to NotificationList screen
-        navigation.navigate('Notifications');
-      }
-    });
-
-    return () => unsubscribe(); // Cleanup the event listener
-  }, [navigation]);
+const RootNavigator = track(function RootNavigator() {
 
   useEffect(() => {
     useBackupStore.getState().initializeEventListeners();
@@ -177,7 +150,7 @@ function RootNavigator() {
             contentStyle: {
               backgroundColor: 'white',
             },
-             sheetCornerRadius: 20,
+            sheetCornerRadius: 20,
             sheetLargestUndimmedDetentIndex: 0,
             sheetExpandsWhenScrolledToEdge: false,
             keyboardHandlingEnabled: true,
@@ -236,26 +209,14 @@ function RootNavigator() {
           options={{headerShown: false, unmountOnBlur: true}}
         />
       </Stack.Navigator>
-
-      <CreateCategoryModal
-        visible={createCategoryModalVisible}
-        onClose={() => setCreateCategoryModalVisible(false)}
-        onCategoryCreated={newCat => {
-          setCategories(prev => [newCat, ...prev]);
-        }}
-      />
-
-      <CategorySelectionModal />
     </>
   );
-}
+})
 
 // 🔹 Main App (Tabs)
-function MainApp({route}) {
-  const user = route.params?.user; // Get user data
-  const {checkingAvailableBackup} = useRestoreStore();
+const MainApp = track(function MainApp() {
+  // const {checkingAvailableBackup} = useRestoreStore();
 
-  console.log(route);
   return (
     <>
       <MainHeader />
@@ -269,14 +230,13 @@ function MainApp({route}) {
         }}>
         <Tab.Screen
           name="Home"
+          component={HomeStack}
           options={{
             tabBarIcon: () => (
               <MaterialCommunityIcons name="home" size={25} color="#000" />
             ),
-          }}>
-          {/* {(props) => <HomeDrawer {...props} user={user} />}  */}
-          {props => <HomeStack {...props} user={user} />}
-        </Tab.Screen>
+          }}
+        />
         <Tab.Screen
           name="Report"
           component={ReportTab}
@@ -286,83 +246,47 @@ function MainApp({route}) {
             ),
           }}
         />
-
-        {/* <Tab.Screen
-            name="Category"
-            component={CategoriesStack}
-            options={{
-              tabBarIcon: () => (
-                <MaterialCommunityIcons
-                  name="account-circle"
-                  size={26}
-                  color="#000"
-                />
-              ),
-            }}
-          /> */}
       </Tab.Navigator>
 
-      <GlobalBottomSheets />
-      {checkingAvailableBackup && (
+      {/* {checkingAvailableBackup && (
         <View style={styles.overlay}>
           <ActivityIndicator size="large" color="#fff" />
           <Text style={styles.loadingText}>Checking for backups..</Text>
         </View>
-      )}
+      )} */}
     </>
   );
-}
+})
 
 // 🔹 Home Stack Navigator (Stack inside Home)
-function HomeStack({user}) {
-  const navigation = useNavigation(); // <-- this is missing in your code
-  useEffect(() => {
-    const unsubscribe = navigation.addListener('tabPress', e => {
-      // Reset to a specific screen when Home tab is pressed
-      navigation.navigate('Home', {
-        screen: 'HomeScreen', // <-- name of the screen inside HomeStack
-      });
-    });
+function HomeStack() {
+  // const navigation = useNavigation(); // <-- this is missing in your code
+  // useEffect(() => {
+  //   const unsubscribe = navigation.addListener('tabPress', e => {
+  //     // Reset to a specific screen when Home tab is pressed
+  //     navigation.navigate('Home', {
+  //       screen: 'HomeScreen', // <-- name of the screen inside HomeStack
+  //     });
+  //   });
 
-    return unsubscribe;
-  }, [navigation]);
-  return (
-    <Stack.Navigator>
-      <Stack.Screen name="HomeScreen" options={{headerShown: false}}>
-        {props => <HomeScreen {...props} user={user} />}
-      </Stack.Screen>
-    </Stack.Navigator>
-  );
-}
-
-const CategoriesStack = () => {
-  const navigation = useNavigation(); // <-- this is missing in your code
-  useEffect(() => {
-    const unsubscribe = navigation.addListener('tabPress', e => {
-      // Reset to a specific screen when Home tab is pressed
-      navigation.navigate('Category', {
-        screen: 'ProfileTab', // <-- name of the screen inside HomeStack
-      });
-    });
-
-    return unsubscribe;
-  }, [navigation]);
+  //   return unsubscribe;
+  // }, [navigation]);
   return (
     <Stack.Navigator>
       <Stack.Screen
-        name="ProfileTab"
-        component={ProfileTab}
+        name="HomeScreen"
+        component={HomeScreen}
         options={{headerShown: false}}
       />
     </Stack.Navigator>
   );
-};
+}
 
 // 🔹 Root Stack Navigator (Login + MainApp)
-export default function App() {
-  const {loading} = useDbStore();
-  const {backupRunning, syncRunning} = useBackupStore();
-  const isBackupInProgress = backupRunning || syncRunning;
+export default App = track(function App() {
+  // const {loading} = useDbStore();
+  // const {backupRunning, syncRunning} = useBackupStore();
+  // const isBackupInProgress = backupRunning || syncRunning;
 
   // useEffect(() => {
   //   resetDatabase();
@@ -375,8 +299,13 @@ export default function App() {
       <AppStateProvider>
         <GestureHandlerRootView>
           <MenuProvider>
-            <NavigationContainer>
+            <NavigationContainer ref={navigationRef}>
               <RootNavigator />
+              <GlobalModals />
+              <GlobalBottomSheets />
+              <GlobalListeners/>
+              <GlobalOverlays/>
+
               <Button
                 title="Debug"
                 onPress={() => {
@@ -387,33 +316,18 @@ export default function App() {
         </GestureHandlerRootView>
       </AppStateProvider>
 
-      {loading && (
+      {/* {loading && (
         <View style={styles.overlay}>
           <ActivityIndicator size="large" color="#fff" />
           <Text style={styles.loadingText}>
             {isBackupInProgress ? 'Saving your Progress' : 'Signing out...'}
           </Text>
         </View>
-      )}
+      )} */}
     </>
   );
-}
+})
 
 const styles = StyleSheet.create({
-  overlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    zIndex: 1000,
-  },
-  loadingText: {
-    marginTop: 10,
-    fontSize: 16,
-    color: '#fff',
-  },
+
 });

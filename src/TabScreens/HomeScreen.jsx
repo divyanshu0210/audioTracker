@@ -12,23 +12,21 @@ import {
 import {isAssignmentPending} from '../appMentorBackend/assignmentsMgt';
 import {BASE_URL} from '../appMentorBackend/userMgt';
 import HomeTabs from './HomeTabs';
-import { useSelectionStore } from '../stores/useSelectionStore';
-import { useShallow } from 'zustand/react/shallow';
+import {useSelectionStore} from '../stores/useSelectionStore';
+import {useShallow} from 'zustand/react/shallow';
+import { track } from '../utils/rerenderTracker';
 
 const HomeScreen = () => {
- const {
-  setCategories,
-  selectedCategory,
-  setSelectedCategory,
-} = useSelectionStore(
-  useShallow(state => ({
-    setCategories: state.setCategories,
-    selectedCategory: state.selectedCategory,
-    setSelectedCategory: state.setSelectedCategory,
-  })),
-);
+  const {setCategories, selectedCategory, setSelectedCategory} =
+    useSelectionStore(
+      useShallow(state => ({
+        setCategories: state.setCategories,
+        selectedCategory: state.selectedCategory,
+        setSelectedCategory: state.setSelectedCategory,
+      })),
+    );
 
-const {userInfo} = useAppState();
+  const {userInfo} = useAppState();
 
   const {setMentors, setMentees, activeMentee, activeMentor} =
     useMentorMenteeStore();
@@ -84,7 +82,7 @@ const {userInfo} = useAppState();
   );
 };
 
-export default HomeScreen;
+export default track(HomeScreen);
 
 const styles = StyleSheet.create({
   container: {

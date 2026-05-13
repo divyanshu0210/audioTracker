@@ -1,17 +1,23 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import {SectionList, StyleSheet, Text, View} from 'react-native';
 import {useAppState} from '../contexts/AppStateContext';
 import DeviceItem from './DeviceItem';
 import {groupItemsByDate} from './utils/grouppByDate';
 import BaseMediaListComponent from './BaseMediaListComponent';
 import {ItemTypes} from '../contexts/constants';
+import { useMediaStore } from '../stores/useMediaStore';
+import useAppStateStore from '../contexts/appStateStore';
 
-const DeviceFilesView = ({data,onRefresh, loading}) => {
+const DeviceFilesView = ({onRefresh}) => {
   const emptyText = 'Press + to Add Media from device';
+  const data = useMediaStore(state => state.validDeviceFiles);
+  const loading = useAppStateStore(state => state.homeTabLoading);
+
+    const memoizedData = useMemo(() => data, [data]);
 
   return (
     <BaseMediaListComponent
-      mediaList={data}
+      mediaList={memoizedData}
       emptyText={emptyText}
       onRefresh={onRefresh}
       loading={loading}
@@ -22,4 +28,4 @@ const DeviceFilesView = ({data,onRefresh, loading}) => {
 
 const styles = StyleSheet.create({});
 
-export default DeviceFilesView;
+export default  React.memo(DeviceFilesView);

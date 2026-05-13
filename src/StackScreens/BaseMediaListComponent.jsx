@@ -1,22 +1,19 @@
-import React, {useEffect} from 'react';
+// BaseMediaListComponent.js
+import React, {useCallback, useMemo, useRef} from 'react';
 import {
   ActivityIndicator,
   SectionList,
   StyleSheet,
   Text,
-  TouchableOpacity,
   View,
 } from 'react-native';
 import {groupItemsByDate} from './utils/grouppByDate';
 import BaseItem from './BaseItem';
-import Ionicons from 'react-native-vector-icons/Ionicons';
-import Fontisto from 'react-native-vector-icons/Fontisto';
-import {useAppState} from '../contexts/AppStateContext';
-import {useNavigation} from '@react-navigation/core';
 import {convertTypetoItemType, ScreenTypes} from '../contexts/constants';
 import NewAssignmentsBtn from '../components/buttons/NewAssignmentsBtn';
-import { useSelectionStore } from '../stores/useSelectionStore';
-import { useShallow } from 'zustand/react/shallow';
+import {useSelectionStore} from '../stores/useSelectionStore';
+import {useShallow} from 'zustand/react/shallow';
+import SelectionHeader from './SelectionHeader';
 
 export const getItemId = item =>
   item?.rowid || item?.source_id || item?.id?.toString();
@@ -33,127 +30,50 @@ const BaseMediaListComponent = ({
   screen = ScreenTypes.MAIN,
   useSections = true,
 }) => {
-const {
-  selectedItems,
-  setSelectedItems,
-  selectionMode,
-  setSelectionMode,
-} = useSelectionStore(
-  useShallow(state => ({
-    selectedItems: state.selectedItems,
-    setSelectedItems: state.setSelectedItems,
-    selectionMode: state.selectionMode,
-    setSelectionMode: state.setSelectionMode,
-  })),
-);
-  const navigation = useNavigation();
+  const renderCount = useRef(0);
+  renderCount.current++;
+  console.log(
+    `🎯 -----------------Render BASELIST COMPONENT #${renderCount.current}---------------------------------------`,
+    type,
+  );
 
-  const isSelected = (id, listType) =>
-    selectedItems.some(i => i.id === id && i.type === listType);
+  const renderItem = useCallback(
+    ({item}) => {
+      const subtype = item.type;
+      const renderType = type ? type : convertTypetoItemType(item.type);
 
-  const toggleSelection = (id, listType, subtype) => {
-    setSelectedItems(prev =>
-      prev.some(i => i.id === id && i.type === listType)
-        ? prev.filter(i => !(i.id === id && i.type === listType))
-        : [...prev, {id, type: listType, subtype}],
-    );
-  };
+      return (
+        <BaseItem
+          type={renderType}
+          item={item}
+          subtype={subtype}
+          screen={screen}
+        />
+      );
+    },
+    [type, screen],
+  );
 
-  const cancelSelection = () => {
-    setSelectedItems([]);
-    setSelectionMode(false);
-  };
+  const sections = useMemo(() => groupItemsByDate(mediaList), [mediaList]);
 
-  const handleForward = () => {
-    console.log('Selected Items:', selectedItems);
-    navigation.navigate('AssignScreen', {selectedItems});
-  };
-
-  const renderItem = ({item}) => {
-    const id = getItemId(item);
-    const subtype = item.type; // ← real media/assignment type from data
-    return (
-      <BaseItem
-        item={item}
-        type={type ? type : convertTypetoItemType(item.type)} // list type
-        isSelected={selectionMode && isSelected(id, type)}
-        onSelect={
-          selectionMode ? () => toggleSelection(id, type, subtype) : undefined
-        }
-        onLongPress={() => {
-          if (!selectionMode) {
-            setSelectedItems([{id, type, subtype}]);
-            setSelectionMode(true);
-          }
-        }}
-        screen={screen}
-      />
-    );
-  };
-
-  // All items in *this* list (used for Select All / Unselect All)
-  const allItemsInThisList = mediaList.map(item => ({
-    id: getItemId(item),
-    type, // ← the prop type (screen/list type)
-    subtype: item.type, // ← actual item type
-  }));
+  const allItemsInThisList = useMemo(
+    () =>
+      mediaList.map(item => ({
+        id: getItemId(item),
+        type,
+        subtype: item.type,
+      })),
+    [mediaList, type],
+  );
 
   return (
     <View style={styles.container}>
-      {selectionMode && (
-        <View style={styles.selectionHeader}>
-          <View style={styles.leftSection}>
-            <Text style={styles.headerTitle}>{selectedItems.length}</Text>
-            <TouchableOpacity
-              onPress={() => {
-                const currentSelectedOfThisType = selectedItems.filter(
-                  i => i.type === type,
-                );
-                const isAllSelected =
-                  currentSelectedOfThisType.length ===
-                  allItemsInThisList.length;
-
-                if (isAllSelected) {
-                  // Unselect only items belonging to this list type
-                  setSelectedItems(prev => prev.filter(i => i.type !== type));
-                } else {
-                  // Add missing items of this list type
-                  const newItems = allItemsInThisList.filter(
-                    ai =>
-                      !selectedItems.some(
-                        si => si.id === ai.id && si.type === ai.type,
-                      ),
-                  );
-                  setSelectedItems(prev => [...prev, ...newItems]);
-                }
-              }}>
-              <Text style={styles.headerButton}>
-                {selectedItems.filter(i => i.type === type).length ===
-                allItemsInThisList.length
-                  ? 'Unselect All'
-                  : 'Select All'}
-              </Text>
-            </TouchableOpacity>
-          </View>
-
-          <View style={styles.rightSection}>
-            <TouchableOpacity onPress={handleForward}>
-              <Fontisto name="share-a" size={23} color="#007AFF" />
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              onPress={cancelSelection}
-              style={styles.iconButton}>
-              <Ionicons name="close-circle-outline" size={26} color="#007AFF" />
-            </TouchableOpacity>
-          </View>
-        </View>
-      )}
+      <SelectionHeader type={type} allItemsInThisList={allItemsInThisList} />
 
       <NewAssignmentsBtn />
 
       <SectionList
-        sections={groupItemsByDate(mediaList)}
+        sections={sections}
         keyExtractor={item => getItemId(item)}
         renderItem={renderItem}
         renderSectionHeader={({section: {title}}) =>
@@ -176,7 +96,7 @@ const {
   );
 };
 
-export default BaseMediaListComponent;
+export default React.memo(BaseMediaListComponent);
 
 const styles = StyleSheet.create({
   container: {
@@ -201,37 +121,5 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 20,
     color: '#888',
-  },
-  selectionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 14,
-    backgroundColor: '#f8f8f8',
-    borderBottomWidth: 1,
-    borderBottomColor: '#ddd',
-  },
-  leftSection: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  rightSection: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  headerButton: {
-    color: '#007AFF',
-    fontSize: 16,
-  },
-  headerTitle: {
-    fontWeight: 'bold',
-    fontSize: 16,
-    color: '#444',
-  },
-  iconButton: {
-    paddingHorizontal: 4,
   },
 });

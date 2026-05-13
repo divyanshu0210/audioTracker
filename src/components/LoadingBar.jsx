@@ -1,9 +1,11 @@
 // components/InsertingProgressBar.jsx
 import React, { useEffect, useRef } from 'react';
 import { Animated, StyleSheet, View } from 'react-native';
+import useDbStore from '../database/dbStore';
 
-export const LoadingBar = ({ isInserting, speed = 1400 }) => {
+export const LoadingBar = ({ speed = 1400 }) => {
   const translateX = useRef(new Animated.Value(-100)).current;
+  const isInserting = useDbStore(state => state.inserting);
 
   useEffect(() => {
     if (isInserting) {

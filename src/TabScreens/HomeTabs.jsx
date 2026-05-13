@@ -14,9 +14,10 @@ import {useFocusEffect} from '@react-navigation/core';
 import {LoadingBar} from '../components/LoadingBar';
 import useRestoreStore from '../backupRestore/restoreStore';
 import {useMediaStore} from '../stores/useMediaStore';
-import {useShallow} from 'zustand/react/shallow';
 import {useSelectionStore} from '../stores/useSelectionStore';
 import {useNotesStore} from '../stores/useNotesStore';
+import useAppStateStore from '../contexts/appStateStore';
+import {track} from '../utils/rerenderTracker';
 
 const Tab = createMaterialTopTabNavigator();
 
@@ -27,88 +28,101 @@ const HomeTabs = ({categoryId}) => {
   const setDeviceFiles = useMediaStore(state => state.setDeviceFiles);
   const setNotebooks = useNotesStore(state => state.setNotebooks);
 
-  //States
-  const {driveLinksList, items, validDeviceFiles, deviceFiles} = useMediaStore(
-    useShallow(state => ({
-      driveLinksList: state.driveLinksList,
-      items: state.items,
-      validDeviceFiles: state.validDeviceFiles,
-      deviceFiles: state.deviceFiles,
-    })),
-  );
-  const notebooks = useNotesStore(state => state.notebooks);
-  const homeReloadKey = useSelectionStore(state => state.homeReloadKey);
-
-  const inserting = useDbStore(state => state.inserting);
   const isRestoring = useRestoreStore(state => state.isRestoring);
-
-  const [loading, setLoading] = useState(true);
+  const setLoading = useAppStateStore(state => state.setHomeTabLoading);
 
   // Data loading functions
-  const loadFilesFromDB = async (loader = true) => {
-    loader && setLoading(true);
-    try {
-      const files = categoryId
-        ? await getCategoryData(categoryId, ['device_file'])
-        : await getChildrenByParent(null, 'device_file');
-      setDeviceFiles(files || []);
-    } catch (err) {
-      console.error('Error loading files from DB:', err);
-    } finally {
-      loader && setLoading(false);
-    }
-  };
+  const loadFilesFromDB = useCallback(
+    async (loader = true) => {
+      loader && setLoading(true);
+      try {
+        const files = categoryId
+          ? await getCategoryData(categoryId, ['device_file'])
+          : await getChildrenByParent(null, 'device_file');
+        setDeviceFiles(files || []);
+      } catch (err) {
+        console.error('Error loading files from DB:', err);
+      } finally {
+        loader && setLoading(false);
+      }
+    },
+    [categoryId],
+  );
 
-  const loadMainYTFromDB = async (loader = true) => {
-    loader && setLoading(true);
-    try {
-      const storedItems = categoryId
-        ? await getCategoryData(categoryId, [
-            'youtube_video',
-            'youtube_playlist',
-          ])
-        : await getChildrenByParent(null, [
-            'youtube_playlist',
-            'youtube_video',
-          ]);
+  const loadMainYTFromDB = useCallback(
+    async (loader = true) => {
+      loader && setLoading(true);
+      try {
+        const storedItems = categoryId
+          ? await getCategoryData(categoryId, [
+              'youtube_video',
+              'youtube_playlist',
+            ])
+          : await getChildrenByParent(null, [
+              'youtube_playlist',
+              'youtube_video',
+            ]);
 
-      setItems(storedItems || []);
-    } catch (error) {
-      console.error('Error loading folders from DB:', error);
-    } finally {
-      loader && setLoading(false);
-    }
-  };
+        setItems(storedItems || []);
+      } catch (error) {
+        console.error('Error loading folders from DB:', error);
+      } finally {
+        loader && setLoading(false);
+      }
+    },
+    [categoryId],
+  );
 
-  const loadDriveItemsfromDB = async (loader = true) => {
-    loader && setLoading(true);
-    try {
-      const storedItems = categoryId
-        ? await getCategoryData(categoryId, ['drive_folder', 'drive_file'])
-        : await getChildrenByParent(null, ['drive_folder', 'drive_file']);
+  const loadDriveItemsfromDB = useCallback(
+    async (loader = true) => {
+      loader && setLoading(true);
+      try {
+        const storedItems = categoryId
+          ? await getCategoryData(categoryId, ['drive_folder', 'drive_file'])
+          : await getChildrenByParent(null, ['drive_folder', 'drive_file']);
 
-      setDriveLinksList(storedItems || []);
-      console.log('Drive items loaded from DB:', storedItems);
-    } catch (error) {
-      console.error('Error loading folders from DB:', error);
-    } finally {
-      loader && setLoading(false);
-    }
-  };
+        setDriveLinksList(storedItems || []);
+      } catch (error) {
+        console.error('Error loading folders from DB:', error);
+      } finally {
+        loader && setLoading(false);
+      }
+    },
+    [categoryId],
+  );
 
-  const loadNotebooks = async (loader = true) => {
-    loader && setLoading(true);
-    try {
-      const storedItems = categoryId
-        ? await getCategoryData(categoryId, ['notebook'])
-        : await fetchNotebooks(setNotebooks);
-      setNotebooks(storedItems || []);
-    } catch (error) {
-      console.error('Error fetching notebooks:', error);
-    } finally {
-      loader && setLoading(false);
-    }
-  };
+  const loadNotebooks = useCallback(
+    async (loader = true) => {
+      loader && setLoading(true);
+      try {
+        const storedItems = categoryId
+          ? await getCategoryData(categoryId, ['notebook'])
+          : await fetchNotebooks(setNotebooks);
+        setNotebooks(storedItems || []);
+      } catch (error) {
+        console.error('Error fetching notebooks:', error);
+      } finally {
+        loader && setLoading(false);
+      }
+    },
+    [categoryId],
+  );
+
+  const refreshYouTube = useCallback(() => {
+    loadMainYTFromDB(true);
+  }, [loadMainYTFromDB]);
+
+  const refreshDevice = useCallback(() => {
+    loadFilesFromDB(true);
+  }, [loadFilesFromDB]);
+
+  const refreshDrive = useCallback(() => {
+    loadDriveItemsfromDB(true);
+  }, [loadDriveItemsfromDB]);
+
+  const refreshNotebooks = useCallback(() => {
+    loadNotebooks(true);
+  }, [loadNotebooks]);
 
   const loadAllData = useCallback(async () => {
     setLoading(true);
@@ -134,12 +148,12 @@ const HomeTabs = ({categoryId}) => {
     if (!isRestoring) {
       loadAllData();
     }
-  }, [categoryId, isRestoring, homeReloadKey]);
+  }, [categoryId, isRestoring]);
 
   // Tab content wrapper
   const renderTabContent = (ScreenComponent, props) => (
     <>
-      <LoadingBar isInserting={inserting} />
+      <LoadingBar />
       <ScreenComponent {...props} />
     </>
   );
@@ -165,9 +179,7 @@ const HomeTabs = ({categoryId}) => {
           <Tab.Screen name="YouTube">
             {() =>
               renderTabContent(MainYouTubeView, {
-                loading,
-                onRefresh: loadMainYTFromDB,
-                data: items,
+                onRefresh: refreshYouTube,
               })
             }
           </Tab.Screen>
@@ -175,9 +187,7 @@ const HomeTabs = ({categoryId}) => {
           <Tab.Screen name="Device">
             {() =>
               renderTabContent(DeviceFilesView, {
-                loading,
-                onRefresh: loadFilesFromDB,
-                data: validDeviceFiles,
+                onRefresh: refreshDevice,
               })
             }
           </Tab.Screen>
@@ -185,9 +195,7 @@ const HomeTabs = ({categoryId}) => {
           <Tab.Screen name="Drive">
             {() =>
               renderTabContent(DriveFilesView, {
-                loading,
-                onRefresh: loadDriveItemsfromDB,
-                data: driveLinksList,
+                onRefresh: refreshDrive,
               })
             }
           </Tab.Screen>
@@ -195,9 +203,7 @@ const HomeTabs = ({categoryId}) => {
           <Tab.Screen name="Notebooks">
             {() =>
               renderTabContent(NotebookScreen, {
-                loading,
-                onRefresh: loadNotebooks,
-                data: notebooks,
+                onRefresh: refreshNotebooks,
               })
             }
           </Tab.Screen>
@@ -214,4 +220,4 @@ const HomeTabs = ({categoryId}) => {
   );
 };
 
-export default HomeTabs;
+export default track(HomeTabs);

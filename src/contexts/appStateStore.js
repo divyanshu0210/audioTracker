@@ -3,8 +3,10 @@ import {create} from 'zustand';
 
 const useAppStateStore = create((set, get) => ({
   loading: false,
+  homeTabLoading: false,
   folderCache: {},
   setLoading: isLoading => set({loading: isLoading}),
+  setHomeTabLoading: isLoading => set({homeTabLoading: isLoading}),
   setFolderCache: (folderId, items) =>
     set(state => ({
       folderCache: {

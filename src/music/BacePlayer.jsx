@@ -37,6 +37,32 @@ const isAudioFile = mimeType => {
   return mimeType.startsWith('audio/');
 };
 
+const NoteSection = React.memo(
+  ({editorRef, source_type, playerRef, captureVLCScreenshot, showPlayerMinimized, isHidden}) => {
+    const activeNoteId = useNotesStore(state => state.activeNoteId);
+    console.log('🔄 NoteSection RENDERING', new Date().toISOString());
+    return (
+      <View style={{flex: 1, marginTop: isHidden ? 5 : 50}}>
+        <RichTextEditor
+          ref={editorRef}
+          noteId={activeNoteId}
+          key={activeNoteId || 'new-note'}
+          captureScreenshot={
+            source_type === 'youtube_video'
+              ? playerRef.current?.captureScreenshot
+              : captureVLCScreenshot
+          }
+          showPlayerMinimized={showPlayerMinimized}
+          playerRef={playerRef}
+          source_type={source_type}
+          webViewRef={source_type === 'youtube_video' ? playerRef.current?.webViewRef : null}
+          isHidden={isHidden}
+        />
+      </View>
+    );
+  },
+);
+
 const BacePlayer = () => {
   console.log('🔄🔄🔄 BacePlayer RENDERING', new Date().toISOString());
   const appState = useRef(AppState.currentState);
@@ -89,9 +115,8 @@ const BacePlayer = () => {
   // Notes context
   const [showNotes, setShowNotes] = useState(false);
   const [isCreatingNote, setIsCreatingNote] = useState(false);
-  const {activeNoteId, setActiveNoteId, setNotesList} = useNotesStore(
+  const {setActiveNoteId, setNotesList} = useNotesStore(
     useShallow(state => ({
-      activeNoteId: state.activeNoteId,
       setActiveNoteId: state.setActiveNoteId,
       setNotesList: state.setNotesList,
     })),
@@ -173,12 +198,13 @@ const BacePlayer = () => {
   }, [routeItems, item, routeCurrentIndex]);
 
   useEffect(() => {
-    if (activeNoteId != null) {
-      // pauseOnStart && hidePlayer();
-      setShowNotes(true);
-      console.log('activeNoteId updated:', activeNoteId);
-    }
-  }, [activeNoteId]);
+    if (useNotesStore.getState().activeNoteId != null) setShowNotes(true);
+    return useNotesStore.subscribe((state, prev) => {
+      if (state.activeNoteId !== prev.activeNoteId && state.activeNoteId != null) {
+        setShowNotes(true);
+      }
+    });
+  }, []);
 
   const loadPreviousWatchData = async videoId => {
     if (!videoId) {
@@ -365,7 +391,7 @@ const BacePlayer = () => {
     Keyboard.dismiss();
     notesSectionRef.current?.blurEditor();
     setTimeout(() => {
-      navigationRef.navigate('ItemNotesScreen', {showHeader: true});
+      navigationRef.navigate('ItemNotesScreen', {showHeader: true, item: currentItem});
     }, 150);
   };
   const handleBackPress = useCallback(() => {
@@ -496,7 +522,7 @@ const BacePlayer = () => {
           <View style={{flex: 1}}></View>
           <TouchableOpacity
             onPress={() => {
-              handleExport(activeNoteId, 'pdf');
+              handleExport(useNotesStore.getState().activeNoteId, 'pdf');
             }}
             style={styles.persistentBackButton}>
             <Fontisto name="share-a" size={18} color="black" />
@@ -648,27 +674,14 @@ const BacePlayer = () => {
           {renderDragHandle()}
 
           {showNotes && (
-            <View style={{flex: 1, marginTop: isHidden ? 5 : 50}}>
-              <RichTextEditor
-                ref={notesSectionRef}
-                noteId={activeNoteId}
-                key={activeNoteId || 'new-note'}
-                captureScreenshot={
-                  source_type === 'youtube_video'
-                    ? playerRef.current?.captureScreenshot
-                    : captureVLCScreenshot
-                }
-                showPlayerMinimized={showPlayerMinimized}
-                playerRef={playerRef}
-                source_type={source_type}
-                webViewRef={
-                  source_type === 'youtube_video'
-                    ? playerRef.current?.webViewRef
-                    : null
-                }
-                isHidden={isHidden}
-              />
-            </View>
+            <NoteSection
+              editorRef={notesSectionRef}
+              source_type={source_type}
+              playerRef={playerRef}
+              captureVLCScreenshot={captureVLCScreenshot}
+              showPlayerMinimized={showPlayerMinimized}
+              isHidden={isHidden}
+            />
           )}
         </>
       ) : (

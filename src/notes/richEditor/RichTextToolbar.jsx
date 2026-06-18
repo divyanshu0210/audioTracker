@@ -32,38 +32,68 @@ const RichTextToolbar = ({
   const [showColorPicker, setShowColorPicker] = useState(false);
   // Define our category buttons
   const iconMap = {
+    [actions.setBold]: ({tintColor}) => (
+      <Text style={[styles.formatIcon, {color: tintColor, fontWeight: '900'}]}>B</Text>
+    ),
+    [actions.setItalic]: ({tintColor}) => (
+      <Text style={[styles.formatIcon, {color: tintColor, fontStyle: 'italic', fontWeight: '700'}]}>I</Text>
+    ),
+    [actions.setUnderline]: ({tintColor}) => (
+      <Text style={[styles.formatIcon, {color: tintColor, textDecorationLine: 'underline', fontWeight: '700'}]}>U</Text>
+    ),
+    [actions.insertBulletsList]: ({tintColor}) => (
+      <MaterialCommunityIcons name="format-list-bulleted" size={24} color={tintColor} />
+    ),
+    [actions.insertOrderedList]: ({tintColor}) => (
+      <MaterialCommunityIcons name="format-list-numbered" size={24} color={tintColor} />
+    ),
+    [actions.alignLeft]: ({tintColor}) => (
+      <MaterialCommunityIcons name="format-align-left" size={24} color={tintColor} />
+    ),
+    [actions.alignCenter]: ({tintColor}) => (
+      <MaterialCommunityIcons name="format-align-center" size={24} color={tintColor} />
+    ),
+    [actions.alignRight]: ({tintColor}) => (
+      <MaterialCommunityIcons name="format-align-right" size={24} color={tintColor} />
+    ),
+    [actions.alignFull]: ({tintColor}) => (
+      <MaterialCommunityIcons name="format-align-justify" size={24} color={tintColor} />
+    ),
+    indent: ({tintColor}) => (
+      <MaterialCommunityIcons name="format-indent-increase" size={24} color={tintColor} />
+    ),
+    outdent: ({tintColor}) => (
+      <MaterialCommunityIcons name="format-indent-decrease" size={24} color={tintColor} />
+    ),
+    code: ({tintColor}) => (
+      <MaterialCommunityIcons name="code-tags" size={24} color={tintColor} />
+    ),
+    undo: ({tintColor}) => (
+      <MaterialCommunityIcons name="undo-variant" size={24} color={tintColor} />
+    ),
+    redo: ({tintColor}) => (
+      <MaterialCommunityIcons name="redo-variant" size={24} color={tintColor} />
+    ),
     link: ({tintColor}) => (
-      <Text style={[styles.toolIcon, {color: tintColor}]}>🔗</Text>
+      <MaterialCommunityIcons name="link-variant" size={24} color={tintColor} />
     ),
     heading1: ({tintColor}) => (
-      <Text style={[styles.toolIcon, {color: tintColor, fontWeight: 'bold'}]}>
-        H1
-      </Text>
+      <Text style={[styles.headingIcon, {color: tintColor}]}>H1</Text>
     ),
     heading2: ({tintColor}) => (
-      <Text style={[styles.toolIcon, {color: tintColor, fontWeight: 'bold'}]}>
-        H2
-      </Text>
+      <Text style={[styles.headingIcon, {color: tintColor}]}>H2</Text>
     ),
     heading3: ({tintColor}) => (
-      <Text style={[styles.toolIcon, {color: tintColor, fontWeight: 'bold'}]}>
-        H3
-      </Text>
+      <Text style={[styles.headingIcon, {color: tintColor}]}>H3</Text>
     ),
     heading4: ({tintColor}) => (
-      <Text style={[styles.toolIcon, {color: tintColor, fontWeight: 'bold'}]}>
-        H4
-      </Text>
+      <Text style={[styles.headingIcon, {color: tintColor}]}>H4</Text>
     ),
     heading5: ({tintColor}) => (
-      <Text style={[styles.toolIcon, {color: tintColor, fontWeight: 'bold'}]}>
-        H5
-      </Text>
+      <Text style={[styles.headingIcon, {color: tintColor}]}>H5</Text>
     ),
     heading6: ({tintColor}) => (
-      <Text style={[styles.toolIcon, {color: tintColor, fontWeight: 'bold'}]}>
-        H6
-      </Text>
+      <Text style={[styles.headingIcon, {color: tintColor}]}>H6</Text>
     ),
     highlight: ({tintColor}) => (
       <TouchableOpacity onPress={() => handleCategoryPress('highlight')}>
@@ -350,6 +380,18 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#424242',
     margin: 4,
+  },
+  formatIcon: {
+    fontSize: 18,
+    width: 24,
+    textAlign: 'center',
+  },
+  headingIcon: {
+    fontSize: 15,
+    fontWeight: '800',
+    width: 28,
+    textAlign: 'center',
+    letterSpacing: -0.5,
   },
   activeIcon: {
     backgroundColor: '#e0e0e0',

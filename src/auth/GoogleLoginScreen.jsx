@@ -34,7 +34,7 @@ const GoogleLoginScreen = ({navigation}) => {
   const {initDb} = useDbStore();
   const {initialize: initializeSettings} = useSettingsStore();
   const {appStartupBackupRoutine} = useBackupStore();
-  const {isRestoring} = useRestoreStore();
+  const {isRestoring, checkingAvailableBackup} = useRestoreStore();
 
   useEffect(() => {
     GoogleSignin.configure({
@@ -150,6 +150,9 @@ const GoogleLoginScreen = ({navigation}) => {
         ) : isLoading ? (
           <View style={styles.loaderContainer}>
             <ActivityIndicator size="large" color="#ffffff" />
+            {checkingAvailableBackup && (
+              <Text style={styles.loaderText}>Checking for backups...</Text>
+            )}
           </View>
         ) : (
           <TouchableOpacity
@@ -226,6 +229,12 @@ const styles = StyleSheet.create({
   loaderContainer: {
     marginVertical: 20,
     alignItems: 'center',
+  },
+  loaderText: {
+    marginTop: 12,
+    fontSize: 14,
+    color: '#ccc',
+    textAlign: 'center',
   },
   footer: {
     marginTop: 30,

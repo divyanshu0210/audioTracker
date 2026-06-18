@@ -3,14 +3,11 @@ import {View, ActivityIndicator, Text, StyleSheet} from 'react-native';
 
 import useDbStore from '../../database/dbStore';
 import useBackupStore from '../../stores/backupStore';
-import useRestoreStore from '../../backupRestore/restoreStore';
 
 function GlobalOverlays() {
   const {loading} = useDbStore();
 
   const {backupRunning, syncRunning} = useBackupStore();
-
-  const {checkingAvailableBackup} = useRestoreStore();
 
   const isBackupInProgress = backupRunning || syncRunning;
 
@@ -23,15 +20,6 @@ function GlobalOverlays() {
             {isBackupInProgress
               ? 'Saving your Progress'
               : 'Signing out...'}
-          </Text>
-        </View>
-      )}
-
-      {checkingAvailableBackup && (
-        <View style={styles.overlay}>
-          <ActivityIndicator size="large" color="#fff" />
-          <Text style={styles.loadingText}>
-            Checking for backups..
           </Text>
         </View>
       )}

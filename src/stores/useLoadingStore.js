@@ -2,6 +2,8 @@
 import {create} from 'zustand';
 
 const useLoadingStore = create((set, get) => ({
+  loading: false,
+  setLoading: isLoading => set({loading: isLoading}),
   // Loading states map
   loadingStates: {
     youtube: false,

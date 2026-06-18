@@ -2,9 +2,7 @@
 import {create} from 'zustand';
 
 const useAppStateStore = create((set, get) => ({
-  loading: false,
   folderCache: {},
-  setLoading: isLoading => set({loading: isLoading}),
   setFolderCache: (folderId, items) =>
     set(state => ({
       folderCache: {

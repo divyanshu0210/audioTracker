@@ -14,12 +14,11 @@ import {useSelectionStore} from '../stores/useSelectionStore';
 import useLoadingStore from '../stores/useLoadingStore';
 
 const ItemNotesScreen = ({route}) => {
-  const activeItem = useSelectionStore(state => state.activeItem);
   const [notes, setNotes] = useState([]); // ← LOCAL STATE
   const setLoadingState = useLoadingStore(state => state.setLoadingState);
 
   // Get item from route params or context
-  const item = route?.params?.item || activeItem;
+  const item = route?.params?.item || useSelectionStore.getState().activeItem;
   const showheader = route?.params?.showHeader || false;
   let sourceId = item?.source_id || item?.sourceId;
   let sourceType = item?.source_type || item?.sourceType || item?.type;

@@ -1,15 +1,18 @@
 import {DRIVE_API_KEY} from '@env';
-import {useFocusEffect, useNavigation, useRoute} from '@react-navigation/native';
+import {
+  useFocusEffect,
+  useNavigation,
+  useRoute,
+} from '@react-navigation/native';
 import axios from 'axios';
 import React, {useCallback, useEffect, useRef, useState} from 'react';
-import {Alert, Animated, SafeAreaView, StyleSheet} from 'react-native';
+import {Alert, Animated, Easing, SafeAreaView, StyleSheet} from 'react-native';
 import {getItemBySourceId, upsertItem} from '../database/C';
 import {getChildrenByParent} from '../database/R';
 import BaseMediaListComponent from './BaseMediaListComponent';
 import {ItemTypes, ScreenTypes} from '../contexts/constants';
-import useAppStateStore from '../stores/appStateStore';
 import AppHeader from '../components/headers/AppHeader';
-import {useMediaStore} from '../stores/useMediaStore';
+import useLoadingStore from '../stores/useLoadingStore';
 
 export const fetchDriveItems = async (
   source_id,
@@ -129,13 +132,17 @@ const GoogleDriveViewer = () => {
   const navigation = useNavigation();
   const {driveInfo} = route.params || {};
 
+  const renderCount = useRef(0);
+  renderCount.current++;
+  console.log(`🎯 Render GOOGLE DRIVE VIEWER #${renderCount.current}`);
+
   // ── Local state ────────────────────────────────────────────────────────────
   const [folderStack, setFolderStack] = useState([
     {source_id: driveInfo.source_id, title: driveInfo.title ?? 'Drive'},
   ]);
   const [currentItems, setCurrentItems] = useState([]);
-  const [loading, setLoading] = useState(false);
-  
+  const setLoading = useLoadingStore(state => state.setLoading);
+  const loading = useLoadingStore(state => state.loading);
 
   // In-memory folder cache: { [source_id]: items[] }
   // Stored in a ref so it survives re-renders without causing them.
@@ -150,57 +157,51 @@ const GoogleDriveViewer = () => {
   const slideAnim = useRef(new Animated.Value(0)).current;
 
   const animateIn = useCallback(() => {
-    slideAnim.setValue(1);   // start off-screen right
+    slideAnim.setValue(1); // start off-screen right
     Animated.timing(slideAnim, {
       toValue: 0,
-      duration: 280,
+      duration: 250,
+      // easing: Easing.out(Easing.quad),
       useNativeDriver: true,
     }).start();
   }, [slideAnim]);
 
-  const animateOut = useCallback(onDone => {
-    Animated.timing(slideAnim, {
-      toValue: 1,
-      duration: 240,
-      useNativeDriver: true,
-    }).start(onDone);
-  }, [slideAnim]);
-
   const translateX = slideAnim.interpolate({
     inputRange: [0, 1],
-    outputRange: [0, 350],  // slide right = going back
+    outputRange: [0, 350],
   });
 
   // ── Fetch items whenever the top of the folder stack changes ─────────────
   const currentFolder = folderStack[folderStack.length - 1];
 
   useEffect(() => {
-  if (!currentFolder?.source_id) {
-    Alert.alert('Invalid URL', 'Please enter a valid Google Drive link.');
-    return;
-  }
-  fetchDriveItems(
-    currentFolder.source_id,
-    folderCacheRef.current,
-    setFolderCache,
-    setCurrentItems,
-    setLoading,
-  );
-}, [currentFolder?.source_id]); 
+    if (!currentFolder?.source_id) {
+      Alert.alert('Invalid URL', 'Please enter a valid Google Drive link.');
+      return;
+    }
+    fetchDriveItems(
+      currentFolder.source_id,
+      folderCacheRef.current,
+      setFolderCache,
+      setCurrentItems,
+      setLoading,
+    );
+  }, [currentFolder?.source_id]);
 
   // ── Navigate INTO a sub-folder (called by BaseItem instead of StackActions.push) ──
   // Expose via a ref so BaseItem / DriveItem can call it without prop-drilling.
   // See note below about how BaseItem calls this.
   const openFolder = useCallback(
     folder => {
-    setCurrentItems([]); // Clear current items immediately for better UX
-      // folder = { source_id, title, mimeType, ... }
+      const cached = folderCacheRef.current[folder.source_id];
+      animateIn();
+      if (cached) setCurrentItems(cached);
+      else setCurrentItems([]);
       setFolderStack(prev => {
         const last = prev[prev.length - 1];
-        if (last?.source_id === folder.source_id) return prev; // guard duplicate
+        if (last?.source_id === folder.source_id) return prev;
         return [...prev, {source_id: folder.source_id, title: folder.title}];
       });
-      animateIn();
     },
     [animateIn],
   );
@@ -208,15 +209,16 @@ const GoogleDriveViewer = () => {
   // ── Go back one folder (internal pop) ─────────────────────────────────────
   const goBackFolder = useCallback(() => {
     if (folderStack.length <= 1) {
-      // At root → let the navigator handle it (actual screen removal)
       navigation.goBack();
       return;
     }
-    animateOut(() => {
-      setFolderStack(prev => prev.slice(0, -1));
-      slideAnim.setValue(0); // reset for next interaction
-    });
-  }, [folderStack.length, navigation, animateOut, slideAnim]);
+    const prevFolder = folderStack[folderStack.length - 2];
+    const cached = folderCacheRef.current[prevFolder.source_id];
+    animateIn();
+    if (cached) setCurrentItems(cached);
+    else setCurrentItems([]);
+    setFolderStack(prev => prev.slice(0, -1));
+  }, [folderStack, navigation, animateIn]);
 
   // ── Intercept hardware back / swipe gesture ────────────────────────────────
   // When the internal stack has depth > 1, preventDefault() stops the screen
@@ -225,39 +227,34 @@ const GoogleDriveViewer = () => {
     useCallback(() => {
       const onBeforeRemove = e => {
         if (folderStack.length > 1) {
-          e.preventDefault();  // ← block actual nav removal
+          e.preventDefault(); // ← block actual nav removal
           goBackFolder();
         }
         // If folderStack.length === 1, allow the event: screen exits normally.
       };
-      const unsubscribe = navigation.addListener('beforeRemove', onBeforeRemove);
+      const unsubscribe = navigation.addListener(
+        'beforeRemove',
+        onBeforeRemove,
+      );
       return () => unsubscribe();
     }, [navigation, folderStack.length, goBackFolder]),
   );
 
   // ── Breadcrumb jump: tap any ancestor folder ───────────────────────────────
   const handleBreadcrumbPress = useCallback(
-  folderId => {
-    setCurrentItems([]); // Clear current items immediately for better UX
-    const targetIndex = folderStack.findIndex(f => f.source_id === folderId);
-    if (targetIndex === -1 || targetIndex === folderStack.length - 1) return;
+    folderId => {
+      const targetIndex = folderStack.findIndex(f => f.source_id === folderId);
+      if (targetIndex === -1 || targetIndex === folderStack.length - 1) return;
 
-    animateOut(() => {
-      const targetFolder = folderStack[targetIndex];   // grab before slicing
+      const targetFolder = folderStack[targetIndex];
+      const cached = folderCacheRef.current[targetFolder.source_id];
+      animateIn();
+      if (cached) setCurrentItems(cached);
+      else setCurrentItems([]);
       setFolderStack(prev => prev.slice(0, targetIndex + 1));
-      slideAnim.setValue(0);
-      // ← add this
-      fetchDriveItems(
-        targetFolder.source_id,
-        folderCacheRef.current,
-        setFolderCache,
-        setCurrentItems,
-        setLoading,
-      );
-    });
-  },
-  [folderStack, animateOut, slideAnim],
-);
+    },
+    [folderStack, animateIn],
+  );
 
   return (
     <SafeAreaView style={styles.container}>
@@ -286,7 +283,7 @@ const GoogleDriveViewer = () => {
           onRefresh={() =>
             fetchDriveItems(
               currentFolder.source_id,
-              {},                   // pass empty cache to force refresh
+              {}, // pass empty cache to force refresh
               setFolderCache,
               setCurrentItems,
               setLoading,

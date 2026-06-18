@@ -10,7 +10,6 @@ import FileViewer from 'react-native-file-viewer';
 import {ItemTypes, ScreenTypes} from '../contexts/constants';
 import BaseMenu from '../components/menu/BaseMenu';
 import NoteItem from '../notes/notesListing/NoteItem';
-import useAppStateStore from '../stores/appStateStore';
 import {CategoryItem} from '../categories/CategoryItem';
 import {useMediaStore} from '../stores/useMediaStore';
 import {useSelectionStore} from '../stores/useSelectionStore';
@@ -18,6 +17,7 @@ import {useNotesStore} from '../stores/useNotesStore';
 import {navigationRef} from '../handlers/navigationRef';
 import {useShallow} from 'zustand/react/shallow';
 import {StackActions, useNavigationState, useRoute} from '@react-navigation/core';
+import useLoadingStore from '../stores/useLoadingStore';
 
 const BaseItem = ({type, item, subtype, screen, onFolderPress}) => {
    const route = useRoute();
@@ -129,7 +129,7 @@ const BaseItem = ({type, item, subtype, screen, onFolderPress}) => {
       } else {
         // Fallback: old behaviour for any context that doesn't pass onFolderPress.
         // (e.g. search results screen rendering drive items)
-        useAppStateStore.setState({loading: true});
+        // useLoadingStore.setState({loading:true});
         requestAnimationFrame(() => {
           setTimeout(() => {
             setFolderStack(prevStack => {

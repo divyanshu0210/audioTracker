@@ -64,6 +64,8 @@ const RichTextEditor = forwardRef(
 
     const richText = useRef(null);
     const scrollRef = useRef(null);
+    const editorReadyRef = useRef(false);
+    const pendingContentRef = useRef(null);
 
     const [currentNoteId, setCurrentNoteId] = useState(noteId);
     const [isLoading, setIsLoading] = useState(false);
@@ -81,6 +83,14 @@ const RichTextEditor = forwardRef(
     const [isEditable, setIsEditable] = useState(false);
 
     const [isToolbarVisible, setIsToolbarVisible] = useState(false);
+
+    const handleEditorInitialized = useCallback(() => {
+      editorReadyRef.current = true;
+      if (pendingContentRef.current !== null) {
+        richText.current?.setContentHTML(pendingContentRef.current);
+        pendingContentRef.current = null;
+      }
+    }, []);
 
     const {saveContent, saveTitle, deleteNote} = useNoteController();
     const {saveImageInBackground} = useImagePersistence();
@@ -252,7 +262,11 @@ const RichTextEditor = forwardRef(
             content.length,
             ')',
           );
-          richText.current?.setContentHTML(content);
+          if (editorReadyRef.current) {
+            richText.current?.setContentHTML(content);
+          } else {
+            pendingContentRef.current = content;
+          }
           latestHtmlContentRef.current = content;
 
           if (isEditable !== isEmpty) {
@@ -706,6 +720,7 @@ const handleCloseNote = async (noteIdToClose) => {
               // borderColor:'red'
             }}
             initialContentHTML={initialContent}
+            editorInitializedCallback={handleEditorInitialized}
             useContainer={true}
             disabled={!isEditable}
             editorStyle={{backgroundColor: '#fefefe'}}

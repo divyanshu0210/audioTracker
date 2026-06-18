@@ -133,7 +133,6 @@ const BacePlayer = () => {
     const TIME_FACTOR = item?.type !== 'youtube_video' ? 1000 : 1;
     const source_type = item?.type;
     const videoId = item?.source_id;
-    // setActiveItem(item);
     return {TIME_FACTOR, source_type, videoId};
   };
   const {TIME_FACTOR, source_type, videoId} = getItemProperties(currentItem);
@@ -149,6 +148,11 @@ const BacePlayer = () => {
     if (currentItem) {
       console.log('bace player ', currentItem);
       setNotesList([]);
+      setActiveItem({
+        sourceId: currentItem.source_id,
+        sourceType: currentItem.type,
+        item: currentItem,
+      });
       const tempIsAudio =
         source_type !== 'youtube_video' && isAudioFile(currentItem?.mimeType);
       setIsAudio(tempIsAudio);
@@ -181,6 +185,7 @@ const BacePlayer = () => {
       navigationRef.getParent()?.setOptions({tabBarStyle: {display: 'flex'}});
       cleanupPlayer();
       setActiveNoteId(null);
+      setActiveItem(null);
     };
   }, [currentItem]);
 

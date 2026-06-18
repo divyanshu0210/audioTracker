@@ -34,8 +34,8 @@ const BaseMediaListComponent = ({
   const renderCount = useRef(0);
   renderCount.current++;
   console.log(
-    `🎯 -----------------Render BASELIST COMPONENT #${renderCount.current}---------------------------------------`,
-    type,
+    `🎯 -----------------Render BASELIST COMPONENT #${renderCount.current} ---------------------------------------`,
+    type,screen
   );
 
   const renderItem = useCallback(
@@ -82,7 +82,7 @@ const BaseMediaListComponent = ({
           useSections ? <Text style={styles.sectionHeader}>{title}</Text> : null
         }
         contentContainerStyle={{paddingVertical: 10}}
-        ListEmptyComponent={<Text style={styles.emptyText}>{emptyText}</Text>}
+        ListEmptyComponent={loading ? null : <Text style={styles.emptyText}>{emptyText}</Text>}
         ListFooterComponent={
           loadingMore
             ? () => <ActivityIndicator size="small" color="#007AFF" />

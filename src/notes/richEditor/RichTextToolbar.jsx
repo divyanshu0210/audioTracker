@@ -1,4 +1,4 @@
-import React, {useState} from 'react';
+import React, {useState, useCallback, useMemo} from 'react';
 import {View, Text, TouchableOpacity, StyleSheet, Alert} from 'react-native';
 import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
@@ -8,17 +8,72 @@ import {openCamera, pickImage} from '../utils/imageAndCamUtils';
 import {getCurrentVideoTime} from '../../music/progressTrackingUtils';
 
 const HIGHLIGHT_COLORS = [
-  {id: 'yellow', value: '#ffff00', name: 'Yellow'}, // bright yellow
-  {id: 'blue', value: '#4fc3f7', name: 'Blue'}, // fresh sky blue
-  {id: 'pink', value: '#ff80ab', name: 'Pink'}, // soft pink
-  {id: 'green', value: '#228B22', name: 'Green'}, // Forest Green
-  {id: 'orange', value: '#ffa726', name: 'Orange'}, // strong orange
-  {id: 'purple', value: '#ba68c8', name: 'Purple'}, // pleasant purple
-  {id: 'teal', value: '#4db6ac', name: 'Teal'}, // clean teal
-  {id: 'parrotgreen', value: '#7CFC00', name: 'Parrot Green'}, // vivid and lively green
-  {id: 'red', value: '#ef5350', name: 'Red'}, // soft red
-  {id: 'mint', value: '#a7ffeb', name: 'Mint'}, // light mint
+  {id: 'yellow', hex: '#ffff00', name: 'Yellow'}, // bright yellow
+  {id: 'blue', hex: '#4fc3f7', name: 'Blue'}, // fresh sky blue
+  {id: 'pink', hex: '#ff80ab', name: 'Pink'}, // soft pink
+  {id: 'green', hex: '#228B22', name: 'Green'}, // Forest Green
+  {id: 'orange', hex: '#ffa726', name: 'Orange'}, // strong orange
+  {id: 'purple', hex: '#ba68c8', name: 'Purple'}, // pleasant purple
+  {id: 'teal', hex: '#4db6ac', name: 'Teal'}, // clean teal
+  {id: 'parrotgreen', hex: '#7CFC00', name: 'Parrot Green'}, // vivid and lively green
+  {id: 'red', hex: '#ef5350', name: 'Red'}, // soft red
+  {id: 'mint', hex: '#a7ffeb', name: 'Mint'}, // light mint
 ];
+
+const TOOLBAR_CONFIGS = {
+  format: {
+    actions: [
+      actions.setBold,
+      actions.setItalic,
+      actions.setUnderline,
+      'code',
+      'heading1',
+      'heading2',
+      'heading3',
+      'heading4',
+      'heading5',
+      'heading6',
+    ],
+  },
+  lists: {
+    actions: [
+      actions.insertBulletsList,
+      actions.insertOrderedList,
+      'indent',
+      'outdent',
+    ],
+  },
+  alignment: {
+    actions: [
+      actions.alignLeft,
+      actions.alignCenter,
+      actions.alignRight,
+      actions.alignFull,
+    ],
+  },
+  media: {actions: ['image', 'camera']},
+  colors: {
+    actions: [
+      ...HIGHLIGHT_COLORS.map(
+        color =>
+          `color${color.id.charAt(0).toUpperCase() + color.id.slice(1)}`,
+      ),
+      'colorRemove',
+    ],
+  },
+};
+
+const CATEGORIES = [
+  {id: 'media', label: 'Media', icon: 'plus-square'},
+  {id: 'format', label: 'Format', icon: 'text-format'},
+  {id: 'highlight', label: 'Highlight', icon: 'format-color-highlight'},
+  {id: 'lists', label: 'Lists', icon: 'format-list-bulleted'},
+  {id: 'alignment', label: 'Alignment', icon: 'format-align-left'},
+  {id: 'screenshot', label: 'Screenshot', icon: 'screenshot'},
+  {id: 'timestamp', label: 'timestamp', icon: 'access-time'},
+];
+
+const SECONDARY_TOOLBAR_KEYS = ['format', 'lists', 'alignment', 'media'];
 
 const RichTextToolbar = ({
   editorRef,
@@ -30,8 +85,77 @@ const RichTextToolbar = ({
      console.log('🔄🔄 RichTextToolbar RENDERING', new Date().toISOString());
   const [activeToolbar, setActiveToolbar] = useState(null);
   const [showColorPicker, setShowColorPicker] = useState(false);
-  // Define our category buttons
-  const iconMap = {
+  const onHighlightWithColor = useCallback((color = 'yellow') => {
+    if (editorRef.current?.webviewBridge?.injectJavaScript) {
+      editorRef.current.webviewBridge.injectJavaScript(`
+            try {
+              document.execCommand('hiliteColor', false, '${color}');
+            } catch(e) {
+              const selection = window.getSelection();
+              if (selection.rangeCount > 0) {
+                const range = selection.getRangeAt(0);
+                const span = document.createElement('span');
+                span.style.backgroundColor = '${color}';
+                range.surroundContents(span);
+              }
+            }
+            true;
+          `);
+    } else {
+      editorRef.current?.insertHTML(
+        '<span style="background-color:yellow;"> </span>',
+      );
+    }
+  }, []);
+
+  const handleCamera = useCallback(async () => {
+    try {
+      const image = await openCamera();
+      if (image) handleImagePickerResult(image);
+    } catch (error) {
+      console.error('Error opening camera:', error);
+    }
+  }, [handleImagePickerResult]);
+
+  const handleImage = useCallback(async () => {
+    try {
+      const images = await pickImage();
+      if (images) {
+        console.log('Captured Image:', images);
+        for (const image of images) handleImagePickerResult(image);
+      }
+    } catch (error) {
+      console.error('Error opening photo:', error);
+    }
+  }, [handleImagePickerResult]);
+
+  const handleCategoryPress = useCallback(categoryId => {
+    if (categoryId === 'highlight') {
+      setShowColorPicker(prev => {
+        const newState = !prev;
+        onToolbarVisibilityChange?.(newState);
+        return newState;
+      });
+      setActiveToolbar(null);
+      return;
+    }
+    if (categoryId === 'screenshot') {
+      captureScreenshot?.();
+      return;
+    }
+    if (categoryId === 'timestamp') {
+      if (typeof addTimestampCb === 'function') addTimestampCb();
+      return;
+    }
+    setActiveToolbar(prev => {
+      const newState = prev === categoryId ? null : categoryId;
+      setShowColorPicker(false);
+      onToolbarVisibilityChange?.(newState !== null);
+      return newState;
+    });
+  }, [captureScreenshot, addTimestampCb, onToolbarVisibilityChange]);
+
+  const iconMap = useMemo(() => ({
     [actions.setBold]: ({tintColor}) => (
       <Text style={[styles.formatIcon, {color: tintColor, fontWeight: '900'}]}>B</Text>
     ),
@@ -121,9 +245,9 @@ const RichTextToolbar = ({
         [`color${color.id.charAt(0).toUpperCase() + color.id.slice(1)}`]: ({
           tintColor,
         }) => (
-          <TouchableOpacity onPress={() => onHighlightWithColor(color.value)}>
+          <TouchableOpacity onPress={() => onHighlightWithColor(color.hex)}>
             <View
-              style={[styles.colorButton, {backgroundColor: color.value}]}
+              style={[styles.colorButton, {backgroundColor: color.hex}]}
             />
           </TouchableOpacity>
         ),
@@ -135,179 +259,39 @@ const RichTextToolbar = ({
         <MaterialIcons name="highlight-off" size={24} color={tintColor} />
       </TouchableOpacity>
     ),
-  };
-
-  // Define our category buttons
-  const categories = [
-    {id: 'media', label: 'Media', icon: 'plus-square'},
-    {id: 'format', label: 'Format', icon: 'text-format'},
-    {id: 'highlight', label: 'Highlight', icon: 'format-color-highlight'},
-    {id: 'lists', label: 'Lists', icon: 'format-list-bulleted'},
-    {id: 'alignment', label: 'Alignment', icon: 'format-align-left'},
-    {id: 'screenshot', label: 'Screenshot', icon: 'screenshot'},
-    {id: 'timestamp', label: 'timestamp', icon: 'access-time'},
-  ];
-
-  const toolbarConfigs = {
-    format: {
-      actions: [
-        actions.setBold,
-        actions.setItalic,
-        actions.setUnderline,
-        'code',
-        'heading1',
-        'heading2',
-        'heading3',
-        'heading4',
-        'heading5',
-        'heading6',
-      ],
-    },
-    lists: {
-      actions: [
-        actions.insertBulletsList,
-        actions.insertOrderedList,
-        'indent',
-        'outdent',
-      ],
-    },
-    alignment: {
-      actions: [
-        actions.alignLeft,
-        actions.alignCenter,
-        actions.alignRight,
-        actions.alignFull,
-      ],
-    },
-    media: {actions: ['image', 'camera']},
-    colors: {
-      actions: [
-        ...HIGHLIGHT_COLORS.map(
-          color =>
-            `color${color.id.charAt(0).toUpperCase() + color.id.slice(1)}`,
-        ),
-        'colorRemove',
-      ],
-    },
-  };
-
-  const handleCategoryPress = categoryId => {
-    if (categoryId === 'highlight') {
-      const newState = !showColorPicker;
-      setShowColorPicker(newState);
-      setActiveToolbar(null);
-      if (onToolbarVisibilityChange) {
-        onToolbarVisibilityChange(newState);
-      }
-      return;
-    }
-
-    if (categoryId === 'screenshot') {
-      if (captureScreenshot) {
-        captureScreenshot();
-      }
-      return; // Don't change toolbar state
-    }
-
-    if (categoryId === 'timestamp') {
-      // if (webViewRef != null) {
-      //   getCurrentVideoTime(webViewRef);
-      // } else if (typeof addTimestampCb === 'function') {
-      //   addTimestampCb();
-      // }
-      if (typeof addTimestampCb === 'function') {
-        addTimestampCb();
-      }
-      return; // Don't change toolbar state
-    }
-
-    // For other categories, toggle toolbar visibility
-    const newState = activeToolbar === categoryId ? null : categoryId;
-    setActiveToolbar(newState);
-    setShowColorPicker(false);
-
-    if (onToolbarVisibilityChange) {
-      onToolbarVisibilityChange(newState !== null);
-    }
-  };
-
-  //highlighter
-  const onHighlightWithColor = (color = 'yellow') => {
-    if (editorRef.current?.webviewBridge?.injectJavaScript) {
-      editorRef.current.webviewBridge.injectJavaScript(`
-            try {
-              document.execCommand('hiliteColor', false, '${color}');
-            } catch(e) {
-              const selection = window.getSelection();
-              if (selection.rangeCount > 0) {
-                const range = selection.getRangeAt(0);
-                const span = document.createElement('span');
-                span.style.backgroundColor = '${color}';
-                range.surroundContents(span);
-              }
-            }
-            true;
-          `);
-    } else {
-      editorRef.current?.insertHTML(
-        '<span style="background-color:yellow;"> </span>',
-      );
-    }
-  };
-
-  const handleCamera = async () => {
-    try {
-      const image = await openCamera(); // Assuming openCamera returns a URI or an object with URI
-      if (image) {
-        handleImagePickerResult(image); // Call the onCamera callback with the URI
-      }
-    } catch (error) {
-      console.error('Error opening camera:', error); // Handle any errors
-    }
-  };
-
-  const handleImage = async () => {
-    try {
-      const images = await pickImage(); // Assuming openCamera returns a URI or an object with URI
-      if (images) {
-        console.log('Captured Image:', images);
-        for (const image of images) {
-          handleImagePickerResult(image);
-        }
-      }
-    } catch (error) {
-      console.error('Error opening photo:', error); // Handle any errors
-    }
-  };
+  }), [handleCategoryPress, handleCamera, handleImage, onHighlightWithColor]);
 
   return (
     <>
-      {/* Color Picker Toolbar - appears when highlight is clicked */}
-      {showColorPicker && (
+      {/* All secondary toolbars pre-mounted; only the wrapper visibility changes */}
+      <View style={showColorPicker ? null : styles.hidden}>
         <RichToolbar
           editor={editorRef}
-          actions={toolbarConfigs.colors.actions}
+          actions={TOOLBAR_CONFIGS.colors.actions}
           selectedButtonStyle={styles.activeIcon}
           iconTint="#333"
           iconMap={iconMap}
           style={styles.toolbar}
         />
-      )}
-      {/* Conditional toolbars */}
-      {activeToolbar && !showColorPicker && (
-        <RichToolbar
-          editor={editorRef}
-          actions={toolbarConfigs[activeToolbar].actions}
-          selectedButtonStyle={styles.activeIcon}
-          iconTint="#333"
-          iconMap={iconMap}
-          style={styles.toolbar}
-        />
-      )}
+      </View>
+      {SECONDARY_TOOLBAR_KEYS.map(key => (
+        <View
+          key={key}
+          style={activeToolbar === key && !showColorPicker ? null : styles.hidden}>
+          <RichToolbar
+            editor={editorRef}
+            actions={TOOLBAR_CONFIGS[key].actions}
+            selectedButtonStyle={styles.activeIcon}
+            iconTint="#333"
+            iconMap={iconMap}
+            style={styles.toolbar}
+          />
+        </View>
+      ))}
 
       {/* Category selection row */}
       <View style={styles.categoryRow}>
-        {categories.map(category => (
+        {CATEGORIES.map(category => (
           <TouchableOpacity
             key={category.id}
             style={[
@@ -340,6 +324,7 @@ const RichTextToolbar = ({
           actions={['undo', 'redo']}
           selectedButtonStyle={styles.activeIcon}
           iconTint="#333"
+          iconMap={iconMap}
           style={styles.mainToolbar}
         />
       </View>
@@ -348,6 +333,9 @@ const RichTextToolbar = ({
 };
 
 const styles = StyleSheet.create({
+  hidden: {
+    display: 'none',
+  },
   categoryRow: {
     flexDirection: 'row',
     justifyContent: 'space-around',

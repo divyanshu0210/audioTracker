@@ -2,27 +2,22 @@ import {useEffect, useRef} from 'react';
 import {updateNote, updateNoteTitle, deleteNoteById} from './richDB';
 import {createNewNote} from './richDB';
 import {useAppState} from '../contexts/AppStateContext';
-import { unstable_batchedUpdates } from 'react-native';
-import { useNotesStore } from '../stores/useNotesStore';
-import { useShallow } from 'zustand/react/shallow';
+import {unstable_batchedUpdates} from 'react-native';
+import {useNotesStore} from '../stores/useNotesStore';
+import {useShallow} from 'zustand/react/shallow';
 
 export const generateId = () =>
   Date.now() * 1000 + Math.floor(Math.random() * 1000);
 
 export const useNoteController = () => {
-const {
-  setNotesList,
-  notesList,
-  setMainNotesList,
-  setSelectedNote,
-} = useNotesStore(
-  useShallow(state => ({
-    setNotesList: state.setNotesList,
-    notesList: state.notesList,
-    setMainNotesList: state.setMainNotesList,
-    setSelectedNote: state.setSelectedNote,
-  })),
-);
+  const {setNotesList, setMainNotesList, setSelectedNote} =
+    useNotesStore(
+      useShallow(state => ({
+        setNotesList: state.setNotesList,
+        setMainNotesList: state.setMainNotesList,
+        setSelectedNote: state.setSelectedNote,
+      })),
+    );
 
   // 🚀 Instant note creation
   const createNoteInstant = async (
@@ -43,12 +38,17 @@ const {
       isTemp: true,
     };
 
-    setNotesList(prev => [tempNote, ...prev]);
-    setMainNotesList(prev => [tempNote, ...prev]);
-    setSelectedNote(tempNote);
+    batchUpdateNoteInAllLists(tempNote);
 
     const id = createNewNote(noteId, String(sourceId), sourceType);
-    return id;
+  };
+
+  const batchUpdateNoteInAllLists = async note => {
+    unstable_batchedUpdates(() => { 
+    setNotesList(prev => [note, ...prev]);
+    setMainNotesList(prev => [note, ...prev]);
+    setSelectedNote(note);
+    });
   };
 
   const saveContent = async (noteId, html, text) => {
@@ -76,31 +76,30 @@ const {
   };
 
   const updateNoteInState = (noteId, updatedFields) => {
-    console.log('UPDATING NOTELIST', notesList, noteId);
+    unstable_batchedUpdates(() => {
+      setNotesList(prevNotes =>
+        prevNotes.map(note =>
+          note.rowid === noteId ? {...note, ...updatedFields} : note,
+        ),
+      );
 
-  unstable_batchedUpdates(() => {
-    setNotesList(prevNotes =>
-      prevNotes.map(note =>
-        note.rowid === noteId ? {...note, ...updatedFields} : note,
-      ),
-    );
+      setMainNotesList(prevNotes =>
+        prevNotes.map(note =>
+          note.rowid === noteId ? {...note, ...updatedFields} : note,
+        ),
+      );
 
-    setMainNotesList(prevNotes =>
-      prevNotes.map(note =>
-        note.rowid === noteId ? {...note, ...updatedFields} : note,
-      ),
-    );
-
-    setSelectedNote(prev =>
-      prev?.rowid === noteId ? {...prev, ...updatedFields} : prev,
-    );
-  });
-};
+      setSelectedNote(prev =>
+        prev?.rowid === noteId ? {...prev, ...updatedFields} : prev,
+      );
+    });
+  };
 
   return {
     createNoteInstant,
     saveContent,
     saveTitle,
     deleteNote,
+    updateNoteInState,
   };
 };

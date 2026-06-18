@@ -94,10 +94,9 @@ export const openCamera = async () => {
       // height: 4000,
       cropping: true,
       cropperCircleOverlay: false,
-      compressImageQuality: 1,
+      compressImageQuality: 0.7,
       mediaType: 'photo',
-      includeBase64:true,
-      // multiple: true, // Enable multiple selection
+      includeBase64: true,
     });
 
     return image
@@ -157,11 +156,11 @@ export const pickImage = async () => {
       // height: 800,
       cropping: true,
       cropperCircleOverlay: false,
-      compressImageQuality: 1,
+      compressImageQuality: 0.7,
       mediaType: 'photo',
-      multiple: true, // Enable multiple selection
-      maxFiles: 10, // Maximum number of images that can be selected
-      includeBase64:true,
+      multiple: true,
+      maxFiles: 10,
+      includeBase64: true,
       // smartAlbums: [
       //   'UserLibrary',
       //   'PhotoStream',

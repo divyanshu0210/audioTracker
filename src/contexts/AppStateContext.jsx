@@ -4,7 +4,6 @@ const AppStateContext = createContext(null);
 
 export const AppStateProvider = ({children}) => {
   const [userInfo, setUserInfo] = useState(null);
-  const defaultNotebookId = useRef(null);
   const bottomSheetRef = useRef(null);
   const addNBbottomSheetRef = useRef(null);
   const mentorMenteeRequestBottomSheetRef = useRef(null);
@@ -14,7 +13,6 @@ export const AppStateProvider = ({children}) => {
       value={{
         userInfo,
         setUserInfo,
-        defaultNotebookId,
         bottomSheetRef,
         addNBbottomSheetRef,
         mentorMenteeRequestBottomSheetRef,

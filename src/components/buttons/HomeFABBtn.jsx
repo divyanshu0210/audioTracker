@@ -51,6 +51,7 @@ const HomeFABBtn = () => {
   const selectedCategory = useSelectionStore(state => state.selectedCategory);
 
   const setActiveNoteId = useNotesStore(state => state.setActiveNoteId);
+  const defaultNotebookId = useNotesStore(state => state.defaultNotebookId);
 
   const {addNBbottomSheetRef, mentorMenteeRequestBottomSheetRef} =
     useAppState();
@@ -118,7 +119,7 @@ const HomeFABBtn = () => {
       const noteId = generateId();
       setActiveNoteId(noteId);
       createNoteInstant(
-        defaultNotebookId.current,
+        defaultNotebookId,
         'notebook',
         {
           title: 'Default Notebook',

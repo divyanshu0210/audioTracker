@@ -24,13 +24,14 @@ import {setupFCM} from '../appNotification/appFCMNotification/fcmNotificationSer
 import {getOrCreateDefaultNotebookId} from '../database/C';
 import useBackupStore from '../stores/backupStore';
 import useRestoreStore from '../backupRestore/restoreStore';
+import {useNotesStore} from '../stores/useNotesStore';
 import LoginRestoreProgressBar from './LoginRestoreProgressBar';
 import { checkAndPromptRestore } from '../backupRestore/restoreManager';
 
 const GoogleLoginScreen = ({navigation}) => {
   const [isLoading, setIsLoading] = useState(false);
 
-  const {setUserInfo, defaultNotebookId} = useAppState();
+  const {setUserInfo} = useAppState();
   const {initDb} = useDbStore();
   const {initialize: initializeSettings} = useSettingsStore();
   const {appStartupBackupRoutine} = useBackupStore();
@@ -85,7 +86,7 @@ const GoogleLoginScreen = ({navigation}) => {
     const navigateToMain = async (userInfo) => {
     try {
       const defaultNotebookIdValue = await getOrCreateDefaultNotebookId();
-      defaultNotebookId.current = defaultNotebookIdValue;
+      useNotesStore.getState().setDefaultNotebookId(defaultNotebookIdValue);
       await initializeSettings();
       appStartupBackupRoutine();
       navigation.replace('MainApp', { user: userInfo.user ?? userInfo });

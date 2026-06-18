@@ -1,7 +1,4 @@
 import {create} from 'zustand';
-import {createRef} from 'react';
-
-export const defaultNotebookId = createRef(null);
 
 export const useNotesStore = create((set, get) => ({
   notesList: [],
@@ -10,6 +7,9 @@ export const useNotesStore = create((set, get) => ({
   activeNoteId: null,
   notebooks: [],
   editingNotebook: null,
+  defaultNotebookId: null,
+
+  setDefaultNotebookId: val => set({defaultNotebookId: val}),
 
   setNotesList: val =>
     set(s => ({notesList: typeof val === 'function' ? val(s.notesList) : val})),

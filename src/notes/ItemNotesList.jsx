@@ -1,23 +1,16 @@
-// screens/ItemNotesScreen.js
-import React, {useEffect, useState} from 'react';
-import {
-  ActivityIndicator,
-  Dimensions,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import React, {useEffect} from 'react';
+import {Dimensions, StyleSheet, Text, View, unstable_batchedUpdates} from 'react-native';
 import {fetchNotes} from '../database/R';
 import NotesListComponent from './notesListing/NotesListComponent';
 import {ScreenTypes} from '../contexts/constants';
 import {useSelectionStore} from '../stores/useSelectionStore';
 import useLoadingStore from '../stores/useLoadingStore';
+import {useNotesStore} from '../stores/useNotesStore';
 
 const ItemNotesScreen = ({route}) => {
-  const [notes, setNotes] = useState([]); // ← LOCAL STATE
   const setLoadingState = useLoadingStore(state => state.setLoadingState);
+  const setNotesList = useNotesStore(state => state.setNotesList);
 
-  // Get item from route params or context
   const item = route?.params?.item || useSelectionStore.getState().activeItem;
   const showheader = route?.params?.showHeader || false;
   let sourceId = item?.source_id || item?.sourceId;
@@ -31,11 +24,18 @@ const ItemNotesScreen = ({route}) => {
     if (sourceId && sourceType) {
       loadNotesForItem();
     }
+    // Clear on unmount so the NEXT mount starts with an empty list and never
+    // flashes this item's stale notes before the new item's notes arrive.
+    return () => {
+      unstable_batchedUpdates(() => {
+        setNotesList([]);
+        setLoadingState('itemNotes', false);
+      });
+    };
   }, [sourceId, sourceType]);
 
   const loadNotesForItem = async () => {
     setLoadingState('itemNotes', true);
-
     try {
       const fetchedNotes = await fetchNotes({
         offset: 0,
@@ -45,17 +45,17 @@ const ItemNotesScreen = ({route}) => {
         sourceId,
         sourceType,
       });
-      console.log(`✅ Fetched ${fetchedNotes.length} notes`);
-      setNotes(fetchedNotes); // ← Set LOCAL state, not context
+      unstable_batchedUpdates(() => {
+        setNotesList(fetchedNotes);
+        setLoadingState('itemNotes', false);
+      });
     } catch (error) {
       console.error('Error loading notes for item:', error);
-    } finally {
       setLoadingState('itemNotes', false);
     }
   };
 
   const {height: SCREEN_HEIGHT} = Dimensions.get('window');
-
   const containerStyle = showheader
     ? {height: SCREEN_HEIGHT * 0.7, backgroundColor: '#fff'}
     : {flex: 1, backgroundColor: '#fff'};
@@ -70,7 +70,6 @@ const ItemNotesScreen = ({route}) => {
       )}
       <View style={{flex: 1}}>
         <NotesListComponent
-          notes={notes}
           screen={ScreenTypes.IN}
           loadInitialData={loadNotesForItem}
         />
@@ -82,15 +81,9 @@ const ItemNotesScreen = ({route}) => {
 export default ItemNotesScreen;
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#fff',
-    height: 200,
-  },
   title: {
     textAlign: 'center',
     marginTop: 10,
-    // marginVertical: 10,
     fontSize: 16,
     fontWeight: 'bold',
     color: '#000',

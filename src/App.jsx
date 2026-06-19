@@ -80,6 +80,10 @@ const Tab = createBottomTabNavigator();
 const RootNavigator = track(function RootNavigator() {
   useEffect(() => {
     useBackupStore.getState().initializeEventListeners();
+    // Restore any downloads that were queued before the app was killed
+    import('./backgroundService/backgroundDownloadService').then(m =>
+      m.restoreDownloadState(),
+    );
     return () => {
       useBackupStore.getState().cleanupEventListeners();
     };
@@ -307,12 +311,12 @@ export default App = track(function App() {
               <GlobalBottomSheets />
               <GlobalListeners />
               <GlobalOverlays />
-
+{/* 
               <Button
                 title="Debug"
                 onPress={() => {
                   copyDatabaseToAccessibleLocation();
-                }}></Button>
+                }}></Button> */}
             </NavigationContainer>
           </MenuProvider>
         </GestureHandlerRootView>

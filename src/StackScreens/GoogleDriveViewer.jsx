@@ -6,7 +6,8 @@ import {
 } from '@react-navigation/native';
 import axios from 'axios';
 import React, {useCallback, useEffect, useRef, useState} from 'react';
-import {Alert, Animated, Easing, SafeAreaView, StyleSheet} from 'react-native';
+import {Alert, Animated, SafeAreaView, StyleSheet} from 'react-native';
+import {useMediaStore} from '../stores/useMediaStore';
 import {getItemBySourceId, upsertItem} from '../database/C';
 import {getChildrenByParent} from '../database/R';
 import BaseMediaListComponent from './BaseMediaListComponent';
@@ -123,8 +124,8 @@ const storeInDB = async (files, parentInternalId) => {
 //   index 0  = root folder (the driveInfo passed via route.params)
 //   last     = currently visible folder
 //
-// currentItems: items for folderStack[last]  (plain useState — no global store
-//   needed for this anymore, which eliminates cross-screen re-renders)
+// currentItems: items for folderStack[last] — stored in useMediaStore.data so
+//   DownloadButton's setData update propagates to DriveItem without prop drilling.
 // ─────────────────────────────────────────────────────────────────────────────
 
 const GoogleDriveViewer = () => {
@@ -136,13 +137,19 @@ const GoogleDriveViewer = () => {
   renderCount.current++;
   console.log(`🎯 Render GOOGLE DRIVE VIEWER #${renderCount.current}`);
 
-  // ── Local state ────────────────────────────────────────────────────────────
+  // ── State ──────────────────────────────────────────────────────────────────
   const [folderStack, setFolderStack] = useState([
     {source_id: driveInfo.source_id, title: driveInfo.title ?? 'Drive'},
   ]);
-  const [currentItems, setCurrentItems] = useState([]);
+  // currentItems lives in the media store so DownloadButton's setData update
+  // is visible to DriveItem's file_path selector without prop drilling.
+  const currentItems = useMediaStore(state => state.data);
+  const setCurrentItems = useMediaStore(state => state.setData);
   const setLoading = useLoadingStore(state => state.setLoading);
   const loading = useLoadingStore(state => state.loading);
+
+  // Clear store data when viewer unmounts so stale folder items don't linger.
+  useEffect(() => () => useMediaStore.getState().setData([]), []);
 
   // In-memory folder cache: { [source_id]: items[] }
   // Stored in a ref so it survives re-renders without causing them.

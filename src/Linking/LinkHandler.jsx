@@ -27,22 +27,20 @@ const {userInfo} = useAppState();
   useEffect(() => {
     const checkInitialURL = async () => {
       const url = await Linking.getInitialURL();
-      if (url) {
-        if (userInfo && !hasHandledInitialUrl.current) {
-          console.log('Initial URL got user:', url);
-          // hasHandledInitialUrl.current = true;
-          handleLinkSubmit(url, { setDriveLinksList, setItems,setDeviceFiles });
-        } else {
-          console.log('Initial URL waiting for user:', url);
-          pendingUrlRef.current = url;
-        }
+      if (!url || url.startsWith('audiotracker://')) return;
+      if (userInfo && !hasHandledInitialUrl.current) {
+        console.log('Initial URL got user:', url);
+        handleLinkSubmit(url, { setDriveLinksList, setItems, setDeviceFiles });
+      } else {
+        console.log('Initial URL waiting for user:', url);
+        pendingUrlRef.current = url;
       }
     };
 
     const handleURL = ({ url }) => {
-      console.log('URL opened while running:', url,userInfo);
+      if (url.startsWith('audiotracker://')) return;
+      console.log('URL opened while running:', url, userInfo);
       if (userInfo && !hasHandledInitialUrl.current) {
-        // hasHandledInitialUrl.current = true;
         handleLinkSubmit(url, { setDriveLinksList, setItems, setDeviceFiles });
       } else {
         pendingUrlRef.current = url;

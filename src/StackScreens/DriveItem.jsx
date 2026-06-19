@@ -7,16 +7,18 @@ import {ItemTypes} from '../contexts/constants';
 import {useAppState} from '../contexts/AppStateContext';
 import {getFileIcon} from '../contexts/fileIconHelper';
 import { useMediaStore } from '../stores/useMediaStore';
-import { useShallow } from 'zustand/react/shallow';
 
 const DriveItem = ({item, screen}) => {
   const [fileExists, setFileExists] = useState(false);
-  const {driveLinksList, data} = useMediaStore(
-  useShallow(state => ({
-    driveLinksList: state.driveLinksList,
-    data: state.data,
-  })),
-);
+
+  // Read file_path from the store so it stays fresh after a download completes,
+  // even when the parent component holds a stale local copy of the item.
+  const filePath = useMediaStore(state => {
+    const found =
+      state.driveLinksList.find(f => f.source_id === item.source_id) ||
+      state.data.find(f => f.source_id === item.source_id);
+    return found?.file_path ?? item.file_path ?? null;
+  });
 
   const isFolder = item?.mimeType === 'application/vnd.google-apps.folder';
   const isVideo = item?.mimeType?.startsWith('video/');
@@ -24,18 +26,18 @@ const DriveItem = ({item, screen}) => {
   useEffect(() => {
     let mounted = true;
     const checkFile = async () => {
-      if (!item.file_path) {
+      if (!filePath) {
         if (mounted) setFileExists(false);
         return;
       }
-      const exists = await RNFS.exists(item.file_path);
+      const exists = await RNFS.exists(filePath);
       if (mounted) setFileExists(exists);
     };
     checkFile();
     return () => {
       mounted = false;
     };
-  }, [item.file_path, driveLinksList, data]);
+  }, [filePath]);
 
   return (
     <View style={styles.row}>

@@ -1,174 +1,112 @@
-import React, {useRef, useState} from 'react';
+import React, {useEffect} from 'react';
 import {ActivityIndicator, Alert, TouchableOpacity, View} from 'react-native';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import RNFS from 'react-native-fs';
 import CircularProgress from 'react-native-circular-progress-indicator';
 import {DRIVE_API_KEY} from '@env';
-import {updateFilePath, updateItemFields} from '../../database/U';
-import {useAppState} from '../../contexts/AppStateContext';
-import { useMediaStore } from '../../stores/useMediaStore';
-import { useShallow } from 'zustand/react/shallow';
+import {useMediaStore} from '../../stores/useMediaStore';
+import {useShallow} from 'zustand/react/shallow';
+import useDownloadStore from '../../stores/useDownloadStore';
+import {
+  enqueueDownload,
+  cancelDownload,
+} from '../../backgroundService/backgroundDownloadService';
+
+const getLocalFilePath = (sourceId, fileName) => {
+  const sanitizedFileName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
+  const sanitizedSourceId = sourceId.replace(/[^a-zA-Z0-9._-]/g, '_');
+  return `${RNFS.ExternalDirectoryPath}/${sanitizedSourceId}_${sanitizedFileName}`;
+};
 
 export const DownloadButton = ({file}) => {
-  const [downloadingFileId, setDownloadingFileId] = useState(null);
-  const [progress, setProgress] = useState(0);
- const {setDriveLinksList, setData} = useMediaStore(
-  useShallow(state => ({
-    setDriveLinksList: state.setDriveLinksList,
-    setData: state.setData,
-  })),
-);
-  const currentDownloadJobId = useRef(null);
+  const {setDriveLinksList, setData} = useMediaStore(
+    useShallow(state => ({
+      setDriveLinksList: state.setDriveLinksList,
+      setData: state.setData,
+    })),
+  );
 
-  const getLocalFilePath = (sourceId, fileName) => {
-    const sanitizedFileName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
-    const sanitizedSourceId = sourceId.replace(/[^a-zA-Z0-9._-]/g, '_');
-    return `${RNFS.ExternalDirectoryPath}/${sanitizedSourceId}_${sanitizedFileName}`;
-  };
+  const download = useDownloadStore(state => state.downloads[file.source_id]);
+  const removeDownload = useDownloadStore(state => state.removeDownload);
 
-  const isFileDownloaded = async filePath => {
-    return await RNFS.exists(filePath);
-  };
+  const status = download?.status;
+  const progress = download?.progress;
+  const isActive = status === 'queued' || status === 'downloading';
 
-  const onDownloadComplete = (file, localPath) => {
-    setData(prevData => {
-      const updated = prevData.map(f =>
+  // When the background service marks this file done, update the media lists
+  // and clear the entry from the download store.
+  useEffect(() => {
+    if (status !== 'done') return;
+    const localPath = download.localPath;
+
+    setData(prev =>
+      prev.map(f =>
         f.source_id === file.source_id ? {...f, file_path: localPath} : f,
-      );
-      return [...updated]; // force brand new array reference
-    });
-    setDriveLinksList(prevData => {
-      const updated = prevData.map(f =>
+      ),
+    );
+    setDriveLinksList(prev =>
+      prev.map(f =>
         f.source_id === file.source_id ? {...f, file_path: localPath} : f,
-      );
-      return [...updated]; // force brand new array reference
-    });
-  };
+      ),
+    );
 
-  const handleDownload = async file => {
+    Alert.alert('Download complete', `${file.title} saved.`);
+    removeDownload(file.source_id);
+  }, [status]);
+
+  const handleDownload = async () => {
     const localPath = getLocalFilePath(file.source_id, file.title);
-    try {
-      setDownloadingFileId(file.source_id);
-      setProgress(0);
 
-      const isDownloaded = await isFileDownloaded(localPath);
-      if (isDownloaded && localPath === file.file_path) {
-        Alert.alert('Already downloaded', `File is already at: ${localPath}`);
-        return;
-      }
-
-      const url = `https://www.googleapis.com/drive/v3/files/${file.source_id}?alt=media&key=${DRIVE_API_KEY}`;
-
-      const downloadOptions = {
-        fromUrl: url,
-        toFile: localPath,
-        progressDivider: 1,
-        begin: res => {
-          currentDownloadJobId.current = res.jobId;
-          console.log('Download started:', res);
-        },
-        progress: res => {
-          const total = Number(res.contentLength);
-          const written = Number(res.bytesWritten);
-          // If content length unknown (-1 or 0)
-          if (!total || total <= 0) {
-            // Show indeterminate progress (spinner mode)
-            setProgress(null);
-            return;
-          }
-          const percent = Math.min(100, Math.round((written / total) * 100));
-          setProgress(percent);
-        },
-      };
-
-      const result = await RNFS.downloadFile(downloadOptions).promise;
-      console.log('DOWNLOAD RESULT', result);
-      currentDownloadJobId.current = null;
-
-      if (result.statusCode === 200) {
-        setProgress(100);
-        const fullItem = await updateItemFields(file.id, {
-          file_path: localPath,
-        });
-        onDownloadComplete(file, localPath);
-        Alert.alert('Download Complete', `File saved to: ${localPath}`);
-      }
-    } catch (error) {
-      // console.error('Download failed or cancelled:', error);
-      if (await RNFS.exists(localPath)) {
-        await RNFS.unlink(localPath);
-        console.log('Partial file deleted');
-      }
-    } finally {
-      setDownloadingFileId(null);
-      setProgress(0);
+    if (await RNFS.exists(localPath) && localPath === file.file_path) {
+      Alert.alert('Already downloaded', 'File is already saved locally.');
+      return;
     }
+
+    const url = `https://www.googleapis.com/drive/v3/files/${file.source_id}?alt=media&key=${DRIVE_API_KEY}`;
+    await enqueueDownload({
+      id: file.id,
+      sourceId: file.source_id,
+      title: file.title,
+      url,
+      localPath,
+    });
   };
 
-  const handleCancelDownload = () => {
-    setDownloadingFileId(null);
-    if (currentDownloadJobId.current !== null) {
-      RNFS.stopDownload(currentDownloadJobId.current);
-      currentDownloadJobId.current = null;
-      setProgress(0);
-      Alert.alert('Download canceled');
-    }
+  const handleCancel = () => {
+    cancelDownload(file.source_id);
   };
 
-  const isDownloading = downloadingFileId === file.source_id;
-
- return (
-  <TouchableOpacity
-    onPress={
-      isDownloading
-        ? handleCancelDownload
-        : () => handleDownload(file)
-    }
-    style={{
-      width: 30,
-      height: 30,
-      alignItems: 'center',
-      justifyContent: 'center',
-    }}
-  >
-    {isDownloading ? (
-      progress === null ? (
-        <ActivityIndicator size="small" />
+  return (
+    <TouchableOpacity
+      onPress={isActive ? handleCancel : handleDownload}
+      style={{width: 30, height: 30, alignItems: 'center', justifyContent: 'center'}}>
+      {isActive ? (
+        progress === null || progress === 0 ? (
+          <ActivityIndicator size="small" />
+        ) : (
+          <View style={{width: 30, height: 30, justifyContent: 'center', alignItems: 'center'}}>
+            <CircularProgress
+              value={progress}
+              radius={15}
+              duration={100}
+              progressValueColor="transparent"
+              activeStrokeColor="#2196F3"
+              inActiveStrokeColor="#e0e0e0"
+              inActiveStrokeWidth={4}
+              activeStrokeWidth={4}
+              maxValue={100}
+            />
+            <Ionicons
+              name="close"
+              size={22}
+              color="#000"
+              style={{position: 'absolute'}}
+            />
+          </View>
+        )
       ) : (
-        <View
-          style={{
-            width: 30,
-            height: 30,
-            justifyContent: 'center',
-            alignItems: 'center',
-          }}
-        >
-          <CircularProgress
-            value={progress}
-            radius={15}
-            duration={100}
-            progressValueColor="transparent"
-            activeStrokeColor="#2196F3"
-            inActiveStrokeColor="#e0e0e0"
-            inActiveStrokeWidth={4}
-            activeStrokeWidth={4}
-            maxValue={100}
-          />
-
-          <Ionicons
-            name="close"
-            size={22}
-            color="#000"
-            style={{
-              position: 'absolute',
-            }}
-          />
-        </View>
-      )
-    ) : (
-      <Ionicons name="cloud-download" size={24} color="black" />
-    )}
-  </TouchableOpacity>
-);
-
+        <Ionicons name="cloud-download" size={24} color="black" />
+      )}
+    </TouchableOpacity>
+  );
 };

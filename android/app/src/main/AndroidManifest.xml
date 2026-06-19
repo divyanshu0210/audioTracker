@@ -70,10 +70,17 @@
   <data android:mimeType="*/*" />
 </intent-filter>
 
+        <intent-filter>
+            <action android:name="android.intent.action.VIEW"/>
+            <category android:name="android.intent.category.DEFAULT"/>
+            <category android:name="android.intent.category.BROWSABLE"/>
+            <data android:scheme="audiotracker"/>
+        </intent-filter>
       </activity>
-  <service 
-    android:name="com.asterinet.react.bgactions.RNBackgroundActionsTask" 
-    android:foregroundServiceType="shortService"/>
+
+  <service
+    android:name="com.asterinet.react.bgactions.RNBackgroundActionsTask"
+    android:foregroundServiceType="dataSync"/>
 
     <service
     android:name="androidx.work.impl.foreground.SystemForegroundService"

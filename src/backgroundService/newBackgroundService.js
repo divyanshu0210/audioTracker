@@ -17,6 +17,10 @@ const options = {
     value: 0,
     indeterminate: false,
   },
+  // ACTION_VIEW deep link that only this app registers (manifest: scheme
+  // "audiotracker") → opens the app directly, no app-chooser dialog.
+  // LinkHandler ignores any audiotracker:// URL, so no navigation/rerenders.
+  linkingURI: 'audiotracker://open',
 };
 
 /**

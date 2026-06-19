@@ -152,13 +152,17 @@ const BaseItem = ({type, item, subtype, screen, onFolderPress}) => {
   }, [item, onFolderPress]);
 
   const handleDriveFilePress = useCallback(async () => {
-    const {nonFolderFiles, nonFolderFilesInside} = useMediaStore.getState();
-    if (item.file_path && isAudioOrVideo(item.mimeType)) {
-      const exists = await RNFS.exists(item.file_path);
-      if (!exists) {
-        return;
-      }
-      console.log(`'trying to play'${item}`);
+    const {nonFolderFiles, nonFolderFilesInside, driveLinksList, data} =
+      useMediaStore.getState();
+    // Use store's file_path — item prop may be stale (e.g. GoogleDriveViewer local state)
+    const storeFile =
+      driveLinksList.find(f => f.source_id === item.source_id) ||
+      data.find(f => f.source_id === item.source_id);
+    const filePath = storeFile?.file_path ?? item.file_path ?? null;
+
+    if (filePath && isAudioOrVideo(item.mimeType)) {
+      const exists = await RNFS.exists(filePath);
+      if (!exists) return;
       const dataSource =
         screen === ScreenTypes.IN ? nonFolderFilesInside : nonFolderFiles;
       if (screen === 'search' || !dataSource || dataSource.length === 0) {
@@ -172,21 +176,15 @@ const BaseItem = ({type, item, subtype, screen, onFolderPress}) => {
         items: dataSource,
         currentIndex: startingIndex,
       });
-    } else if (item.file_path) {
-      const exists = await RNFS.exists(item.file_path);
-      if (!exists) {
-        return;
-      }
-      FileViewer.open(item.file_path, {showOpenWithDialog: true})
-        .then(() => {
-          // file opened successfully
-        })
-        .catch(() => {
-          Alert.alert(
-            'Could not open file.',
-            'You do not have a proper app to view this file',
-          );
-        });
+    } else if (filePath) {
+      const exists = await RNFS.exists(filePath);
+      if (!exists) return;
+      FileViewer.open(filePath, {showOpenWithDialog: true}).catch(() => {
+        Alert.alert(
+          'Could not open file.',
+          'You do not have a proper app to view this file',
+        );
+      });
     }
   }, [item, screen]);
 

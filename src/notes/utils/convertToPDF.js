@@ -22,14 +22,18 @@ let processedContent = note.content;
 images.forEach(img => {
   if (!img?.id || !img?.image_data) return;
 
+  // [^>]*? instead of [\s\S]*? — the SVG placeholder encodes all < and >
+  // as %3C/%3E so no attribute value contains a literal >, meaning [^>] is
+  // guaranteed to stop at this tag's own closing > and never cross into the
+  // next <img> tag (which [\s\S]*? could do when the matching id is not first).
   const regex = new RegExp(
-    `<img[\\s\\S]*?data-image-id=["']${img.id}["'][\\s\\S]*?>`,
+    `<img[^>]*?data-image-id=["']${img.id}["'][^>]*?>`,
     'gi'
   );
 
   processedContent = processedContent.replace(
     regex,
-    `<img src="${img.image_data}" style="max-width:100%; margin:20px 0;" />`
+    `<img src="${img.image_data}" style="max-width:100%; height:auto; display:block;" />`
   );
 });
 
@@ -38,6 +42,21 @@ images.forEach(img => {
     processedContent = processedContent
       .replace(/contenteditable="false"/g, '')
       .replace(/onclick="[^"]*"/g, '');
+
+    // Center the image wrapper div (the position:relative container that holds
+    // both the <img> and the absolutely-positioned timestamp button). Centering
+    // the wrapper — not the img — keeps the button overlaid on the image.
+    // The img fills the wrapper at 100% so the effective size is 60% of page.
+    processedContent = processedContent.replace(
+      /(<div\b[^>]*?)style="([^"]*)"/gi,
+      (match, tag, style) => {
+        if (!/position\s*:\s*relative/i.test(style)) return match;
+        const updated = style
+          .replace(/max-width\s*:\s*[\w.%]+/i, 'max-width: 60%')
+          .replace(/display\s*:\s*\w+/i, 'display: block');
+        return `${tag}style="${updated}; margin: 16px auto;"`;
+      },
+    );
 
     // 4️⃣ Remove invisible spacer buttons
     processedContent = processedContent.replace(
@@ -75,9 +94,12 @@ images.forEach(img => {
         <head>
           <meta charset="utf-8" />
           <style>
+            @page {
+              margin: 40px;
+            }
             body {
               font-family: Helvetica, sans-serif;
-              margin: 40px;
+              margin: 0;
               line-height: 1.6;
               color: #333;
             }
@@ -91,7 +113,6 @@ images.forEach(img => {
               max-width: 100%;
               height: auto;
               display: block;
-              margin: 20px auto;
             }
             p {
               font-size: 16px;

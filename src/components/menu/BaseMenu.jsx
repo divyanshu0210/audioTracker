@@ -73,7 +73,7 @@ const {setSelectedNote} = useNotesStore(
       case ItemTypes.DRIVE:
         return item?.mimeType !== 'application/vnd.google-apps.folder';
       case ItemTypes.YOUTUBE:
-        return item.type !== 'playlist';
+        return item.type !== 'youtube_playlist';
       default:
         return null;
     }

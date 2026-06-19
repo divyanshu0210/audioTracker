@@ -25,6 +25,7 @@ import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
 import {seekVideoTo} from '../../music/progressTrackingUtils.js';
 import {generateId, useNoteController} from '../useNoteController.jsx';
 import {useImagePersistence} from '../useImagePersistence.jsx';
+import {cacheImageFile} from '../utils/imageFileCache.js';
 import {LoadingBar} from '../../components/LoadingBar.jsx';
 import {useNotesStore} from '../../stores/useNotesStore.js';
 
@@ -34,7 +35,11 @@ import {useNotesStore} from '../../stores/useNotesStore.js';
 const makePlaceholder = (w, h) => {
   const W = Number(w) || 4;
   const H = Number(h) || 3;
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}"><rect width="100%" height="100%" fill="#e0e0e0"/></svg>`;
+  // viewBox is essential: without it an <img> SVG won't scale its height
+  // proportionally when CSS caps the width (max-width:100% + height:auto), so
+  // the placeholder collapses shorter than the real image and the scroll height
+  // comes out short. With viewBox it carries an intrinsic ratio like a raster.
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}"><rect width="100%" height="100%" fill="#e0e0e0"/></svg>`;
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 };
 
@@ -42,6 +47,33 @@ const CUSTOM_CSS = `
   .highlight { background-color: yellow; }
   img { max-width: 100% !important; height: auto !important; display: block; }
   div[contenteditable="false"] { max-width: 100% !important; }
+`;
+
+// DEBUG: set > 0 (ms) to load the grey placeholders first and swap in the real
+// images after this delay — lets you watch that placeholders reserve the correct
+// box and the note stays scrollable. Set to 0 for production (single-step load).
+const TEST_PLACEHOLDER_DELAY = 0;
+
+// Insurance for async file:// image decode: pell only measures content height on
+// init + input, so if an image's box settles a tick later the container can be
+// left too short. A ResizeObserver re-reports height on any content size change,
+// using the same OFFSET_HEIGHT message pell already listens for.
+const HEIGHT_OBSERVER_JS = `
+(function(){
+  if (window.__heightObserverAttached) return true;
+  var content = document.getElementById('content');
+  if (!content || !window.ResizeObserver || !window.ReactNativeWebView) return true;
+  window.__heightObserverAttached = true;
+  var report = function(){
+    try {
+      window.ReactNativeWebView.postMessage(
+        JSON.stringify({type: 'OFFSET_HEIGHT', data: content.scrollHeight})
+      );
+    } catch (e) {}
+  };
+  new ResizeObserver(report).observe(content);
+})();
+true;
 `;
 
 // ─── Pure helpers ─────────────────────────────────────────────────────────────
@@ -81,7 +113,11 @@ function processHtmlContent(html) {
         // BEFORE the real image decodes → scrollHeight is right immediately, so
         // the editor measures the right height and the note stays scrollable.
         const dimAttrs = w && h ? ` width="${w}" height="${h}"` : '';
-        return `<img src="${makePlaceholder(w, h)}" data-image-id="${imageId}" data-image-width="${w || ''}" data-image-height="${h || ''}"${dimAttrs} loading="lazy" alt="image" style="max-width:100%;height:auto;display:block;background:#e0e0e0;"/>`;
+        // NOTE: no loading="lazy" — this WebView has no internal scroll, so a
+        // below-the-fold lazy image never enters the viewport, never loads, and
+        // its box stays collapsed → pell measures a too-short height and the
+        // note won't scroll. width/height already reserve the box with no shift.
+        return `<img src="${makePlaceholder(w, h)}" data-image-id="${imageId}" data-image-width="${w || ''}" data-image-height="${h || ''}"${dimAttrs} alt="image" style="max-width:100%;height:auto;display:block;background:#e0e0e0;"/>`;
       }
       return fullMatch;
     },
@@ -154,6 +190,8 @@ const RichTextEditor = forwardRef(
 
     const handleEditorInitialized = useCallback(() => {
       editorReadyRef.current = true;
+      // Keep the WebView container height in sync with async image decode.
+      richText.current?.injectJavascript(HEIGHT_OBSERVER_JS);
       if (pendingContentRef.current !== null) {
         richText.current?.setContentHTML(pendingContentRef.current);
         pendingContentRef.current = null;
@@ -170,6 +208,12 @@ const RichTextEditor = forwardRef(
         let hydrated = htmlContent;
         for (const img of images) {
           if (!img?.id || !img?.image_data) continue;
+
+          // Materialize the base64 to a cache file and point the DOM at its
+          // tiny file:// URI — keeps base64 out of the editable HTML so the
+          // editor's per-keystroke onChange stays small.
+          const fileUri = await cacheImageFile(img.id, img.image_data);
+          if (!fileUri) continue;
 
           const marker = `data-image-id="${img.id}"`;
           const markerPos = hydrated.indexOf(marker);
@@ -193,8 +237,7 @@ const RichTextEditor = forwardRef(
           }
 
           const fullTag = hydrated.slice(tagStart, pos + 1);
-          // /s flag so [^"]* spans newlines inside the SVG data URL
-          const updatedTag = fullTag.replace(/src="[^"]*"/s, `src="${img.image_data}"`);
+          const updatedTag = fullTag.replace(/src="[^"]*"/s, `src="${fileUri}"`);
           hydrated = hydrated.slice(0, tagStart) + updatedTag + hydrated.slice(pos + 1);
         }
         return hydrated;
@@ -226,19 +269,28 @@ const RichTextEditor = forwardRef(
         // scroll bug — and no racy second setContentHTML on a not-yet-ready editor.
         const hydratedContent = await hydrateImagesInHtml(id, content);
 
+        // `content` from the DB already holds the grey placeholders; when the
+        // debug delay is on, show those first so the box reservation is visible.
+        const firstContent =
+          TEST_PLACEHOLDER_DELAY > 0 ? content : hydratedContent;
+
+        const applyContent = html => {
+          if (editorReadyRef.current) {
+            richText.current?.setContentHTML(html);
+          } else {
+            pendingContentRef.current = html;
+          }
+        };
+
         unstable_batchedUpdates(() => {
           setTitle(noteTitle);
           latestTitleRef.current = noteTitle;
 
-          if (editorReadyRef.current) {
-            richText.current?.setContentHTML(hydratedContent);
-          } else {
-            pendingContentRef.current = hydratedContent;
-          }
+          applyContent(firstContent);
           latestHtmlContentRef.current = content;
           // The editor emits onChange right after setContentHTML; seed the guard
-          // with the hydrated HTML so that initial event doesn't re-save on open.
-          lastSavedContentRef.current = hydratedContent;
+          // with the rendered HTML so that initial event doesn't re-save on open.
+          lastSavedContentRef.current = firstContent;
 
           if (isEditableRef.current !== isEmpty) setIsEditable(isEmpty);
           // Keep the loader up until the editor actually renders the content
@@ -246,6 +298,16 @@ const RichTextEditor = forwardRef(
           // stays true here; handleEditorChange flips it off.
           awaitingContentRef.current = true;
         });
+
+        // DEBUG phase 2: swap the grey placeholders for the real file:// images
+        // after the delay. Same width/height attrs → no layout shift on swap.
+        if (TEST_PLACEHOLDER_DELAY > 0) {
+          setTimeout(() => {
+            applyContent(hydratedContent);
+            lastSavedContentRef.current = hydratedContent;
+            latestHtmlContentRef.current = content;
+          }, TEST_PLACEHOLDER_DELAY);
+        }
 
         // Fallback: pell doesn't reliably emit onChange for programmatic
         // setContentHTML, so clear the loader shortly after the content is
@@ -404,14 +466,18 @@ const RichTextEditor = forwardRef(
           }
         }
 
+        // Write the bytes to the on-disk cache and reference the tiny file://
+        // URI in the editable DOM; base64 still goes to the DB below for backup.
+        const fileUri = await cacheImageFile(imageId, base64Image);
+        const domSrc = fileUri || base64Image;
+
         let html = `
         <div><br></div>
         <div contenteditable="false" style="position: relative; display: block; max-width: 100%;">
           <img
-            src="${base64Image}"
+            src="${domSrc}"
             style="max-width: 100%; height: auto; display: block;"
             alt="image"
-            loading="lazy"
             data-image-id="${imageId}"
             data-image-width="${width || ''}"
             data-image-height="${height || ''}"
@@ -507,6 +573,12 @@ const RichTextEditor = forwardRef(
     // ── RichEditor onChange ───────────────────────────────────────────────────
 
     const handleEditorChange = useCallback(descriptionText => {
+      // VERIFY bridge cost: payload size per keystroke. Should stay small
+      // (file:// URIs) and NOT scale with image count (no base64 leaking in).
+      // console.log(
+      //   `⌨️ onChange payload: ${descriptionText?.length ?? 0} chars`,
+      //   descriptionText?.includes('base64') ? '⚠️ BASE64 IN DOM' : '✅ no base64',
+      // );
       // First onChange after a load = content has rendered → drop the loader.
       if (awaitingContentRef.current) {
         awaitingContentRef.current = false;
@@ -592,6 +664,11 @@ const RichTextEditor = forwardRef(
             onChange={handleEditorChange}
             customCSS={CUSTOM_CSS}
             onMessage={handleMessage}
+            // Allow the WebView to load the file:// image cache. pell spreads
+            // these through to its internal WebView via {...rest}.
+            allowFileAccess={true}
+            allowFileAccessFromFileURLs={true}
+            allowUniversalAccessFromFileURLs={true}
           />
         </ScrollView>
 

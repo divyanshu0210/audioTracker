@@ -1,9 +1,6 @@
 import React from 'react';
-import {View, Text, TouchableOpacity} from 'react-native';
-import {useNavigation} from '@react-navigation/native';
-import {useAppState} from '../../contexts/AppStateContext';
 import AppHeader from '../../components/headers/AppHeader';
-import { useSelectionStore } from '../../stores/useSelectionStore';
+import {useSelectionStore} from '../../stores/useSelectionStore';
 
 const sourceTypeLabels = {
   youtube: 'YouTube Video',
@@ -16,18 +13,15 @@ const sourceTypeColors = {
   youtube: '#FF4E42',
   drive: '#007bff',
   device: '#00C853',
-  notebook: null, // Use dynamic color from item
+  notebook: null,
 };
 
 const ContextHeader = ({}) => {
-const activeItem = useSelectionStore(
-  state => state.activeItem,
-);
-  console.log('CONEXT HEADER', activeItem);
+  const activeItem = useSelectionStore(state => state.activeItem);
 
   const isNoteSource = activeItem?.sourceType === 'note';
   const resolvedItem = isNoteSource ? activeItem?.item : activeItem;
-  
+
   const sourceId = isNoteSource
     ? resolvedItem?.source_id
     : resolvedItem?.sourceId;
@@ -56,7 +50,7 @@ const activeItem = useSelectionStore(
       searchParams={{
         initialSearchActive: true,
         mode: 'notes',
-        initialNoteFilters: [sourceType.split('_')[0] + '_notes'],
+        initialNoteFilters: sourceType ? [sourceType.split('_')[0] + '_notes'] : [],
         sourceId: sourceId,
       }}
       rightComponent={null}

@@ -185,7 +185,6 @@ const BacePlayer = () => {
       navigationRef.getParent()?.setOptions({tabBarStyle: {display: 'flex'}});
       cleanupPlayer();
       setActiveNoteId(null);
-      setActiveItem(null);
     };
   }, [currentItem]);
 
@@ -400,7 +399,6 @@ const BacePlayer = () => {
     }, 150);
   };
   const handleBackPress = useCallback(() => {
-    setActiveItem(null);
     if (navigationRef.canGoBack()) {
       navigationRef.goBack();
     } else {

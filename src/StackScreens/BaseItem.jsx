@@ -16,8 +16,7 @@ import {useSelectionStore} from '../stores/useSelectionStore';
 import {useNotesStore} from '../stores/useNotesStore';
 import {navigationRef} from '../handlers/navigationRef';
 import {useShallow} from 'zustand/react/shallow';
-import {StackActions, useNavigationState, useRoute} from '@react-navigation/core';
-import useLoadingStore from '../stores/useLoadingStore';
+import {StackActions, useRoute} from '@react-navigation/core';
 
 const BaseItem = ({type, item, subtype, screen, onFolderPress}) => {
    const route = useRoute();
@@ -28,10 +27,9 @@ const BaseItem = ({type, item, subtype, screen, onFolderPress}) => {
     })),
   );
 
-  const {setActiveItem, setSelectedCategory} = useSelectionStore(
+  const {setActiveItem} = useSelectionStore(
     useShallow(state => ({
       setActiveItem: state.setActiveItem,
-      setSelectedCategory: state.setSelectedCategory,
     })),
   );
 
@@ -183,8 +181,7 @@ const BaseItem = ({type, item, subtype, screen, onFolderPress}) => {
         .then(() => {
           // file opened successfully
         })
-        .catch(error => {
-          // console.error('Failed to open file:', error);
+        .catch(() => {
           Alert.alert(
             'Could not open file.',
             'You do not have a proper app to view this file',
@@ -210,11 +207,14 @@ const BaseItem = ({type, item, subtype, screen, onFolderPress}) => {
   const handleMediaNotePress = useCallback(() => {
     setSelectedNote(item);
     const targetScreen = 'BacePlayer';
-    console.log('routeInfo', currentRoute);
     if (currentRoute === targetScreen || currentRoute === 'ItemNotesScreen') {
       navigationRef.goBack();
       setActiveNoteId(item.rowid);
-    } else if (currentRoute === 'Notes' || currentRoute === 'All Notes') {
+    } else if (
+      currentRoute === 'Notes' ||
+      currentRoute === 'All Notes' ||
+      currentRoute === 'NotesListScreen'
+    ) {
       navigationRef.navigate(targetScreen, {
         item: item.relatedItem,
         currentNoteId: item.rowid,

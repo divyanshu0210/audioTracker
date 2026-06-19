@@ -1,5 +1,6 @@
-import React, {useEffect} from 'react';
+import React, {useCallback, useEffect} from 'react';
 import {Dimensions, StyleSheet, Text, View, unstable_batchedUpdates} from 'react-native';
+import {useFocusEffect} from '@react-navigation/native';
 import {fetchNotes} from '../database/R';
 import NotesListComponent from './notesListing/NotesListComponent';
 import {ScreenTypes} from '../contexts/constants';
@@ -33,6 +34,16 @@ const ItemNotesScreen = ({route}) => {
       });
     };
   }, [sourceId, sourceType]);
+
+  // BacePlayer clears the shared notesList store when it mounts. Reload when
+  // this screen regains focus so the list is never left empty after going back.
+  useFocusEffect(
+    useCallback(() => {
+      if (sourceId && sourceType) {
+        loadNotesForItem();
+      }
+    }, [sourceId, sourceType]),
+  );
 
   const loadNotesForItem = async () => {
     setLoadingState('itemNotes', true);

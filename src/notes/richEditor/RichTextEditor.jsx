@@ -81,7 +81,7 @@ function processHtmlContent(html) {
         // BEFORE the real image decodes → scrollHeight is right immediately, so
         // the editor measures the right height and the note stays scrollable.
         const dimAttrs = w && h ? ` width="${w}" height="${h}"` : '';
-        return `<img src="${makePlaceholder(w, h)}" data-image-id="${imageId}" data-image-width="${w || ''}" data-image-height="${h || ''}"${dimAttrs} alt="image" style="max-width:100%;height:auto;display:block;background:#e0e0e0;"/>`;
+        return `<img src="${makePlaceholder(w, h)}" data-image-id="${imageId}" data-image-width="${w || ''}" data-image-height="${h || ''}"${dimAttrs} loading="lazy" alt="image" style="max-width:100%;height:auto;display:block;background:#e0e0e0;"/>`;
       }
       return fullMatch;
     },
@@ -120,6 +120,10 @@ const RichTextEditor = forwardRef(
     const pendingContentRef = useRef(null);
     const saveTimeout = useRef(null);
     const titleTimeout = useRef(null);
+    // True between handing content to the editor and the editor actually
+    // rendering it (its first onChange) — keeps the loader up across that gap.
+    const awaitingContentRef = useRef(false);
+    const loaderSafetyTimeout = useRef(null);
 
     // Shadow refs — let callbacks read current values without stale closures
     const noteIdRef = useRef(noteId);
@@ -127,6 +131,9 @@ const RichTextEditor = forwardRef(
     const isLoadingRef = useRef(false);
     const latestHtmlContentRef = useRef('');
     const latestTitleRef = useRef('');
+    // Tracks the editor HTML we last persisted, so we can skip the base64 scan +
+    // DB write when nothing actually changed (e.g. the onChange right after load).
+    const lastSavedContentRef = useRef(null);
 
     const [isLoading, setIsLoading] = useState(false);
     const [title, setTitle] = useState('');
@@ -229,10 +236,28 @@ const RichTextEditor = forwardRef(
             pendingContentRef.current = hydratedContent;
           }
           latestHtmlContentRef.current = content;
+          // The editor emits onChange right after setContentHTML; seed the guard
+          // with the hydrated HTML so that initial event doesn't re-save on open.
+          lastSavedContentRef.current = hydratedContent;
 
           if (isEditableRef.current !== isEmpty) setIsEditable(isEmpty);
-          setIsLoading(false);
+          // Keep the loader up until the editor actually renders the content
+          // (its first onChange), so there's no blank "stuck" gap. setIsLoading
+          // stays true here; handleEditorChange flips it off.
+          awaitingContentRef.current = true;
         });
+
+        // Fallback: pell doesn't reliably emit onChange for programmatic
+        // setContentHTML, so clear the loader shortly after the content is
+        // handed over (covers the WebView paint gap). The onChange fast-path
+        // clears it sooner when it does fire.
+        if (loaderSafetyTimeout.current) clearTimeout(loaderSafetyTimeout.current);
+        loaderSafetyTimeout.current = setTimeout(() => {
+          if (awaitingContentRef.current) {
+            awaitingContentRef.current = false;
+            setIsLoading(false);
+          }
+        }, 500);
 
         setTimeout(() => {
           const usedImageIds = Array.from(
@@ -262,11 +287,14 @@ const RichTextEditor = forwardRef(
       const id = noteIdRef.current;
       if (!id) return;
       if (!isEditableRef.current && !forceSave) return;
+      // Nothing changed since the last save → skip the base64 scan + DB write.
+      if (content === lastSavedContentRef.current && !forceSave) return;
 
       const {processedHtml} = processHtmlContent(content);
       const textContent = stripHtml(processedHtml, latestTitleRef.current);
       try {
         saveContent(id, processedHtml, textContent);
+        lastSavedContentRef.current = content;
       } catch (error) {
         console.error('🔵 handleSaveNote failed:', error);
       }
@@ -303,11 +331,26 @@ const RichTextEditor = forwardRef(
           await deleteNote(id);
           ToastAndroid.show('Empty note deleted', ToastAndroid.SHORT);
         } else {
-          await handleSaveNote(currentContent);
+          // Process the base64 → placeholders ONCE and reuse it for both the DB
+          // save and the in-memory list (avoids a second full base64 scan).
+          const {processedHtml} = processHtmlContent(currentContent);
+          const textContent = stripHtml(processedHtml, latestTitleRef.current);
+
+          // Persist only if editable and actually changed (same guards as save).
+          if (isEditableRef.current && currentContent !== lastSavedContentRef.current) {
+            try {
+              saveContent(id, processedHtml, textContent);
+              lastSavedContentRef.current = currentContent;
+            } catch (error) {
+              console.error('🔵 save on close failed:', error);
+            }
+          }
+
+          // Store placeholders in the list, never base64 → keeps list state small.
           updateNoteInState(id, {
-            content: currentContent,
+            content: processedHtml,
             noteTitle: latestTitleRef.current,
-            text_content: stripHtml(currentContent, latestTitleRef.current),
+            text_content: textContent,
           });
         }
 
@@ -317,12 +360,13 @@ const RichTextEditor = forwardRef(
         console.error('🔴 handleCloseNote error:', error);
         ToastAndroid.show('Error closing note', ToastAndroid.SHORT);
       }
-    }, [handleSaveNote, deleteNote, setActiveNoteId, updateNoteInState]);
+    }, [saveContent, deleteNote, setActiveNoteId, updateNoteInState]);
 
     useEffect(() => {
       const mountedNoteId = noteId;
       return () => {
         if (mountedNoteId) handleCloseNote(mountedNoteId);
+        if (loaderSafetyTimeout.current) clearTimeout(loaderSafetyTimeout.current);
       };
     }, []);
 
@@ -367,6 +411,7 @@ const RichTextEditor = forwardRef(
             src="${base64Image}"
             style="max-width: 100%; height: auto; display: block;"
             alt="image"
+            loading="lazy"
             data-image-id="${imageId}"
             data-image-width="${width || ''}"
             data-image-height="${height || ''}"
@@ -462,6 +507,15 @@ const RichTextEditor = forwardRef(
     // ── RichEditor onChange ───────────────────────────────────────────────────
 
     const handleEditorChange = useCallback(descriptionText => {
+      // First onChange after a load = content has rendered → drop the loader.
+      if (awaitingContentRef.current) {
+        awaitingContentRef.current = false;
+        if (loaderSafetyTimeout.current) {
+          clearTimeout(loaderSafetyTimeout.current);
+          loaderSafetyTimeout.current = null;
+        }
+        setIsLoading(false);
+      }
       latestHtmlContentRef.current = descriptionText;
       if (noteIdRef.current && !isLoadingRef.current) {
         debouncedSaveNote(descriptionText);
@@ -488,6 +542,7 @@ const RichTextEditor = forwardRef(
       focusEditor: () => richText.current?.focusContentEditor(),
       blurEditor: () => richText.current?.blurContentEditor(),
       toggleEditMode,
+      // flushSave, // optional — see commented method above
     }), [handleImagePickerResult, addTimestamp, toggleEditMode]);
 
     // ── Render ────────────────────────────────────────────────────────────────
@@ -523,7 +578,7 @@ const RichTextEditor = forwardRef(
             returnKeyType="next"
             onSubmitEditing={onSubmitTitle}
           />
-          {isLoading && <LoadingBar isInserting={isLoading} speed={800} />}
+          {isLoading && <LoadingBar active={isLoading} speed={800} />}
           <RichEditor
             ref={richText}
             placeholder="Start typing..."

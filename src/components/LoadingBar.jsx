@@ -3,9 +3,12 @@ import React, { useEffect, useRef } from 'react';
 import { Animated, StyleSheet, View } from 'react-native';
 import useDbStore from '../database/dbStore';
 
-export const LoadingBar = ({ speed = 1400 }) => {
+export const LoadingBar = ({ speed = 1400, active }) => {
   const translateX = useRef(new Animated.Value(-100)).current;
-  const isInserting = useDbStore(state => state.inserting);
+  const storeInserting = useDbStore(state => state.inserting);
+  // When `active` is passed, it drives the bar (e.g. note loading); otherwise
+  // fall back to the global DB-insert flag (e.g. HomeTabs).
+  const isInserting = active !== undefined ? active : storeInserting;
 
   useEffect(() => {
     if (isInserting) {

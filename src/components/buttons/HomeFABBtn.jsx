@@ -56,7 +56,7 @@ const HomeFABBtn = () => {
   const {addNBbottomSheetRef, mentorMenteeRequestBottomSheetRef} =
     useAppState();
   const {createNoteInstant} = useNoteController();
-  const {setInserting} = useDbStore();
+  const setInserting = useDbStore(state => state.setInserting);
   //  Media ---------------------
   // Reset modal visibility on screen blur or keyboard hide
   useFocusEffect(

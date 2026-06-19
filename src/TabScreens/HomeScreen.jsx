@@ -29,7 +29,14 @@ const HomeScreen = () => {
   const {userInfo} = useAppState();
 
   const {setMentors, setMentees, activeMentee, activeMentor} =
-    useMentorMenteeStore();
+    useMentorMenteeStore(
+      useShallow(state => ({
+        setMentors: state.setMentors,
+        setMentees: state.setMentees,
+        activeMentee: state.activeMentee,
+        activeMentor: state.activeMentor,
+      })),
+    );
   const isActive = activeMentee || activeMentor;
 
   // Initial load
@@ -82,7 +89,11 @@ const HomeScreen = () => {
   );
 };
 
-export default track(HomeScreen);
+// HomeScreen derives all data from Zustand hooks — it uses no props. Memo with
+// () => true prevents React Navigation from re-rendering it when route/navigation
+// object references change (e.g. after navigate('HomeScreen', {screen:'YouTube'})).
+// Zustand subscriptions still fire their own rerenders as normal.
+export default track(React.memo(HomeScreen, () => true));
 
 const styles = StyleSheet.create({
   container: {

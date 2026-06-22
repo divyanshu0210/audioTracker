@@ -9,6 +9,7 @@ import NotebookItem from './NoteBook/NotebookItem';
 import FileViewer from 'react-native-file-viewer';
 import {ItemTypes, ScreenTypes} from '../contexts/constants';
 import BaseMenu from '../components/menu/BaseMenu';
+import {playFile as playIskconFile} from '../scrap/iskconActions';
 import NoteItem from '../notes/notesListing/NoteItem';
 import {CategoryItem} from '../categories/CategoryItem';
 import {useMediaStore} from '../stores/useMediaStore';
@@ -188,6 +189,12 @@ const BaseItem = ({type, item, subtype, screen, onFolderPress}) => {
     }
   }, [item, screen]);
 
+  const handleIskconPress = useCallback(() => {
+    // DB rows only exist for files that were played or downloaded, so
+    // file_path is always set (remote URL until a local copy exists).
+    playIskconFile(item, item.file_path);
+  }, [item]);
+
   const handleNotebookPress = useCallback(() => {
     navigationRef.navigate('NotebookNotesScreen', {notebook: item});
   }, [item]);
@@ -282,6 +289,11 @@ const BaseItem = ({type, item, subtype, screen, onFolderPress}) => {
       Component: DeviceItem,
       onPress: handleDevicePress,
       showMenu: item => !!item.file_path,
+    },
+    [ItemTypes.ISKCON]: {
+      Component: DeviceItem,
+      onPress: handleIskconPress,
+      showMenu: () => true,
     },
     [ItemTypes.DRIVE]: {
       Component: DriveItem,

@@ -5,6 +5,7 @@ import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityI
 import {useAppState} from '../../contexts/AppStateContext';
 import CommonMenuItems from './CommonMenuItems';
 import DriveMenuItems from './DriveMenuItems';
+import IskconMenuItems from './IskconMenuItems';
 import NBMenuItems from './NBMenuItems';
 import NoteMenuItems from './NoteMenuItems';
 import YTMenuItems from './YTMenuItems';
@@ -26,6 +27,7 @@ const {setSelectedNote} = useNotesStore(
     setSelectedNote: state.setSelectedNote,
   })),
 );
+
   const sourceId =
     item?.rowid ||
     item?.source_id ||
@@ -59,6 +61,8 @@ const {setSelectedNote} = useNotesStore(
         );
       case ItemTypes.YOUTUBE:
         return <YTMenuItems item={item} screen={screen} hideMenu={hideMenu} />;
+      case ItemTypes.ISKCON:
+        return <IskconMenuItems item={item} hideMenu={hideMenu} />;
       default:
         return null;
     }
@@ -74,13 +78,15 @@ const {setSelectedNote} = useNotesStore(
         return item?.mimeType !== 'application/vnd.google-apps.folder';
       case ItemTypes.YOUTUBE:
         return item.type !== 'youtube_playlist';
+      case ItemTypes.ISKCON:
+        return true;
       default:
         return null;
     }
   };
 
   return (
-    <View>
+    <View style={styles.row}>
       <Menu
         visible={visible}
         anchor={
@@ -111,6 +117,10 @@ const {setSelectedNote} = useNotesStore(
 export default BaseMenu;
 
 const styles = StyleSheet.create({
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
   menuContainer: {
     borderRadius: 8,
     backgroundColor: '#fff',

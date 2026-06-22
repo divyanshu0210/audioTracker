@@ -12,6 +12,7 @@ const PRIMARY_FILTERS = [
   {label: 'Drive Folder', key: 'drive_folder'},
   {label: 'Drive File', key: 'drive_file'},
   {label: 'Device File', key: 'device_file'},
+  {label: 'Iskcon File', key: 'iskcon_file'},
   {label: 'Youtube Video', key: 'youtube_video'},
   {label: 'Youtube Playlist', key: 'youtube_playlist'},
   {label: 'Notebook', key: 'notebook'},
@@ -24,6 +25,7 @@ const NOTE_FILTERS = [
   {label: 'Drive Notes', key: 'drive_notes'},
   {label: 'Notebook Notes', key: 'notebook_notes'},
   {label: 'Device Notes', key: 'device_notes'},
+  {label: 'Iskcon Notes', key: 'iskcon_notes'},
 ];
 
 const UniversalFilterBar = ({

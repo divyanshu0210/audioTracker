@@ -67,7 +67,7 @@ const {
         await RNFS.unlink(item.file_path);
       }
       await updateItemFields(item.id, {file_path: null});
-      await softDeleteItem(item.type, item, source_id);
+      await softDeleteItem(item.type, item.source_id);
       Alert.alert('Success', 'File deleted successfully.');
       setDeviceFiles(prev => prev.filter(f => f.source_id !== item.source_id));
     } catch (error) {
@@ -83,7 +83,7 @@ const {
       }
       await updateItemFields(item.id, {file_path: null});
       if (screen === 'out') {
-        await softDeleteItem(item.type, item, source_id);
+        await softDeleteItem(item.type, item.source_id);
       }
       handleLocalDelete(item);
     } catch (error) {
@@ -131,16 +131,18 @@ const {
     <View>
       {isFolder && renderFolderSpecificItems()}
 
-      <MenuItem onPress={hideMenu}>
-        <TouchableOpacity onPress={handleDeleteConfirm}>
-          <Text style={styles.menuItemText}>
-            {isFolder
-              ? 'Delete Folder'
-              : screen === 'in'
-                ? 'Remove Download'
-                : 'Delete'}
-          </Text>
-        </TouchableOpacity>
+      <MenuItem
+        onPress={() => {
+          hideMenu();
+          handleDeleteConfirm();
+        }}>
+        <Text style={styles.menuItemText}>
+          {isFolder
+            ? 'Delete Folder'
+            : screen === 'in'
+              ? 'Remove Download'
+              : 'Delete'}
+        </Text>
       </MenuItem>
     </View>
   );

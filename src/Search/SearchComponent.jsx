@@ -17,6 +17,7 @@ const NOTE_FILTER_TO_SOURCE_TYPE = {
   drive_notes: 'drive_file',
   notebook_notes: 'notebook',
   device_notes: 'device_file',
+  iskcon_notes: 'iskcon_file',
 };
 
 const SearchComponent = ({

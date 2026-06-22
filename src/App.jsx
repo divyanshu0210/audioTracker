@@ -38,6 +38,7 @@ import SettingsScreen from './Settings/Settings';
 import DeviceFilesView from './StackScreens/DeviceFilesView';
 import GDriveFolderOverview from './StackScreens/GDriveFolderOverview';
 import GoogleDriveViewer from './StackScreens/GoogleDriveViewer';
+import IskconFolderViewer from './scrap/IskconFolderViewer';
 import PlaylistView from './StackScreens/PlaylistView';
 import HomeScreen from './TabScreens/HomeScreen';
 import ProfileTab from './TabScreens/ProfileTab';
@@ -129,6 +130,11 @@ const RootNavigator = track(function RootNavigator() {
           options={{headerShown: false}}
         />
         <Stack.Screen
+          name="IskconFolderViewer"
+          component={IskconFolderViewer}
+          options={{headerShown: false}}
+        />
+        <Stack.Screen
           name="PlaylistView"
           component={PlaylistView}
           options={{headerShown: false}}
@@ -146,10 +152,10 @@ const RootNavigator = track(function RootNavigator() {
         <Stack.Screen
           name="ItemNotesScreen"
           component={ItemNotesScreen}
-          options={{
+          options={({route}) => ({
             headerShown: false,
             presentation: 'formSheet',
-            sheetAllowedDetents: [0.75],
+            sheetAllowedDetents: [route.params?.detent ?? 0.75],
             contentStyle: {
               backgroundColor: 'white',
             },
@@ -157,7 +163,7 @@ const RootNavigator = track(function RootNavigator() {
             sheetLargestUndimmedDetentIndex: 0,
             sheetExpandsWhenScrolledToEdge: false,
             keyboardHandlingEnabled: true,
-          }}
+          })}
         />
 
         <Stack.Screen name="Settings" component={SettingsScreen} />

@@ -4,6 +4,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import {updateItemFields} from '../database/U';
 import useDownloadStore from '../stores/useDownloadStore';
 import {requestPermissions} from './newBackgroundService';
+import {onDisplayNotification} from '../notification/notificationService';
 
 const QUEUE_KEY = '@download_queue';
 
@@ -32,6 +33,8 @@ const removeFromQueue = async sourceId => {
 const activeJobIds = new Map(); // sourceId → RNFS jobId
 const fileProgress = new Map(); // sourceId → { total, written }
 let pendingCount = 0; // files currently in-flight (including queued but not yet begun)
+let completedCount = 0; // files finished successfully in the current batch
+let completedBytes = 0; // bytes downloaded successfully in the current batch
 
 const formatBytes = bytes => {
   if (bytes <= 0) return '0 B';
@@ -121,6 +124,8 @@ const downloadSingleFile = async file => {
         progress: 100,
         localPath: file.localPath,
       });
+      completedCount++;
+      completedBytes += Number(result.bytesWritten) || 0;
     } else {
       throw new Error(`HTTP ${result.statusCode}`);
     }
@@ -139,7 +144,16 @@ const downloadSingleFile = async file => {
     pendingCount--;
 
     if (pendingCount === 0) {
-      // Last download finished (or was cancelled) — shut down the service.
+      // Last download finished (or was cancelled) — leave a normal
+      // notification behind (the foreground-service one disappears on stop).
+      if (completedCount > 0) {
+        await onDisplayNotification(
+          completedCount === 1 ? '1 file downloaded' : `${completedCount} files downloaded`,
+          formatBytes(completedBytes),
+        );
+      }
+      completedCount = 0;
+      completedBytes = 0;
       await BackgroundService.stop();
     } else {
       // Other downloads still running — update notification count/progress.

@@ -67,8 +67,9 @@ const ItemNotesScreen = ({route}) => {
   };
 
   const {height: SCREEN_HEIGHT} = Dimensions.get('window');
+  const detent = route?.params?.detent ?? 0.7;
   const containerStyle = showheader
-    ? {height: SCREEN_HEIGHT * 0.7, backgroundColor: '#fff'}
+    ? {height: SCREEN_HEIGHT * detent, backgroundColor: '#fff'}
     : {flex: 1, backgroundColor: '#fff'};
 
   return (

@@ -3,6 +3,7 @@ import {getDb} from './database';
 // Vibrant Colors for Pie Chart
 const DEVICE_COLOR = '#00D97E'; // Brighter Green
 const DRIVE_COLOR = '#4D9FFF';  // Brighter Blue
+const ISKCON_COLOR = '#FFB800'; // Saffron/gold
 
 const getYtColor = i =>
   [
@@ -40,7 +41,7 @@ export const fetchWatchTimeData = (startDate, endDate) => {
         [startDate, endDate],
         (_, { rows }) => {
           const chartData = [];
-          const totals = { device: 0, drive: 0 };
+          const totals = { device: 0, drive: 0, iskcon: 0 };
 
           for (let i = 0; i < rows.length; i++) {
             const row = rows.item(i);
@@ -50,6 +51,8 @@ export const fetchWatchTimeData = (startDate, endDate) => {
               totals.device += row.time;
             } else if (row.type === 'drive_file') {
               totals.drive += row.time;
+            } else if (row.type === 'iskcon_file') {
+              totals.iskcon += row.time;
             } else if (row.type === 'youtube_video') {
               chartData.push({
                 name: row.channel_title || `Unknown Channel ${i + 1}`,
@@ -72,6 +75,14 @@ export const fetchWatchTimeData = (startDate, endDate) => {
               name: 'Drive',
               time: totals.drive,
               color: DRIVE_COLOR,
+            });
+          }
+
+          if (totals.iskcon > 0) {
+            chartData.push({
+              name: 'Iskcon',
+              time: totals.iskcon,
+              color: ISKCON_COLOR,
             });
           }
 

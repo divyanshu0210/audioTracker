@@ -4,7 +4,8 @@ export const ItemTypes = Object.freeze({
   DRIVE: 'drive',
   NOTEBOOK: 'notebook',
   NOTE: 'note',
-  CATEGORY:'category'
+  CATEGORY:'category',
+  ISKCON: 'iskcon',
 });
 export const ScreenTypes = Object.freeze({
   MAIN: 'out',
@@ -17,6 +18,7 @@ export const ITEM_TYPES_THAT_USE_ITEMS_TABLE = [
   'device_file',
   'drive_file',
   'drive_folder',
+  'iskcon_file',
 ] ;
 
 export const convertTypetoItemType = type => {

@@ -101,11 +101,13 @@ const BacePlayer = () => {
   const durationRef = useRef(0);
 
   const [isAudio, setIsAudio] = useState(false);
-  const AUDIO_PLAYER_HEIGHT = 140;
   const {height: SCREEN_HEIGHT} = Dimensions.get('window');
+  const AUDIO_MINIMIZED_RATIO = 0.18;
+  const VIDEO_MINIMIZED_RATIO = 0.25;
+  const AUDIO_PLAYER_HEIGHT = SCREEN_HEIGHT * AUDIO_MINIMIZED_RATIO;
   const MAXIMIZED_HEIGHT = SCREEN_HEIGHT;
   const MINIMIZED_HEIGHT = useRef(
-    new Animated.Value(SCREEN_HEIGHT * 0.25),
+    new Animated.Value(SCREEN_HEIGHT * VIDEO_MINIMIZED_RATIO),
   ).current;
   // Animations
   const playerHeight = useRef(
@@ -169,9 +171,9 @@ const BacePlayer = () => {
         }
       } else {
         // For video items
-        MINIMIZED_HEIGHT.setValue(SCREEN_HEIGHT * 0.25);
+        MINIMIZED_HEIGHT.setValue(SCREEN_HEIGHT * VIDEO_MINIMIZED_RATIO);
         if (isMinimized) {
-          playerHeight.setValue(SCREEN_HEIGHT * 0.25);
+          playerHeight.setValue(SCREEN_HEIGHT * VIDEO_MINIMIZED_RATIO);
         }
       }
 
@@ -406,8 +408,16 @@ const BacePlayer = () => {
   const handleOpenBottomMenu = () => {
     Keyboard.dismiss();
     notesSectionRef.current?.blurEditor();
+    // Size the notes sheet to whatever's left below the player's current
+    // height, so it sits flush under it instead of a fixed/mismatched detent.
+    const playerHeightFraction = playerHeight._value / SCREEN_HEIGHT;
+    const detent = Math.min(0.95, Math.max(0.5, 1 - playerHeightFraction));
     setTimeout(() => {
-      navigationRef.navigate('ItemNotesScreen', {showHeader: true, item: currentItem});
+      navigationRef.navigate('ItemNotesScreen', {
+        showHeader: true,
+        item: currentItem,
+        detent,
+      });
     }, 150);
   };
   const handleBackPress = useCallback(() => {

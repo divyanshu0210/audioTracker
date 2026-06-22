@@ -1,5 +1,5 @@
 import React, {useEffect, useRef, useCallback, useState} from 'react';
-import {Animated, StyleSheet, View} from 'react-native';
+import {Animated, Image, StyleSheet, View} from 'react-native';
 import {createMaterialTopTabNavigator} from '@react-navigation/material-top-tabs';
 import {Provider} from 'react-native-paper';
 import {getCategoryData} from '../categories/catDB';
@@ -18,6 +18,7 @@ import {useSelectionStore} from '../stores/useSelectionStore';
 import {useNotesStore} from '../stores/useNotesStore';
 import {track} from '../utils/rerenderTracker';
 import useLoadingStore from '../stores/useLoadingStore';
+import IskconAudioView from '../scrap/IskconAudioView';
 
 const Tab = createMaterialTopTabNavigator();
 
@@ -166,6 +167,7 @@ const HomeTabs = ({categoryId}) => {
         <Tab.Navigator
           screenOptions={{
             tabBarActiveTintColor: '#000',
+            tabBarShowIcon: true,
             tabBarIndicatorStyle: {backgroundColor: '#000'},
             tabBarStyle: {
               backgroundColor: '#f0f0f0',
@@ -202,6 +204,21 @@ const HomeTabs = ({categoryId}) => {
             }
           </Tab.Screen>
 
+          <Tab.Screen
+            name="IDT"
+            component={IskconAudioView}
+            options={{
+              tabBarLabel: () => null,
+              tabBarIcon: () => (
+                <Image
+                  source={require('../assets/idt_logo.jpg')}
+                  style={styles.iskconTabIcon}
+                  resizeMode="contain"
+                />
+              ),
+            }}
+          />
+
           <Tab.Screen name="Notebooks">
             {() =>
               renderTabContent(NotebookScreen, {
@@ -223,3 +240,11 @@ const HomeTabs = ({categoryId}) => {
 };
 
 export default track(HomeTabs);
+
+const styles = StyleSheet.create({
+  iskconTabIcon: {
+    width: 100,
+    width: 100,
+    height: 26,
+  },
+});

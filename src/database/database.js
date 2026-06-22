@@ -97,7 +97,8 @@ export const initDatabase = async () => {
           'youtube_playlist',
           'drive_file',
           'drive_folder',
-          'device_file'
+          'device_file',
+          'iskcon_file'
         )
       ),
 

@@ -1,5 +1,5 @@
 import React from 'react';
-import {View, StyleSheet} from 'react-native';
+import {Image, View, StyleSheet} from 'react-native';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
 import FontAwesome from 'react-native-vector-icons/FontAwesome';
 import Foundation from 'react-native-vector-icons/Foundation';
@@ -7,6 +7,28 @@ import Entypo from 'react-native-vector-icons/Entypo'
 
 export const getFileIcon = (input, size = 22, boxSize = 44) => {
   const type = input?.toLowerCase() || '';
+
+  // Iskcon audio uses its own logo instead of a generic file/audio icon.
+  if (type.startsWith('iskcon_')) {
+    return (
+      <View
+        style={[
+          styles.container,
+          {
+            width: boxSize,
+            height: boxSize,
+            borderRadius: boxSize * 0.28,
+            backgroundColor: '#F5F5F5',
+          },
+        ]}>
+        <Image
+          source={require('../assets/idt_logo.jpg')}
+          style={{width: boxSize * 0.75, height: boxSize * 0.75, borderRadius: boxSize * 0.18}}
+          resizeMode="contain"
+        />
+      </View>
+    );
+  }
 
   let IconComponent = MaterialCommunityIcons;
   let iconName = 'file-outline';

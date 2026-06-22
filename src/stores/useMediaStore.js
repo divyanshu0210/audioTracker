@@ -12,6 +12,7 @@ export const useMediaStore = create((set, get) => ({
   videos: [],
   data: [],
   folderStack: [],
+  iskconEntries: [],
 
   setDriveLinksList: async val => {
     const list =
@@ -36,6 +37,11 @@ export const useMediaStore = create((set, get) => ({
   setFolderStack: val =>
     set(s => ({
       folderStack: typeof val === 'function' ? val(s.folderStack) : val,
+    })),
+
+  setIskconEntries: val =>
+    set(s => ({
+      iskconEntries: typeof val === 'function' ? val(s.iskconEntries) : val,
     })),
 
   setDeviceFiles: async val => {

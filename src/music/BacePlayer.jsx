@@ -31,6 +31,10 @@ import {useNotesStore} from '../stores/useNotesStore';
 import {useShallow} from 'zustand/react/shallow';
 import {useSelectionStore} from '../stores/useSelectionStore';
 import { navigationRef } from '../handlers/navigationRef';
+import {
+  activateKeepAwake,
+  deactivateKeepAwake,
+} from '@sayem314/react-native-keep-awake';
 // const {PipModule} = NativeModules;
 
 const isAudioFile = mimeType => {
@@ -184,6 +188,7 @@ const BacePlayer = () => {
     return () => {
       navigationRef.getParent()?.setOptions({tabBarStyle: {display: 'flex'}});
       cleanupPlayer();
+      deactivateKeepAwake();
       setActiveNoteId(null);
     };
   }, [currentItem]);
@@ -317,6 +322,13 @@ const BacePlayer = () => {
   const handleIsPausedChange = useCallback(
     paused => {
       isPausedRef.current = paused;
+
+      // Keep the screen on only while media is actively playing.
+      if (paused) {
+        deactivateKeepAwake();
+      } else {
+        activateKeepAwake();
+      }
 
       // Handle play/pause tracking
       if (tracker.current) {

@@ -1,5 +1,7 @@
-import {Image, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
+import {StyleSheet, Text, TouchableOpacity, View} from 'react-native';
 import { navigationRef } from '../handlers/navigationRef';
+import {getFileIcon} from '../contexts/fileIconHelper';
+import MediaThumbnail, {iconInput} from '../components/MediaThumbnail';
 
 const SegmentedProgressBar = ({intervals, duration}) => {
   if (!duration) return null;
@@ -49,16 +51,6 @@ export const HistoryItem = ({
   item,
   variant = 'card', // "card" | "list"
 }) => {
-  let thumbnailSource = null;
-
-  if (item.type === 'youtube_video') {
-    thumbnailSource = {
-      uri: `https://img.youtube.com/vi/${item.source_id}/mqdefault.jpg`,
-    };
-  } else {
-    thumbnailSource = require('../assets/video-placeholder.png');
-  }
-
   const totalWatched = item.watchedIntervals.reduce(
     (sum, [start, end]) => sum + (end - start),
     0,
@@ -71,19 +63,16 @@ export const HistoryItem = ({
       onPress={() => navigationRef.navigate('BacePlayer', {item: item})}
       style={[isList ? styles.listContainer : styles.cardContainer]}>
       {/* Thumbnail */}
-      <View
-        style={[
-          styles.thumbnailContainer,
-          isList && styles.listThumbnailContainer,
-        ]}>
-        {thumbnailSource && (
-          <Image source={thumbnailSource} style={styles.thumbnail} />
-        )}
+      <MediaThumbnail item={item} isList={isList}>
+        {/* Type icon superimposed on the thumbnail in both card and list. */}
+        <View style={styles.typeBadge}>
+          {getFileIcon(iconInput(item), 8, 16)}
+        </View>
         <SegmentedProgressBar
           intervals={item.watchedIntervals}
           duration={item.duration}
         />
-      </View>
+      </MediaThumbnail>
 
       {/* Details */}
       <View style={[isList && styles.listDetails]}>
@@ -125,12 +114,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
 
-  listThumbnailContainer: {
-    width: 120,
-    height: 70,
-    marginBottom: 0,
-  },
-
   listTitle: {
     fontSize: 14,
     fontWeight: '600',
@@ -138,18 +121,10 @@ const styles = StyleSheet.create({
 
   /* ---------- Shared ---------- */
 
-  thumbnailContainer: {
-    width: 160,
-    height: 90,
-    borderRadius: 8,
-    overflow: 'hidden',
-    marginBottom: 8,
-    position: 'relative',
-  },
-
-  thumbnail: {
-    width: '100%',
-    height: '100%',
+  typeBadge: {
+    position: 'absolute',
+    top: 6,
+    left: 6,
   },
 
   videoTitle: {

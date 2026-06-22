@@ -59,7 +59,7 @@ import {GlobalBottomSheets} from './components/bottomsheets/GlobalBottomSheets';
 import MainHeader from './components/headers/MainHeader';
 import SearchWrapper from './Search/SearchWrapper';
 import FullHistoryScreen from './history/FullHistoryScreen';
-import CategoriesView from './categories/CategoriesView';
+import DownloadsView from './downloads/DownloadsView';
 import {initDatabase, resetDatabase} from './database/database';
 import BackupExplorerScreen from './Settings/BackupExplorerScreen';
 import useBackupStore from './stores/backupStore';
@@ -202,8 +202,8 @@ const RootNavigator = track(function RootNavigator() {
           options={{title: 'Watch History'}}
         />
         <Stack.Screen
-          name="CategoriesView"
-          component={CategoriesView}
+          name="DownloadsView"
+          component={DownloadsView}
           options={{headerShown: false}}
         />
         <Stack.Screen

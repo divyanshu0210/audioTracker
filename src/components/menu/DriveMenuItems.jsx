@@ -1,5 +1,5 @@
 import React, {useState} from 'react';
-import {Alert, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
+import {Alert, StyleSheet, Text, ToastAndroid, TouchableOpacity, View} from 'react-native';
 import RNFS from 'react-native-fs';
 import {Menu, MenuDivider, MenuItem} from 'react-native-material-menu';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
@@ -52,7 +52,7 @@ const {
   const handleDeleteFolder = async () => {
     try {
       await softDeleteItem(item.type, item.source_id);
-      Alert.alert('Success', 'Folder and its contents deleted successfully.');
+      ToastAndroid.show('Folder deleted', ToastAndroid.SHORT);
       setDriveLinksList(prev =>
         prev.filter(f => f.source_id !== item.source_id),
       );
@@ -68,7 +68,7 @@ const {
       }
       await updateItemFields(item.id, {file_path: null});
       await softDeleteItem(item.type, item.source_id);
-      Alert.alert('Success', 'File deleted successfully.');
+      ToastAndroid.show('File deleted', ToastAndroid.SHORT);
       setDeviceFiles(prev => prev.filter(f => f.source_id !== item.source_id));
     } catch (error) {
       Alert.alert('Delete failed');
@@ -86,6 +86,10 @@ const {
         await softDeleteItem(item.type, item.source_id);
       }
       handleLocalDelete(item);
+      ToastAndroid.show(
+        screen === 'in' ? 'Download removed' : 'File deleted',
+        ToastAndroid.SHORT,
+      );
     } catch (error) {
       Alert.alert('Delete failed');
       console.error('Delete failed:', error);

@@ -2,7 +2,7 @@ import {StyleSheet, Text, View} from 'react-native';
 import React, {useEffect, useState} from 'react';
 import {useIsFocused, useNavigation} from '@react-navigation/native'; // Import the hook
 import HistoryComponent from '../history/HistoryComponent';
-import CategoriesView from '../categories/CategoriesView';
+import DownloadsView from '../downloads/DownloadsView';
 import ProfileHeader from '../components/headers/ProfileHeader';
 
 const ProfileTab = () => {
@@ -12,7 +12,7 @@ const ProfileTab = () => {
       <ProfileHeader />
       <View style={styles.container}>
         <HistoryComponent />
-        <CategoriesView mode='preview'/>
+        <DownloadsView mode='preview'/>
       </View>
     </>
   );

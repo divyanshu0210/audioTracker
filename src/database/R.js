@@ -87,6 +87,39 @@ export const getChildrenByParent = async (parentId = null, types = null) => {
     });
   });
 };
+// ------------------------------ downloads
+
+// "Downloaded" = a real local copy exists on disk. device_file's file_path is
+// always local; drive_file / iskcon_file only get a local file_path once
+// downloaded (iskcon_file's file_path is the remote URL — http(s) — until
+// then, so those are excluded by the NOT LIKE 'http%' guard). youtube_video
+// has no file_path/download concept, so it's naturally excluded too.
+export const getDownloadedItems = () => {
+  const fastdb = getDb();
+  return new Promise((resolve, reject) => {
+    fastdb.transaction(tx => {
+      tx.executeSql(
+        `SELECT items.*
+         FROM items
+         WHERE items.deleted_at IS NULL
+           AND items.file_path IS NOT NULL
+           AND items.file_path NOT LIKE 'http%'
+         ORDER BY datetime(items.created_at) DESC;`,
+        [],
+        (_, results) => {
+          const items = [];
+          for (let i = 0; i < results.rows.length; i++) {
+            items.push(results.rows.item(i));
+          }
+          console.log(`⬇️  Loaded ${items.length} downloaded items`);
+          resolve(items);
+        },
+        (_, error) => reject(error),
+      );
+    });
+  });
+};
+
 // ------------------------------notes
 
 export const getAllNotesModifiedToday = () => {

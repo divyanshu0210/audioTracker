@@ -6,6 +6,28 @@ import { handleLinkSubmit } from './utils/handleLinkSubmit';
 import { useAppState } from '../contexts/AppStateContext';
 import { useMediaStore } from '../stores/useMediaStore';
 import { useShallow } from 'zustand/react/shallow';
+import { navigationRef } from '../handlers/navigationRef';
+import { setPendingRoute } from '../handlers/navigationIntent';
+
+// The download foreground-service notification opens this URL.
+const DOWNLOADS_URL = 'audiotracker://downloads';
+
+// Cold start: the login → MainApp redirect hasn't happened yet, so record the
+// intent and let navigateToMain land with DownloadsView already on top (no
+// flash of Home first). Warm start (app already past login): just navigate.
+const routeToDownloads = ({cold}) => {
+  const current = navigationRef.isReady()
+    ? navigationRef.getCurrentRoute()?.name
+    : null;
+
+  if (cold && (!current || current === 'GoogleLoginScreen')) {
+    setPendingRoute('DownloadsView');
+    return;
+  }
+  if (current !== 'DownloadsView') {
+    navigationRef.navigate('DownloadsView');
+  }
+};
 
 const useLinkHandler = () => {
  const {
@@ -27,6 +49,7 @@ const {userInfo} = useAppState();
   useEffect(() => {
     const checkInitialURL = async () => {
       const url = await Linking.getInitialURL();
+      if (url === DOWNLOADS_URL) return routeToDownloads({cold: true});
       if (!url || url.startsWith('audiotracker://')) return;
       if (userInfo && !hasHandledInitialUrl.current) {
         console.log('Initial URL got user:', url);
@@ -38,6 +61,7 @@ const {userInfo} = useAppState();
     };
 
     const handleURL = ({ url }) => {
+      if (url === DOWNLOADS_URL) return routeToDownloads({cold: false});
       if (url.startsWith('audiotracker://')) return;
       console.log('URL opened while running:', url, userInfo);
       if (userInfo && !hasHandledInitialUrl.current) {

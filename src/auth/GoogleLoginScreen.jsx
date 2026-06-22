@@ -27,6 +27,7 @@ import useRestoreStore from '../backupRestore/restoreStore';
 import {useNotesStore} from '../stores/useNotesStore';
 import LoginRestoreProgressBar from './LoginRestoreProgressBar';
 import { checkAndPromptRestore } from '../backupRestore/restoreManager';
+import { consumePendingRoute } from '../handlers/navigationIntent';
 
 const GoogleLoginScreen = ({navigation}) => {
   const [isLoading, setIsLoading] = useState(false);
@@ -89,7 +90,20 @@ const GoogleLoginScreen = ({navigation}) => {
       useNotesStore.getState().setDefaultNotebookId(defaultNotebookIdValue);
       await initializeSettings();
       appStartupBackupRoutine();
-      navigation.replace('MainApp', { user: userInfo.user ?? userInfo });
+      const user = userInfo.user ?? userInfo;
+      // If a deep link (e.g. the downloads notification) launched the app, land
+      // straight on that screen WITHOUT MainApp in the stack, so MainApp's
+      // heavy mount/data-loading is skipped entirely. It's built lazily when
+      // the user leaves that screen via back (launchedDirectly → goHome).
+      const pendingRoute = consumePendingRoute();
+      if (pendingRoute) {
+        navigation.reset({
+          index: 0,
+          routes: [{name: pendingRoute, params: {launchedDirectly: true}}],
+        });
+      } else {
+        navigation.replace('MainApp', {user});
+      }
     } catch (e) {
       console.error('[Login] Post-restore nav error:', e);
       Alert.alert('Error', 'Failed to complete setup. Please restart the app.');

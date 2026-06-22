@@ -1,5 +1,5 @@
 import React, {useEffect} from 'react';
-import {ActivityIndicator, Alert, TouchableOpacity, View} from 'react-native';
+import {ActivityIndicator, ToastAndroid, TouchableOpacity, View} from 'react-native';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import RNFS from 'react-native-fs';
 import CircularProgress from 'react-native-circular-progress-indicator';
@@ -50,7 +50,6 @@ export const DownloadButton = ({file}) => {
       ),
     );
 
-    Alert.alert('Download complete', `${file.title} saved.`);
     removeDownload(file.source_id);
   }, [status]);
 
@@ -58,7 +57,7 @@ export const DownloadButton = ({file}) => {
     const localPath = getLocalFilePath(file.source_id, file.title);
 
     if (await RNFS.exists(localPath) && localPath === file.file_path) {
-      Alert.alert('Already downloaded', 'File is already saved locally.');
+      ToastAndroid.show('Already downloaded', ToastAndroid.SHORT);
       return;
     }
 
@@ -69,7 +68,13 @@ export const DownloadButton = ({file}) => {
       title: file.title,
       url,
       localPath,
+      type: file.type,
+      mimeType: file.mimeType,
     });
+    ToastAndroid.show(
+      'Download started — see notification for details',
+      ToastAndroid.SHORT,
+    );
   };
 
   const handleCancel = () => {

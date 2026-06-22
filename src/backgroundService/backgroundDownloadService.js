@@ -184,15 +184,25 @@ const downloadTask = async () => {
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
-export const enqueueDownload = async ({id, sourceId, title, url, localPath}) => {
+export const enqueueDownload = async ({
+  id,
+  sourceId,
+  title,
+  url,
+  localPath,
+  type,
+  mimeType,
+}) => {
   const {setDownload} = useDownloadStore.getState();
 
   const queue = await getQueue();
   if (queue.some(f => f.sourceId === sourceId)) return;
 
-  const file = {id, sourceId, title, url, localPath};
+  const file = {id, sourceId, title, url, localPath, type, mimeType};
   await saveQueue([...queue, file]);
-  setDownload(sourceId, {status: 'queued', progress: 0});
+  // Stash title/type/mimeType in the store too so the Downloads screen can
+  // render an in-progress card (status updates merge over this).
+  setDownload(sourceId, {status: 'queued', progress: 0, title, type, mimeType});
 
   if (BackgroundService.isRunning()) {
     // Service already alive — start this download alongside existing ones.
@@ -209,8 +219,8 @@ export const enqueueDownload = async ({id, sourceId, title, url, localPath}) => 
       progressBar: {max: 100, value: 0, indeterminate: true},
       // ACTION_VIEW deep link that only this app registers (manifest: scheme
       // "audiotracker") → opens the app directly, no app-chooser dialog.
-      // LinkHandler ignores any audiotracker:// URL, so no navigation/rerenders.
-      linkingURI: 'audiotracker://open',
+      // LinkHandler routes this one to the Downloads screen.
+      linkingURI: 'audiotracker://downloads',
       parameters: {},
     });
   }
@@ -245,7 +255,13 @@ export const restoreDownloadState = async () => {
   const queue = await getQueue();
   const {setDownload} = useDownloadStore.getState();
   queue.forEach(f => {
-    setDownload(f.sourceId, {status: 'queued', progress: 0});
+    setDownload(f.sourceId, {
+      status: 'queued',
+      progress: 0,
+      title: f.title,
+      type: f.type,
+      mimeType: f.mimeType,
+    });
   });
 };
 

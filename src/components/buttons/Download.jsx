@@ -72,8 +72,8 @@ export const DownloadButton = ({file}) => {
       mimeType: file.mimeType,
     });
     ToastAndroid.show(
-      'Download started — see notification for details',
-      ToastAndroid.SHORT,
+      'Preparing download. See notification for details',
+      ToastAndroid.LONG,
     );
   };
 

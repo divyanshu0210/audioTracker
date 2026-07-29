@@ -58,7 +58,7 @@ const IskconMenuItems = ({item, hideMenu}) => {
       type: 'iskcon_file',
       mimeType: 'audio/mpeg',
     });
-    ToastAndroid.show('Download started — see notification for details', ToastAndroid.SHORT);
+    ToastAndroid.show('Preparing download. See notification for details', ToastAndroid.LONG);
   };
 
   const handleRemove = async () => {

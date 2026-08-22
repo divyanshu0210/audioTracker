@@ -20,6 +20,7 @@ import {
 } from 'react-native';
 import {RichEditor} from 'react-native-pell-rich-editor';
 import RichTextToolbar from './RichTextToolbar.jsx';
+import ImageZoomModal from './ImageZoomModal.jsx';
 import {deleteUnusedImages, getImagesForNote, getNoteById} from '../richDB.js';
 import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
 import {seekVideoTo} from '../../music/progressTrackingUtils.js';
@@ -72,6 +73,30 @@ const HEIGHT_OBSERVER_JS = `
     } catch (e) {}
   };
   new ResizeObserver(report).observe(content);
+})();
+true;
+`;
+
+// Delegated (not per-image) click listener on the editor content container,
+// so newly pasted images are covered without re-injecting per image. Capture
+// phase + preventDefault/stopPropagation so tapping an image opens the zoom
+// viewer instead of just placing the text cursor there.
+const IMAGE_TAP_JS = `
+(function(){
+  if (window.__imageTapAttached) return true;
+  var content = document.getElementById('content');
+  if (!content || !window.ReactNativeWebView) return true;
+  window.__imageTapAttached = true;
+  content.addEventListener('click', function(e){
+    var target = e.target;
+    if (target && target.tagName === 'IMG') {
+      e.preventDefault();
+      e.stopPropagation();
+      window.ReactNativeWebView.postMessage(
+        JSON.stringify({type: 'IMAGE_TAP', data: target.src})
+      );
+    }
+  }, true);
 })();
 true;
 `;
@@ -176,6 +201,9 @@ const RichTextEditor = forwardRef(
     const [initialContent] = useState('');
     const [isTitleFocused, setIsTitleFocused] = useState(false);
     const [isEditable, setIsEditable] = useState(false);
+    // Set when an image inside the note is tapped (see IMAGE_TAP_JS) — the
+    // tapped <img>'s current src, or null when the zoom viewer is closed.
+    const [zoomImageUri, setZoomImageUri] = useState(null);
 
     // Keep shadow refs in sync with state/props
     useEffect(() => { noteIdRef.current = noteId; }, [noteId]);
@@ -192,6 +220,7 @@ const RichTextEditor = forwardRef(
       editorReadyRef.current = true;
       // Keep the WebView container height in sync with async image decode.
       richText.current?.injectJavascript(HEIGHT_OBSERVER_JS);
+      richText.current?.injectJavascript(IMAGE_TAP_JS);
       if (pendingContentRef.current !== null) {
         richText.current?.setContentHTML(pendingContentRef.current);
         pendingContentRef.current = null;
@@ -549,6 +578,8 @@ const RichTextEditor = forwardRef(
       const type = message.type;
       if (typeof type === 'string' && type.startsWith('TIMESTAMP_')) {
         seekToTimestamp(parseFloat(type.replace('TIMESTAMP_', '')));
+      } else if (type === 'IMAGE_TAP') {
+        setZoomImageUri(message.data);
       }
     }, [seekToTimestamp]);
 
@@ -688,6 +719,12 @@ const RichTextEditor = forwardRef(
             addTimestampCb={addTimestampCb}
           />
         )}
+
+        <ImageZoomModal
+          visible={!!zoomImageUri}
+          uri={zoomImageUri}
+          onClose={() => setZoomImageUri(null)}
+        />
       </SafeAreaView>
     );
   },

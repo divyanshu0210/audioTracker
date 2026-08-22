@@ -7,35 +7,46 @@ export const startTrackingTime = webViewRef => {
           function trackAndSend() {
             const video = document.querySelector('video');
             if (!video) return;
-            
-            if (!video.paused || video.lastSentTime !== video.currentTime) { 
+
+            if (!video.paused || video.lastSentTime !== video.currentTime) {
               // Send time if playing or if currentTime has changed (seeking)
-              window.ReactNativeWebView.postMessage(JSON.stringify({ 
-                currentTime: video.currentTime, 
-                playbackSpeed: video.playbackRate 
+              window.ReactNativeWebView.postMessage(JSON.stringify({
+                currentTime: video.currentTime,
+                playbackSpeed: video.playbackRate
               }));
               video.lastSentTime = video.currentTime;
             }
-            
+
+            // Detected here (polling, re-querying the video element every
+            // tick) rather than via a one-time addEventListener('ended', ...)
+            // below on the element that existed at load time: some replay
+            // interactions (e.g. YouTube's own "watch again" button) recreate
+            // the underlying <video> element internally, which silently
+            // detaches a one-time listener so it never fires again for a
+            // replayed video. Polling video.ended self-heals across that
+            // since it always looks at whatever element currently exists.
+            if (video.ended && !video.lastEndedNotified) {
+              video.lastEndedNotified = true;
+              window.ReactNativeWebView.postMessage(JSON.stringify({ ended: "ENDED" }));
+            } else if (!video.ended && video.lastEndedNotified) {
+              video.lastEndedNotified = false;
+            }
+
             // Set dynamic interval based on playback speed
             const interval = Math.max(500, 1000 / video.playbackRate); // Minimum 100ms
             window.timeTrackingInterval = setTimeout(trackAndSend, interval);
           }
-  
+
           const video = document.querySelector('video');
           if (video) {
             video.addEventListener('play', () => {
               window.ReactNativeWebView.postMessage(JSON.stringify({ state: "PLAYING" }));
             });
-  
+
             video.addEventListener('pause', () => {
               window.ReactNativeWebView.postMessage(JSON.stringify({ state: "PAUSED" }));
             });
 
-             video.addEventListener('ended', () => {
-            window.ReactNativeWebView.postMessage(JSON.stringify({ ended: "ENDED" }));
-            });
-  
             video.addEventListener('loadedmetadata', () => {
               window.ReactNativeWebView.postMessage(JSON.stringify({ 
                 duration: video.duration ,

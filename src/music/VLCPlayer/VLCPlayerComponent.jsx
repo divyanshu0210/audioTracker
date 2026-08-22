@@ -91,6 +91,29 @@ const VLCPlayerComponent = forwardRef(
     // apply the new `rate` prop.
     const [playbackRateIndex, setPlaybackRateIndex] = useState(2);
     const [isPaused, setIsPaused] = useState(false);
+    // Bumped to force-remount <VLCPlayer> after end-of-track — some builds
+    // of the native player stop honoring seek() once a stream has reported
+    // EOF (manual seeks silently no-op and playback snaps back to the end),
+    // so recovering means creating a fresh native player instance instead.
+    const [playerKey, setPlayerKey] = useState(0);
+    const hasAppliedStartTimeRef = useRef(false);
+    // Value for the *next* mount's `autoplay` prop only — read once at
+    // construction time by the native player, then left alone. Must be a
+    // ref, not state derived from isPaused: this native player treats every
+    // `autoplay` prop change (even on an already-mounted instance) as
+    // "reload and play from 0", which broke ordinary pause → resume.
+    // Ongoing play/pause after mount goes entirely through `paused`.
+    const autoplayOnMountRef = useRef(true);
+    // Whether the *current* native instance has already reached EOF once.
+    // Not derivable from currentTime >= duration — resetToStart zeroes
+    // currentTime as soon as a track ends, so that comparison can't tell
+    // "just ended, needs a remount to play again" apart from "paused at 0
+    // mid-playback" on any *subsequent* end. Without this, pressing Play
+    // after a track ends just flips `paused` on the already-ended instance
+    // instead of remounting it — and this native player never fires onEnd
+    // again for an instance that's resumed that way, so the second end of a
+    // replayed track silently does nothing (no countdown, no autoplay).
+    const hasEndedRef = useRef(false);
 
     // ─── Side-effects ─────────────────────────────────────────────────────────
     useEffect(() => {
@@ -104,18 +127,18 @@ const VLCPlayerComponent = forwardRef(
       );
     }, [playbackRateIndex, onPlayBackRateChange]);
 
-    useEffect(() => {
-      setControlsVisible(true);
-    }, []);
-
     // ─── Controls visibility ──────────────────────────────────────────────────
     const hideControls = useCallback(() => {
+      // The 3s timer that schedules this can still be pending if the video
+      // got paused after it was set (e.g. pauseOnStart pausing right after
+      // the initial showControls() call) — don't hide while paused.
+      if (isPaused) return;
       Animated.timing(controlsOpacity, {
         toValue: 0,
         duration: 300,
         useNativeDriver: true,
       }).start(() => setControlsVisible(false));
-    }, [controlsOpacity]);
+    }, [controlsOpacity, isPaused]);
 
     const showControls = useCallback(() => {
       setControlsVisible(true);
@@ -130,6 +153,15 @@ const VLCPlayerComponent = forwardRef(
       }
     }, [controlsOpacity, hideControls, isPaused]);
 
+    // Show controls on mount via showControls() (not a bare
+    // setControlsVisible(true)) so the initial display also schedules the
+    // 3s auto-hide — otherwise, until the user taps the screen once, nothing
+    // ever starts that timer and controls stay visible indefinitely.
+    useEffect(() => {
+      showControls();
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
     // ─── Handlers ─────────────────────────────────────────────────────────────
     const handleScreenTap = useCallback(() => {
       if (isAudio) return;
@@ -137,20 +169,45 @@ const VLCPlayerComponent = forwardRef(
       settingsRef.current?.closeSettingsModal?.();
     }, [isAudio, showControls]);
 
+    // Reset to 0, called both when the track actually ends (stay paused —
+    // "replay" state) and when the user presses Play after it ended (resume
+    // playing from 0). Those two need different `paused` outcomes, so the
+    // caller decides via `play`; don't hardcode it here.
+    const resetToStart = useCallback(
+      play => {
+        currentTimeRef.current = 0;
+        setCurrentTime(0);
+        setIsPaused(!play);
+        autoplayOnMountRef.current = play;
+        // This remount produces a fresh, not-yet-ended instance — handleReplay
+        // re-marks it ended immediately after, for the native-onEnd case.
+        hasEndedRef.current = false;
+        setPlayerKey(k => k + 1);
+        // Video controls auto-hide after a few seconds of inactivity, and
+        // nothing else re-shows them when a track ends — without this, the
+        // player can sit there paused at 0 with no visible way to replay.
+        clearTimeout(controlsTimeout.current);
+        controlsOpacity.setValue(1);
+        setControlsVisible(true);
+      },
+      [setCurrentTime, setControlsVisible, controlsOpacity],
+    );
+
     const handleReplay = useCallback(() => {
-      if (vlcPlayerRef.current) {
-        setIsPaused(true);
-        onEnd?.();
-      }
-    }, [onEnd]);
+      resetToStart(false);
+      hasEndedRef.current = true;
+      onEnd?.();
+    }, [resetToStart, onEnd]);
 
     const togglePlayPause = useCallback(() => {
-      if (getCurrentTime() >= getDuration() && getDuration() > 0) {
-        handleReplay();
+      if (hasEndedRef.current) {
+        // Ended — Play must remount (see hasEndedRef/resetToStart) rather
+        // than just flip `paused` on the already-ended instance.
+        resetToStart(true);
       } else {
         setIsPaused(!isPaused);
       }
-    }, [handleReplay, isPaused]);
+    }, [resetToStart, isPaused]);
 
     const handleSeek = useCallback(newTime => {
       if (vlcPlayerRef.current && durationRef.current > 0) {
@@ -192,12 +249,16 @@ const VLCPlayerComponent = forwardRef(
           </View>
         </Animated.View>
 
-        {/* VLCPlayer — re-renders only when isPaused or playbackRateIndex change */}
+        {/* VLCPlayer — re-renders only when isPaused or playbackRateIndex change.
+            key={playerKey} lets resetToStart force a fresh native instance
+            after end-of-track, since seek() stops working once the stream
+            has reported EOF. */}
         <VLCPlayer
+          key={playerKey}
           ref={vlcPlayerRef}
           source={{uri: item.file_path}}
           style={isAudio ? styles.audioPlayer : styles.videoPlayer}
-          autoplay={true}
+          autoplay={autoplayOnMountRef.current}
           paused={isPaused}
           onProgress={event => {
             if (event.duration > 0 && !durationRef.current) {
@@ -213,9 +274,13 @@ const VLCPlayerComponent = forwardRef(
             onCurrentTimeChange?.(event.currentTime);
           }}
           onOpen={() => {
-            if (item.duration > 0 && startTime) {
+            // Only honor startTime on the very first open — reapplying it on
+            // every resetToStart remount would seek back to the old saved
+            // position instead of the fresh 0 we just reset to.
+            if (!hasAppliedStartTimeRef.current && item.duration > 0 && startTime) {
               vlcPlayerRef.current?.seek(startTime / item.duration);
             }
+            hasAppliedStartTimeRef.current = true;
           }}
           playInBackground={true}
           videoAspectRatio={settingsRef.current?.getAspectRatio?.()}
@@ -223,7 +288,12 @@ const VLCPlayerComponent = forwardRef(
             settingsRef.current?.getPlaybackRate?.() ??
             playbackRates[playbackRateIndex]
           }
-          repeat={true}
+          // The app drives its own end-of-track behavior via handleReplay/onEnd
+          // (pause-and-offer-replay, or advance to the next playlist item) —
+          // native repeat would auto-restart playback underneath that,
+          // fighting with the explicit pause and leaving the player in an
+          // inconsistent state where a manual seek back to 0 stops working.
+          repeat={false}
           onEnd={handleReplay}
         />
 

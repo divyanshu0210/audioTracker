@@ -86,6 +86,18 @@ const BacePlayer = () => {
   const [playlist, setPlaylist] = useState(routeItems || (item ? [item] : []));
   const [currentIndex, setCurrentIndex] = useState(routeCurrentIndex || 0);
   const currentItem = playlist[currentIndex] || null;
+  // Seconds left before auto-advancing to the next item, or null when no
+  // countdown is running — see handleAutoAdvance/stopAutoAdvanceCountdown.
+  const [autoAdvanceSecondsLeft, setAutoAdvanceSecondsLeft] = useState(null);
+  const autoAdvanceIntervalRef = useRef(null);
+
+  useEffect(() => {
+    return () => {
+      if (autoAdvanceIntervalRef.current) {
+        clearInterval(autoAdvanceIntervalRef.current);
+      }
+    };
+  }, []);
 
   // Refs
   const captureRef = useRef(null);
@@ -259,7 +271,13 @@ const BacePlayer = () => {
       console.log('Saving progress.', durationRef.current);
       currentItem.duration = durationRef.current;
       tracker.current.saveProgressinDB();
-      await saveDatatoBackend(currentItem);
+      // Fire-and-forget: this is a network upload that can take several
+      // seconds, and callers (handleNext/handlePrevious) await cleanupPlayer()
+      // before switching videos — awaiting it here made every playlist
+      // transition block on that round-trip. Progress is already persisted
+      // locally above; saveDatatoBackend has its own try/catch, so a failure
+      // here just logs, it doesn't need to be awaited to be handled.
+      saveDatatoBackend(currentItem);
     } else {
       console.log('Tracker not initialized, skipping save.');
     }
@@ -364,20 +382,54 @@ const BacePlayer = () => {
   // Handle playlist navigation
   const handleNext = async () => {
     if (!autoplay) return;
+    stopAutoAdvanceCountdown();
 
     if (currentIndex < playlist.length - 1) {
       await cleanupPlayer();
       setActiveNoteId(null);
       setCurrentIndex(currentIndex + 1);
       setIsDataLoaded(false);
-      currentTimeRef.current = 0; 
-      lastTimeRef.current = 0; 
+      currentTimeRef.current = 0;
+      lastTimeRef.current = 0;
       setShowNotes(false);
       setIsMinimized(true);
     }
   };
 
+  // Countdown before auto-advancing to the next playlist item when a track
+  // ends on its own — an instant jump (now that cleanupPlayer's backend
+  // upload no longer blocks it, see cleanupPlayer) feels too abrupt, and the
+  // user may want to stay on the video that just ended instead of moving on.
+  // Manual skip-next/previous stay instant; this only wraps the onEnd path.
+  const AUTOPLAY_NEXT_DELAY_SEC = 5;
+
+  const stopAutoAdvanceCountdown = () => {
+    if (autoAdvanceIntervalRef.current) {
+      clearInterval(autoAdvanceIntervalRef.current);
+      autoAdvanceIntervalRef.current = null;
+    }
+    setAutoAdvanceSecondsLeft(null);
+  };
+
+  const handleAutoAdvance = () => {
+    if (!autoplay || currentIndex >= playlist.length - 1) return;
+    setAutoAdvanceSecondsLeft(AUTOPLAY_NEXT_DELAY_SEC);
+    autoAdvanceIntervalRef.current = setInterval(() => {
+      setAutoAdvanceSecondsLeft(prev => {
+        if (prev === null) return null; // cancelled mid-tick
+        if (prev <= 1) {
+          clearInterval(autoAdvanceIntervalRef.current);
+          autoAdvanceIntervalRef.current = null;
+          handleNext();
+          return null;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+  };
+
   const handlePrevious = async () => {
+    stopAutoAdvanceCountdown();
     if (!autoplay) return;
 
     if (currentIndex > 0) {
@@ -629,7 +681,7 @@ const BacePlayer = () => {
                   updateDuration={updateDuration}
                   pauseOnStart={pauseOnStart}
                   startTime={startFrom?.current}
-                  onEnd={handleNext}
+                  onEnd={handleAutoAdvance}
                 />
               ) : (
                 currentItem.file_path &&
@@ -647,11 +699,24 @@ const BacePlayer = () => {
                     updateDuration={updateDuration}
                     pauseOnStart={pauseOnStart}
                     startTime={startFrom?.current}
-                    onEnd={handleNext}
+                    onEnd={handleAutoAdvance}
                   />
                 )
               )}
             </ViewShot>
+
+            {autoAdvanceSecondsLeft !== null && (
+              <View style={styles.autoAdvanceOverlay}>
+                <Text style={styles.autoAdvanceText}>
+                  Next video in {autoAdvanceSecondsLeft}s
+                </Text>
+                <TouchableOpacity
+                  style={styles.autoAdvanceCancelBtn}
+                  onPress={stopAutoAdvanceCountdown}>
+                  <Text style={styles.autoAdvanceCancelText}>Cancel</Text>
+                </TouchableOpacity>
+              </View>
+            )}
 
             {!showNotes && renderPlaylistControls()}
 
@@ -806,6 +871,34 @@ const styles = StyleSheet.create({
     color: '#000',
     fontSize: 16,
     fontWeight: 'bold',
+  },
+  autoAdvanceOverlay: {
+    position: 'absolute',
+    bottom: 16,
+    alignSelf: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.75)',
+    borderRadius: 24,
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    gap: 12,
+  },
+  autoAdvanceText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  autoAdvanceCancelBtn: {
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    borderRadius: 16,
+    paddingVertical: 6,
+    paddingHorizontal: 14,
+  },
+  autoAdvanceCancelText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '700',
   },
 });
 

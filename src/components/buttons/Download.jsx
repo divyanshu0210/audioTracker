@@ -1,8 +1,7 @@
 import React, {useEffect} from 'react';
-import {ActivityIndicator, ToastAndroid, TouchableOpacity, View} from 'react-native';
+import {ToastAndroid, TouchableOpacity} from 'react-native';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import RNFS from 'react-native-fs';
-import CircularProgress from 'react-native-circular-progress-indicator';
 import {DRIVE_API_KEY} from '@env';
 import {useMediaStore} from '../../stores/useMediaStore';
 import {useShallow} from 'zustand/react/shallow';
@@ -11,6 +10,7 @@ import {
   enqueueDownload,
   cancelDownload,
 } from '../../backgroundService/backgroundDownloadService';
+import {DownloadProgressIndicator} from './DownloadProgressIndicator';
 
 const getLocalFilePath = (sourceId, fileName) => {
   const sanitizedFileName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
@@ -81,37 +81,17 @@ export const DownloadButton = ({file}) => {
     cancelDownload(file.source_id);
   };
 
+  if (isActive) {
+    return (
+      <DownloadProgressIndicator progress={progress} onCancel={handleCancel} />
+    );
+  }
+
   return (
     <TouchableOpacity
-      onPress={isActive ? handleCancel : handleDownload}
+      onPress={handleDownload}
       style={{width: 30, height: 30, alignItems: 'center', justifyContent: 'center'}}>
-      {isActive ? (
-        progress === null || progress === 0 ? (
-          <ActivityIndicator size="small" />
-        ) : (
-          <View style={{width: 30, height: 30, justifyContent: 'center', alignItems: 'center'}}>
-            <CircularProgress
-              value={progress}
-              radius={15}
-              duration={100}
-              progressValueColor="transparent"
-              activeStrokeColor="#2196F3"
-              inActiveStrokeColor="#e0e0e0"
-              inActiveStrokeWidth={4}
-              activeStrokeWidth={4}
-              maxValue={100}
-            />
-            <Ionicons
-              name="close"
-              size={22}
-              color="#000"
-              style={{position: 'absolute'}}
-            />
-          </View>
-        )
-      ) : (
-        <Ionicons name="cloud-download" size={24} color="black" />
-      )}
+      <Ionicons name="cloud-download" size={24} color="black" />
     </TouchableOpacity>
   );
 };

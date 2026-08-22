@@ -176,6 +176,16 @@ export const getFileIcon = (input, size = 22, boxSize = 44) => {
     </View>
   );
 };
+
+// Small green checkmark overlaid on a file icon (see getFileIcon) to mark a
+// remote file (Drive/ISKCON) that already has a local copy. Caller's icon
+// wrapper needs `position: 'relative'` for this to anchor correctly.
+export const DownloadedBadge = () => (
+  <View style={styles.downloadedBadge}>
+    <MaterialCommunityIcons name="check-circle" size={14} color="#2E7D32" />
+  </View>
+);
+
 const styles = StyleSheet.create({
   container: {
     borderRadius: 12,
@@ -188,5 +198,12 @@ const styles = StyleSheet.create({
     shadowRadius: 6,
     shadowOffset: {width: 0, height: 2},
     elevation: 2,
+  },
+  downloadedBadge: {
+    position: 'absolute',
+    bottom: -2,
+    right: -2,
+    backgroundColor: '#fff',
+    borderRadius: 8,
   },
 });

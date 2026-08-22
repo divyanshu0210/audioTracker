@@ -1,8 +1,10 @@
 // IskconItem.jsx
 //
 // Row for one scraped entry. Folders get a chevron. Files are always
-// playable (streamed remotely if not downloaded), so they always show the
-// three-dot menu — "Download"/"Remove Download" lives inside it.
+// playable (streamed remotely if not downloaded), so they normally show the
+// three-dot menu — "Download"/"Remove Download" lives inside it — except
+// while a download for that file is active, when it's swapped for a
+// progress indicator (see DownloadProgressIndicator below).
 // file_path is read from useMediaStore.iskconEntries (not the entry prop) so
 // it stays fresh after a download completes or is removed via the menu —
 // same pattern StackScreens/DriveItem.jsx uses for driveLinksList/data.
@@ -13,10 +15,13 @@ import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
 import RNFS from 'react-native-fs';
 
-import {getFileIcon} from '../contexts/fileIconHelper';
+import {DownloadedBadge, getFileIcon} from '../contexts/fileIconHelper';
 import BaseMenu from '../components/menu/BaseMenu';
+import {DownloadProgressIndicator} from '../components/buttons/DownloadProgressIndicator';
 import {ItemTypes} from '../contexts/constants';
 import {useMediaStore} from '../stores/useMediaStore';
+import useDownloadStore from '../stores/useDownloadStore';
+import {cancelDownload} from '../backgroundService/backgroundDownloadService';
 import useIskconPinsStore from '../stores/useIskconPinsStore';
 import {playFile} from './iskconActions';
 
@@ -59,6 +64,14 @@ const IskconItem = ({entry, onFolderPress}) => {
 
   const [fileExists, setFileExists] = useState(false);
 
+  const download = useDownloadStore(state =>
+    isFolder ? null : state.downloads[entry.source_id],
+  );
+  const removeDownload = useDownloadStore(state => state.removeDownload);
+  const setIskconEntries = useMediaStore(state => state.setIskconEntries);
+  const isDownloading =
+    download?.status === 'queued' || download?.status === 'downloading';
+
   useEffect(() => {
     let mounted = true;
     (async () => {
@@ -70,6 +83,20 @@ const IskconItem = ({entry, onFolderPress}) => {
     };
   }, [filePath]);
 
+  // BaseMenu (and the "Remove Download" logic inside it) is swapped out for
+  // a progress indicator while downloading — see below — so this row is the
+  // only thing guaranteed to stay mounted for the whole download. Sync the
+  // finished file into iskconEntries and clear the store entry here rather
+  // than relying on a menu item that isn't mounted yet at that moment.
+  useEffect(() => {
+    if (isFolder || download?.status !== 'done') return;
+    const localPath = download.localPath;
+    setIskconEntries(prev =>
+      prev.map(f => (f.source_id === entry.source_id ? {...f, file_path: localPath} : f)),
+    );
+    removeDownload(entry.source_id);
+  }, [isFolder, download?.status, download?.localPath, entry.source_id, setIskconEntries, removeDownload]);
+
   const handlePress = () =>
     isFolder ? onFolderPress(entry) : playFile(mergedEntry, filePath);
 
@@ -77,7 +104,10 @@ const IskconItem = ({entry, onFolderPress}) => {
 
   return (
     <TouchableOpacity style={styles.row} activeOpacity={0.6} onPress={handlePress}>
-      {getFileIcon(isFolder ? 'application/vnd.google-apps.folder' : 'iskcon_file')}
+      <View style={styles.iconWrapper}>
+        {getFileIcon(isFolder ? 'application/vnd.google-apps.folder' : 'iskcon_file')}
+        {!isFolder && fileExists && <DownloadedBadge />}
+      </View>
       <View style={styles.textCol}>
         <Text style={styles.title} numberOfLines={2}>
           {entry.title}
@@ -101,6 +131,11 @@ const IskconItem = ({entry, onFolderPress}) => {
           </TouchableOpacity>
           <MaterialIcons name="chevron-right" size={24} color="#bbb" />
         </>
+      ) : isDownloading ? (
+        <DownloadProgressIndicator
+          progress={download.progress}
+          onCancel={() => cancelDownload(entry.source_id)}
+        />
       ) : (
         <BaseMenu
           item={{...mergedEntry, file_path: fileExists ? filePath : null}}
@@ -123,6 +158,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 0.5,
     borderBottomColor: '#eee',
   },
+  iconWrapper: {position: 'relative'},
   textCol: {flex: 1},
   title: {fontSize: 14, fontWeight: '500', color: '#222'},
   breadcrumb: {fontSize: 11, color: '#999', marginTop: 2},

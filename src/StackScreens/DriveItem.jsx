@@ -5,7 +5,7 @@ import {DownloadButton} from '../components/buttons/Download';
 import BaseMenu from '../components/menu/BaseMenu';
 import {ItemTypes} from '../contexts/constants';
 import {useAppState} from '../contexts/AppStateContext';
-import {getFileIcon} from '../contexts/fileIconHelper';
+import {DownloadedBadge, getFileIcon} from '../contexts/fileIconHelper';
 import { useMediaStore } from '../stores/useMediaStore';
 
 const DriveItem = ({item, screen}) => {
@@ -41,7 +41,10 @@ const DriveItem = ({item, screen}) => {
 
   return (
     <View style={styles.row}>
-      <View style={styles.iconWrapper}>{getFileIcon(item.mimeType)}</View>
+      <View style={styles.iconWrapper}>
+        {getFileIcon(item.mimeType)}
+        {!isFolder && fileExists && <DownloadedBadge />}
+      </View>
 
       <View style={styles.textContainer}>
         <Text
@@ -80,6 +83,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginRight:10,
+    position: 'relative',
   },
 
   textContainer: {

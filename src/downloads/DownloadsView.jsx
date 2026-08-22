@@ -19,6 +19,7 @@ import {
 import {useFocusEffect, useRoute} from '@react-navigation/native';
 import RNFS from 'react-native-fs';
 import ShimmerPlaceholder from 'react-native-shimmer-placeholder';
+import {useShallow} from 'zustand/react/shallow';
 
 import {getDownloadedItems} from '../database/R';
 import AppHeader from '../components/headers/AppHeader';
@@ -113,20 +114,23 @@ export default function DownloadsView({mode = 'full'}) {
   // they show (with progress) above the already-completed files. Re-fetch the
   // completed list whenever one finishes so it moves from "active" to the DB
   // list without a manual refresh.
-  const downloadsState = useDownloadStore(state => state.downloads);
-  const active = Object.entries(downloadsState)
-    .filter(([, d]) => d.status === 'downloading' || d.status === 'queued')
-    .map(([sourceId, d]) => ({
-      _download: d,
-      source_id: sourceId,
-      title: d.title || 'Downloading…',
-      type: d.type,
-      mimeType: d.mimeType,
-    }));
+  const active = useDownloadStore(
+    useShallow(state =>
+      Object.entries(state.downloads)
+        .filter(([, d]) => d.status === 'downloading' || d.status === 'queued')
+        .map(([sourceId, d]) => ({
+          _download: d,
+          source_id: sourceId,
+          title: d.title || 'Downloading…',
+          type: d.type,
+          mimeType: d.mimeType,
+        })),
+    ),
+  );
 
-  const doneCount = Object.values(downloadsState).filter(
-    d => d.status === 'done',
-  ).length;
+  const doneCount = useDownloadStore(
+    state => Object.values(state.downloads).filter(d => d.status === 'done').length,
+  );
   useEffect(() => {
     if (doneCount > 0) fetch();
   }, [doneCount, fetch]);

@@ -32,6 +32,7 @@ const removeFromQueue = async sourceId => {
 
 const activeJobIds = new Map(); // sourceId → RNFS jobId
 const fileProgress = new Map(); // sourceId → { total, written }
+const lastReportedPct = new Map(); // sourceId → last progress % pushed to the store
 let pendingCount = 0; // files currently in-flight (including queued but not yet begun)
 let completedCount = 0; // files finished successfully in the current batch
 let completedBytes = 0; // bytes downloaded successfully in the current batch
@@ -102,13 +103,18 @@ const downloadSingleFile = async file => {
         const written = Number(res.bytesWritten) || 0;
         fileProgress.set(file.sourceId, {total, written});
 
-        if (!total || total <= 0) {
-          setDownload(file.sourceId, {status: 'downloading', progress: null});
-        } else {
-          const pct = Math.min(100, Math.round((written / total) * 100));
-          setDownload(file.sourceId, {status: 'downloading', progress: pct});
-        }
+        const pct =
+          !total || total <= 0
+            ? null
+            : Math.min(100, Math.round((written / total) * 100));
 
+        // RNFS's native progress callback fires many times per file; only
+        // push a store update (and re-render every subscriber) when the
+        // rounded percentage actually moved, instead of on every tick.
+        if (lastReportedPct.get(file.sourceId) === pct) return;
+        lastReportedPct.set(file.sourceId, pct);
+
+        setDownload(file.sourceId, {status: 'downloading', progress: pct});
         updateServiceNotification();
       },
     });
@@ -116,6 +122,7 @@ const downloadSingleFile = async file => {
     const result = await promise;
     activeJobIds.delete(file.sourceId);
     fileProgress.delete(file.sourceId);
+    lastReportedPct.delete(file.sourceId);
 
     if (result.statusCode === 200) {
       await updateItemFields(file.id, {file_path: file.localPath});
@@ -132,6 +139,7 @@ const downloadSingleFile = async file => {
   } catch {
     activeJobIds.delete(file.sourceId);
     fileProgress.delete(file.sourceId);
+    lastReportedPct.delete(file.sourceId);
     if (await RNFS.exists(file.localPath)) {
       await RNFS.unlink(file.localPath);
     }
@@ -182,6 +190,27 @@ const downloadTask = async () => {
   await new Promise(() => {});
 };
 
+// Starts (or restarts, e.g. after the app/service was killed mid-download)
+// the foreground service that drives downloadTask. Shared by enqueueDownload
+// and restoreDownloadState.
+const startDownloadService = async taskTitle => {
+  pendingCount = 0; // reset in case of stale state
+  await requestPermissions().catch(() => {});
+  await BackgroundService.start(downloadTask, {
+    taskName: 'File Download',
+    taskTitle,
+    taskDesc: 'Starting…',
+    taskIcon: {name: 'ic_launcher', type: 'mipmap'},
+    color: '#2196F3',
+    progressBar: {max: 100, value: 0, indeterminate: true},
+    // ACTION_VIEW deep link that only this app registers (manifest: scheme
+    // "audiotracker") → opens the app directly, no app-chooser dialog.
+    // LinkHandler routes this one to the Downloads screen.
+    linkingURI: 'audiotracker://downloads',
+    parameters: {},
+  });
+};
+
 // ── Public API ────────────────────────────────────────────────────────────────
 
 export const enqueueDownload = async ({
@@ -208,21 +237,7 @@ export const enqueueDownload = async ({
     // Service already alive — start this download alongside existing ones.
     downloadSingleFile(file);
   } else {
-    pendingCount = 0; // reset in case of stale state
-    await requestPermissions().catch(() => {});
-    await BackgroundService.start(downloadTask, {
-      taskName: 'File Download',
-      taskTitle: `Downloading ${title}`,
-      taskDesc: 'Starting…',
-      taskIcon: {name: 'ic_launcher', type: 'mipmap'},
-      color: '#2196F3',
-      progressBar: {max: 100, value: 0, indeterminate: true},
-      // ACTION_VIEW deep link that only this app registers (manifest: scheme
-      // "audiotracker") → opens the app directly, no app-chooser dialog.
-      // LinkHandler routes this one to the Downloads screen.
-      linkingURI: 'audiotracker://downloads',
-      parameters: {},
-    });
+    await startDownloadService(`Downloading ${title}`);
   }
 };
 
@@ -234,6 +249,7 @@ export const cancelDownload = async sourceId => {
   await removeFromQueue(sourceId);
   removeDownload(sourceId);
   fileProgress.delete(sourceId);
+  lastReportedPct.delete(sourceId);
 
   // Stop the RNFS job — causes downloadSingleFile's await promise to
   // reject/resolve, which runs its catch + finally (decrements pendingCount,
@@ -253,6 +269,8 @@ export const cancelDownload = async sourceId => {
 
 export const restoreDownloadState = async () => {
   const queue = await getQueue();
+  if (!queue.length) return;
+
   const {setDownload} = useDownloadStore.getState();
   queue.forEach(f => {
     setDownload(f.sourceId, {
@@ -263,6 +281,17 @@ export const restoreDownloadState = async () => {
       mimeType: f.mimeType,
     });
   });
+
+  // The queue survives an app kill (persisted in AsyncStorage) but the
+  // foreground service driving it does not — without restarting it here,
+  // these files would sit at "Queued…" forever with nothing downloading.
+  if (!BackgroundService.isRunning()) {
+    const title =
+      queue.length === 1
+        ? `Downloading ${queue[0].title}`
+        : `Downloading ${queue.length} files`;
+    await startDownloadService(title);
+  }
 };
 
 const safeUpdateNotification = async opts => {

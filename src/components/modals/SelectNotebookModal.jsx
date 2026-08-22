@@ -116,7 +116,7 @@ const SelectNotebookModal = ({
                       numberOfLines={1}
                       ellipsizeMode="tail"
                     >
-                      {notebook.name}
+                      {notebook.title}
                     </Text>
 
                     {isSelected ? (

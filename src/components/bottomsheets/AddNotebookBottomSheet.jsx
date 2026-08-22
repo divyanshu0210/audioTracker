@@ -43,7 +43,7 @@ const AddNotebookBottomSheet = forwardRef(({}, ref) => {
 
   useEffect(() => {
     if (editingNotebook) {
-      setNotebookName(editingNotebook.name);
+      setNotebookName(editingNotebook.title);
       setSelectedColor(editingNotebook.color);
       // Open the bottom sheet
       ref?.current?.expand();
@@ -143,11 +143,11 @@ const AddNotebookBottomSheet = forwardRef(({}, ref) => {
           onChangeText={setNotebookName}
           style={[
             styles.input,
-            editingNotebook?.name === 'Default Notebook' && {
+            editingNotebook?.title === 'Default Notebook' && {
               color: '#555',
             },
           ]}
-          editable={editingNotebook?.name !== 'Default Notebook'}
+          editable={editingNotebook?.title !== 'Default Notebook'}
         />
 
         <Text style={styles.colorTitle}>Select Color:</Text>

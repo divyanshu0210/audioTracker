@@ -88,7 +88,7 @@ export const updateNotebook = (id, name, color, callback) => {
   const fastdb = getDb();
   fastdb.transaction(tx => {
     tx.executeSql(
-      'UPDATE notebooks SET name = ?, color = ? WHERE id = ?;',
+      'UPDATE notebooks SET title = ?, color = ? WHERE id = ?;',
       [name, color, id],
       (_, result) => {
         console.log('Notebook updated! ID:', id);

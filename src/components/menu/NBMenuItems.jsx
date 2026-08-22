@@ -100,7 +100,7 @@ const {setNotebooks, setEditingNotebook} =
       <MenuItem
         onPress={() => {
           console.log(item);
-          if (item.name === 'Default Notebook') {
+          if (item.title === 'Default Notebook') {
             handleDeleteDefaultNotebook(item.id);
           } else {
             handleDeleteNotebook(item.id);

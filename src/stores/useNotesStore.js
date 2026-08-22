@@ -7,6 +7,7 @@ export const useNotesStore = create((set, get) => ({
   activeNoteId: null,
   notebooks: [],
   editingNotebook: null,
+  movingNote: null,
   defaultNotebookId: null,
 
   setDefaultNotebookId: val => set({defaultNotebookId: val}),
@@ -29,6 +30,8 @@ export const useNotesStore = create((set, get) => ({
     })),
 
   setEditingNotebook: val => set({editingNotebook: val}),
+
+  setMovingNote: val => set({movingNote: val}),
 
   removeItem: (type, id) => {
     switch (type) {

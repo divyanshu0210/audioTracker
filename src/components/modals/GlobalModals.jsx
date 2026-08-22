@@ -1,10 +1,10 @@
 import React from 'react';
 
-
 import {useShallow} from 'zustand/react/shallow';
 import { useSelectionStore } from '../../stores/useSelectionStore';
 import CreateCategoryModal from './CreateCategoryModal';
 import CategorySelectionModal from './CategorySelectionModal';
+import MoveNoteModal from './MoveNoteModal';
 
 function GlobalModals() {
   const {
@@ -30,6 +30,8 @@ function GlobalModals() {
       />
 
       <CategorySelectionModal />
+
+      <MoveNoteModal />
     </>
   );
 }

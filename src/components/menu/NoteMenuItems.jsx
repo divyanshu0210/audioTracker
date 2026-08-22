@@ -1,15 +1,13 @@
 import {useNavigation} from '@react-navigation/native';
-import React, {useCallback, useState} from 'react';
+import React, {useCallback} from 'react';
 import {Alert, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
 import {Menu, MenuItem} from 'react-native-material-menu';
 import Share from 'react-native-share';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
 import {useAppState} from '../../contexts/AppStateContext.jsx';
-import {moveNoteToNotebook} from '../../database/U.js';
 import {deleteNoteById} from '../../notes/richDB.js';
 import {convertToPdf} from '../../notes/utils/convertToPDF.js';
 import {convertToDocx} from '../../notes/utils/covertToDOCX.js';
-import SelectNotebookModal from '../modals/SelectNotebookModal.jsx';
 import CommonMenuItems from './CommonMenuItems.jsx';
 import { useNotesStore } from '../../stores/useNotesStore.js';
 import { useShallow } from 'zustand/react/shallow';
@@ -57,17 +55,16 @@ export const handleExport = async (noteId, format) => {
 };
 
 const NoteMenuItems = ({item, hideMenu}) => {
-const {setNotesList, setMainNotesList} =
+const {setNotesList, setMainNotesList, setMovingNote} =
   useNotesStore(
     useShallow(state => ({
       setNotesList: state.setNotesList,
       setMainNotesList: state.setMainNotesList,
+      setMovingNote: state.setMovingNote,
     })),
   );
 
 const {bottomSheetRef} = useAppState();
-
-  const [moveModalVisible, setMoveModalVisible] = useState(false);
 
   const onDelete = noteId => {
     setNotesList(prev => prev.filter(note => note.rowid !== noteId));
@@ -83,22 +80,6 @@ const {bottomSheetRef} = useAppState();
         onPress: () => deleteNoteById(noteId, onDelete(noteId)),
       },
     ]);
-  };
-  // Handle moving the note to selected notebook
-  const handleMoveNotebook = async newNotebookId => {
-    try {
-      const success = await moveNoteToNotebook(item.rowid, newNotebookId);
-      if (success) {
-        Alert.alert('Success', 'Note moved successfully');
-        setMoveModalVisible(false);
-        onDelete(item.rowid); // Notify parent or refresh list
-      } else {
-        Alert.alert('Failed', 'Failed to move note. Please try again.');
-      }
-    } catch (error) {
-      Alert.alert('Error', 'An error occurred while moving the note.');
-      console.error(error);
-    }
   };
   const openNoteDetailsMenu = useCallback(() => {
     bottomSheetRef.current?.snapToIndex(0);
@@ -123,7 +104,7 @@ const {bottomSheetRef} = useAppState();
         <MenuItem
           onPress={() => {
             hideMenu();
-            setMoveModalVisible(true);
+            setMovingNote(item);
           }}>
           <Text style={styles.menuItemText}>Move</Text>
         </MenuItem>
@@ -152,14 +133,6 @@ const {bottomSheetRef} = useAppState();
           <Text style={styles.menuItemText}>Details</Text>
         </TouchableOpacity>
       </MenuItem>
-
-      {/* Move Note Modal */}
-      <SelectNotebookModal
-        visible={moveModalVisible}
-        onClose={() => setMoveModalVisible(false)}
-        onSelect={handleMoveNotebook}
-        selectedNotebookId={item.source_id}
-      />
     </View>
   );
 };

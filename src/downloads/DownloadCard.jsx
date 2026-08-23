@@ -1,24 +1,29 @@
 // DownloadCard.jsx
 //
 // Card for one download. Shares its thumbnail tile with the Recently-Watched
-// cards via MediaThumbnail. For a completed download, tapping opens the player
-// with the local copy. For an in-progress one (`download` prop set), the
-// thumbnail shows a loading overlay and a ✕ button cancels that specific
-// download (which also updates the service notification).
+// cards via MediaThumbnail. For a completed download, tapping opens it —
+// in-app for audio/video/YouTube, via the OS "open with" dialog for anything
+// else. For an in-progress one (`download` prop set), the thumbnail shows a
+// loading overlay and a ✕ button cancels that specific download (which also
+// updates the service notification).
 
 import React from 'react';
 import {
   ActivityIndicator,
+  Alert,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native';
 import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
+import RNFS from 'react-native-fs';
+import FileViewer from 'react-native-file-viewer';
 
 import {getFileIcon} from '../contexts/fileIconHelper';
 import {navigationRef} from '../handlers/navigationRef';
 import {cancelDownload} from '../backgroundService/backgroundDownloadService';
+import {isAudioOrVideo} from '../Linking/utils/handleLinkSubmit';
 import MediaThumbnail, {
   iconInput,
   sourceLabelFor,
@@ -36,10 +41,24 @@ export const DownloadCard = ({item, variant = 'card', style, download}) => {
       ? 'Downloading…'
       : `Downloading ${progress}%`;
 
-  // While downloading the card isn't playable; cancellation is the explicit ✕.
-  const onPress = () => {
+  // Audio/video (and YouTube) play in-app; everything else — PDFs, images,
+  // docs, zips — opens via the OS "open with" dialog in its own app, same
+  // as BaseItem's handleDriveFilePress does for the un-downloaded browse view.
+  const onPress = async () => {
     if (isActive) return;
-    navigationRef.navigate('BacePlayer', {item});
+    if (item.type === 'youtube_video' || isAudioOrVideo(item.mimeType)) {
+      navigationRef.navigate('BacePlayer', {item});
+      return;
+    }
+    if (!item.file_path) return;
+    const exists = await RNFS.exists(item.file_path);
+    if (!exists) return;
+    FileViewer.open(item.file_path, {showOpenWithDialog: true}).catch(() => {
+      Alert.alert(
+        'Could not open file.',
+        'You do not have a proper app to view this file',
+      );
+    });
   };
 
   const cancel = () => cancelDownload(item.source_id);

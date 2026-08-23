@@ -9,6 +9,7 @@
 
 import React from 'react';
 import {Image, StyleSheet, View} from 'react-native';
+import {getFileIcon} from '../contexts/fileIconHelper';
 
 const AUDIO_PLACEHOLDER = require('../assets/audio-placeholder.png');
 const VIDEO_PLACEHOLDER = require('../assets/video-placeholder.png');
@@ -28,22 +29,40 @@ export const sourceLabelFor = item => SOURCE_LABELS[item.type] || 'File';
 export const iconInput = item =>
   item.type === 'device_file' ? item.mimeType : item.type;
 
+// Returns an <Image> source when there's a sensible one to show (a real
+// thumbnail, YouTube's remote thumb, an audio/video placeholder, or the
+// downloaded image itself), or null when there isn't — MediaThumbnail then
+// falls back to a getFileIcon icon instead of guessing with a placeholder.
 const thumbnailSourceFor = item => {
   if (item.type === 'youtube_video') {
     return {uri: `https://img.youtube.com/vi/${item.source_id}/mqdefault.jpg`};
   }
   if (item.thumbnail) return {uri: item.thumbnail};
-  return item.mimeType?.startsWith('audio/')
-    ? AUDIO_PLACEHOLDER
-    : VIDEO_PLACEHOLDER;
+  if (item.mimeType?.startsWith('audio/')) return AUDIO_PLACEHOLDER;
+  if (item.mimeType?.startsWith('video/')) return VIDEO_PLACEHOLDER;
+  if (item.mimeType?.startsWith('image/') && item.file_path) {
+    // Local downloads store a plain filesystem path (e.g. from
+    // RNFS.ExternalDirectoryPath) with no scheme — Image needs file:// to
+    // load it on Android, otherwise it just fails silently.
+    const isRemoteOrAlreadyScheme = /^(file|https?):\/\//.test(item.file_path);
+    return {uri: isRemoteOrAlreadyScheme ? item.file_path : `file://${item.file_path}`};
+  }
+  return null;
 };
 
-export const MediaThumbnail = ({item, isList, children}) => (
-  <View style={[styles.container, isList && styles.listContainer]}>
-    <Image source={thumbnailSourceFor(item)} style={styles.image} />
-    {children}
-  </View>
-);
+export const MediaThumbnail = ({item, isList, children}) => {
+  const source = thumbnailSourceFor(item);
+  return (
+    <View style={[styles.container, isList && styles.listContainer]}>
+      {source ? (
+        <Image source={source} style={styles.image} />
+      ) : (
+        <View style={styles.iconFallback}>{getFileIcon(item.mimeType, 24, 48)}</View>
+      )}
+      {children}
+    </View>
+  );
+};
 
 const styles = StyleSheet.create({
   container: {
@@ -62,6 +81,11 @@ const styles = StyleSheet.create({
   image: {
     width: '100%',
     height: '100%',
+  },
+  iconFallback: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });
 

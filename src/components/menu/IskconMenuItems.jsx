@@ -51,8 +51,18 @@ const IskconMenuItems = ({item, hideMenu}) => {
 
   const handleRemove = async () => {
     try {
-      if (await RNFS.exists(item.file_path)) {
-        await RNFS.unlink(item.file_path);
+      // Delete both item.file_path and the deterministic path handleDownload
+      // checks against — they're normally the same, but if they ever drift,
+      // deleting only item.file_path leaves the real file on disk, and the
+      // next download attempt finds it via getLocalFilePath and wrongly
+      // reports "already downloaded".
+      const paths = new Set(
+        [item.file_path, getLocalFilePath(item.source_id, item.title)].filter(Boolean),
+      );
+      for (const path of paths) {
+        if (await RNFS.exists(path)) {
+          await RNFS.unlink(path);
+        }
       }
       await updateItemFields(item.id, {file_path: null});
       setIskconEntries(prev =>

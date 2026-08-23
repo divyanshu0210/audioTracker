@@ -148,15 +148,19 @@ const VLCPlayerComponent = forwardRef(
         useNativeDriver: true,
       }).start();
       clearTimeout(controlsTimeout.current);
-      if (!isPaused) {
+      // Audio has no video content for controls to obstruct, and no tap
+      // handler to bring them back (handleScreenTap no-ops for audio) — they
+      // should just stay up permanently, never auto-hide.
+      if (!isPaused && !isAudio) {
         controlsTimeout.current = setTimeout(hideControls, 3000);
       }
-    }, [controlsOpacity, hideControls, isPaused]);
+    }, [controlsOpacity, hideControls, isPaused, isAudio]);
 
     // Show controls on mount via showControls() (not a bare
     // setControlsVisible(true)) so the initial display also schedules the
-    // 3s auto-hide — otherwise, until the user taps the screen once, nothing
-    // ever starts that timer and controls stay visible indefinitely.
+    // 3s auto-hide for video — otherwise, until the user taps the screen
+    // once, nothing ever starts that timer and controls stay visible
+    // indefinitely. showControls itself skips scheduling that hide for audio.
     useEffect(() => {
       showControls();
       // eslint-disable-next-line react-hooks/exhaustive-deps

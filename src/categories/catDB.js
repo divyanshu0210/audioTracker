@@ -54,6 +54,10 @@ export const getAllCategories = (query = null) => {
 
   return new Promise((resolve, reject) => {
     fastdb.transaction(tx => {
+      // These exclusions keep the mentor/mentee categories (created from
+      // menteeKey/mentorKey, which contain emails) out of the normal lists.
+      // CreateCategoryModal rejects user-typed names matching them — see
+      // getCategoryNameError there; keep the two in sync.
       let sql = `
         SELECT *, 'category' AS type
         FROM categories

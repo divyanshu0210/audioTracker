@@ -18,6 +18,26 @@ import { useAppState } from '../../contexts/AppStateContext';
 import { useSelectionStore } from '../../stores/useSelectionStore';
 import { useShallow } from 'zustand/react/shallow';
 
+// getAllCategories hides any name containing "@" or the mentee tag (see its
+// WHERE clause) — that's deliberate, it's how the mentor/mentee categories
+// created from menteeKey/mentorKey stay out of the normal category lists.
+// A user-typed name that trips those same filters would save fine and then
+// never appear anywhere, leaving an invisible row that still holds the name
+// (addCategory reuses an existing row's id on a name match, so even
+// re-creating it later silently returns the hidden one). So this guards the
+// user-typed path only — addCategory itself must keep accepting them.
+const MENTEE_CAT_FILTER_TAG = '[MENTEE_CAT_Filter]';
+
+const getCategoryNameError = name => {
+  if (name.includes('@')) {
+    return 'Category names cannot contain "@".';
+  }
+  if (name.includes(MENTEE_CAT_FILTER_TAG)) {
+    return `Category names cannot contain "${MENTEE_CAT_FILTER_TAG}".`;
+  }
+  return null;
+};
+
 // editingCategory ({id, name, color}) switches this into rename mode —
 // used by CategoriesView's manage mode via GlobalModals. null means "create".
 const CreateCategoryModal = ({ visible, onClose, onCategoryCreated, editingCategory, onCategoryUpdated }) => {
@@ -51,6 +71,14 @@ const {setSelectedCategory, categories} = useSelectionStore(
     const trimmedName = newCategoryName.trim();
     if (!trimmedName) {
       Alert.alert('Error', 'Please enter a category name');
+      return;
+    }
+
+    // Reject names that getAllCategories filters out — the category would be
+    // saved and then be invisible everywhere (see getCategoryNameError).
+    const nameError = getCategoryNameError(trimmedName);
+    if (nameError) {
+      Alert.alert('Invalid Name', nameError);
       return;
     }
 

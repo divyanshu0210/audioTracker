@@ -22,6 +22,7 @@ import FontAwesome6 from 'react-native-vector-icons/FontAwesome6';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
 import GoogleLoginScreen from './auth/GoogleLoginScreen';
 import CategoryDetailScreen from './categories/CategoryDetailScreen';
+import CategoriesView from './categories/CategoriesView';
 import AddNotebookBottomSheet from './components/bottomsheets/AddNotebookBottomSheet';
 import NoteInfoBottomMenu from './components/bottomsheets/NoteInfoBottomMenu';
 import {AppStateProvider, useAppState} from './contexts/AppStateContext';
@@ -187,6 +188,11 @@ const RootNavigator = track(function RootNavigator() {
         <Stack.Screen
           name="CategoryDetailScreen"
           component={CategoryDetailScreen}
+          options={{headerShown: false}}
+        />
+        <Stack.Screen
+          name="CategoriesView"
+          component={CategoriesView}
           options={{headerShown: false}}
         />
 

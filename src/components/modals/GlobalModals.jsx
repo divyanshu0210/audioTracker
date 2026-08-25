@@ -11,11 +11,15 @@ function GlobalModals() {
     createCategoryModalVisible,
     setCreateCategoryModalVisible,
     setCategories,
+    editingCategory,
+    setEditingCategory,
   } = useSelectionStore(
     useShallow(state => ({
       createCategoryModalVisible: state.createCategoryModalVisible,
       setCreateCategoryModalVisible: state.setCreateCategoryModalVisible,
       setCategories: state.setCategories,
+      editingCategory: state.editingCategory,
+      setEditingCategory: state.setEditingCategory,
     })),
   );
 
@@ -23,9 +27,18 @@ function GlobalModals() {
     <>
       <CreateCategoryModal
         visible={createCategoryModalVisible}
-        onClose={() => setCreateCategoryModalVisible(false)}
+        onClose={() => {
+          setCreateCategoryModalVisible(false);
+          setEditingCategory(null);
+        }}
+        editingCategory={editingCategory}
         onCategoryCreated={newCat => {
           setCategories(prev => [newCat, ...prev]);
+        }}
+        onCategoryUpdated={updatedCat => {
+          setCategories(prev =>
+            prev.map(c => (c.id === updatedCat.id ? {...c, ...updatedCat} : c)),
+          );
         }}
       />
 

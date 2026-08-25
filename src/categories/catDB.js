@@ -32,6 +32,23 @@ export const addCategory = (name, color) => {
     );
   });
 };
+export const updateCategory = (categoryId, {name, color}) => {
+  const fastdb = getDb();
+  return new Promise((resolve, reject) => {
+    fastdb.transaction(
+      tx => {
+        tx.executeSql(
+          'UPDATE categories SET name = ?, color = ? WHERE id = ?;',
+          [name, color, categoryId],
+          (_, result) => resolve(result),
+          (_, error) => reject(error),
+        );
+      },
+      error => reject(error),
+    );
+  });
+};
+
 export const getAllCategories = (query = null) => {
   const fastdb = getDb();
 

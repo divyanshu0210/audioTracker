@@ -1,5 +1,5 @@
 // CreateCategoryModal.js
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Modal,
   View,
@@ -13,35 +13,84 @@ import {
 import Ionicons from 'react-native-vector-icons/Ionicons';
 
 import ColorPallete from '../ColorPallete';
-import { addCategory } from '../../categories/catDB';
+import { addCategory, updateCategory } from '../../categories/catDB';
 import { useAppState } from '../../contexts/AppStateContext';
 import { useSelectionStore } from '../../stores/useSelectionStore';
+import { useShallow } from 'zustand/react/shallow';
 
-const CreateCategoryModal = ({ visible, onClose, onCategoryCreated }) => {
+// editingCategory ({id, name, color}) switches this into rename mode —
+// used by CategoriesView's manage mode via GlobalModals. null means "create".
+const CreateCategoryModal = ({ visible, onClose, onCategoryCreated, editingCategory, onCategoryUpdated }) => {
   const [newCategoryName, setNewCategoryName] = useState('');
   const [selectedColor, setSelectedColor] = useState('#007AFF');
   const [addingCategory, setAddingCategory] = useState(false);
-const setSelectedCategory = useSelectionStore(
-  state => state.setSelectedCategory,
+const {setSelectedCategory, categories} = useSelectionStore(
+  useShallow(state => ({
+    setSelectedCategory: state.setSelectedCategory,
+    categories: state.categories,
+  })),
 );
+  const isEditing = !!editingCategory;
+
+  // Reset on every open — prefill when editing, blank when creating.
+  // This modal stays mounted globally (GlobalModals), so without this a
+  // name left over from a cancelled or duplicate-rejected attempt would
+  // still be sitting in the input the next time it's opened.
+  useEffect(() => {
+    if (!visible) return;
+    if (editingCategory) {
+      setNewCategoryName(editingCategory.name);
+      setSelectedColor(editingCategory.color || '#007AFF');
+    } else {
+      setNewCategoryName('');
+      setSelectedColor('#007AFF');
+    }
+  }, [visible, editingCategory]);
 
   const handleCreateCategory = async () => {
-    if (!newCategoryName.trim()) {
+    const trimmedName = newCategoryName.trim();
+    if (!trimmedName) {
       Alert.alert('Error', 'Please enter a category name');
+      return;
+    }
+
+    // addCategory itself silently reuses an existing row's id on a name
+    // collision (see catDB.js) rather than erroring — which would otherwise
+    // leave a duplicate {id, name, color} entry sitting in the categories
+    // store array once onCategoryCreated prepends it. Catch it here instead,
+    // with a real message, before it ever reaches the DB call. Case-
+    // insensitive since "Work" and "work" would collide there too.
+    const duplicate = categories.find(
+      c =>
+        c.id !== editingCategory?.id &&
+        c.name.trim().toLowerCase() === trimmedName.toLowerCase(),
+    );
+    if (duplicate) {
+      Alert.alert(
+        'Category Already Exists',
+        `A category named "${duplicate.name}" already exists.`,
+      );
       return;
     }
 
     setAddingCategory(true);
     try {
-      const newCategoryId = await addCategory(newCategoryName, selectedColor);
-      onCategoryCreated?.({ id: newCategoryId, name: newCategoryName, color: selectedColor });
-          // setSelectedCategory(newCategoryId);
+      if (isEditing) {
+        await updateCategory(editingCategory.id, {
+          name: trimmedName,
+          color: selectedColor,
+        });
+        onCategoryUpdated?.({ id: editingCategory.id, name: trimmedName, color: selectedColor });
+      } else {
+        const newCategoryId = await addCategory(trimmedName, selectedColor);
+        onCategoryCreated?.({ id: newCategoryId, name: trimmedName, color: selectedColor });
+      }
       setNewCategoryName('');
       setSelectedColor('#007AFF');
       onClose();
     } catch (error) {
-      console.error('Failed to create category:', error);
-      Alert.alert('Error', 'Failed to create category. Please try again.');
+      console.error(`Failed to ${isEditing ? 'update' : 'create'} category:`, error);
+      Alert.alert('Error', `Failed to ${isEditing ? 'update' : 'create'} category. Please try again.`);
     } finally {
       setAddingCategory(false);
     }
@@ -55,7 +104,9 @@ const setSelectedCategory = useSelectionStore(
             <Ionicons name="close" size={24} color="black" />
           </TouchableOpacity>
 
-          <Text style={styles.modalTitle}>Create New Category</Text>
+          <Text style={styles.modalTitle}>
+            {isEditing ? 'Edit Category' : 'Create New Category'}
+          </Text>
           <TextInput
             style={styles.input}
             placeholder="Category Name"
@@ -83,7 +134,11 @@ const setSelectedCategory = useSelectionStore(
               onPress={handleCreateCategory}
               disabled={addingCategory || !newCategoryName.trim()}
             >
-              {addingCategory ? <ActivityIndicator color="white" /> : <Text style={styles.buttonText}>Create</Text>}
+              {addingCategory ? (
+                <ActivityIndicator color="white" />
+              ) : (
+                <Text style={styles.buttonText}>{isEditing ? 'Save' : 'Create'}</Text>
+              )}
             </TouchableOpacity>
           </View>
         </View>

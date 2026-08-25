@@ -10,6 +10,13 @@ export const useSelectionStore = create((set, get) => ({
   activeItem: null,
   createCategoryModalVisible: false,
   addToCategoryModalVisible: false,
+  // Set when "Add to Category" is triggered from SelectionHeader's bulk
+  // action instead of a single item's menu — CategorySelectionModal checks
+  // this to decide whether to operate on `activeItem` or this whole array.
+  categoryModalBulkItems: null,
+  // Set when CreateCategoryModal is opened to rename an existing category
+  // (from CategoriesView's manage mode) rather than create a new one.
+  editingCategory: null,
 
   setSelectedItems: val =>
     set(s => ({
@@ -31,4 +38,6 @@ export const useSelectionStore = create((set, get) => ({
     set({createCategoryModalVisible: val}),
   setAddToCategoryModalVisible: val =>
     set({addToCategoryModalVisible: val}),
+  setCategoryModalBulkItems: val => set({categoryModalBulkItems: val}),
+  setEditingCategory: val => set({editingCategory: val}),
 }));

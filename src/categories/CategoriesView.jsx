@@ -7,25 +7,39 @@ import {getAllCategories} from './catDB';
 import AppHeader from '../components/headers/AppHeader';
 import {ItemTypes} from '../contexts/constants';
 import BaseMediaListComponent from '../StackScreens/BaseMediaListComponent';
-import { useSelectionStore } from '../stores/useSelectionStore';
-import { useShallow } from 'zustand/react/shallow';
-import { navigationRef } from '../handlers/navigationRef';
+import {useSelectionStore} from '../stores/useSelectionStore';
+import {useShallow} from 'zustand/react/shallow';
+import {navigationRef} from '../handlers/navigationRef';
 
 export default function CategoriesView({mode = 'full'}) {
 const {
   categories,
   setCategories,
   setCreateCategoryModalVisible,
+  setSelectedItems,
+  setSelectionMode,
 } = useSelectionStore(
   useShallow(state => ({
     categories: state.categories,
     setCategories: state.setCategories,
     setCreateCategoryModalVisible:
       state.setCreateCategoryModalVisible,
+    setSelectedItems: state.setSelectedItems,
+    setSelectionMode: state.setSelectionMode,
   })),
 );
 
   const isPreview = mode === 'preview';
+
+  // A selection left active from a previous screen would hide AppHeader here
+  // (it hides itself globally whenever selectionMode is on) — start every
+  // visit to this screen with a clean slate instead.
+  useFocusEffect(
+    useCallback(() => {
+      setSelectionMode(false);
+      setSelectedItems([]);
+    }, [setSelectionMode, setSelectedItems]),
+  );
 
   const fetch = async () => {
     try {

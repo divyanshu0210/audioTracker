@@ -1,4 +1,4 @@
-import React, {useState, useEffect} from 'react';
+import React, {useEffect, useState} from 'react';
 import {
   Modal,
   View,
@@ -13,6 +13,7 @@ import {
   checkItemInCategory,
   getAllCategories,
 } from '../../categories/catDB';
+import {bulkAddToCategory, describeFailures} from '../../StackScreens/bulkActions';
 import {Picker} from '@react-native-picker/picker';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import {useAppState} from '../../contexts/AppStateContext';
@@ -31,6 +32,8 @@ const {
   addToCategoryModalVisible,
   setAddToCategoryModalVisible,
   setCreateCategoryModalVisible,
+  categoryModalBulkItems,
+  setCategoryModalBulkItems,
 } = useSelectionStore(
   useShallow(state => ({
     categories: state.categories,
@@ -42,12 +45,18 @@ const {
       state.setAddToCategoryModalVisible,
     setCreateCategoryModalVisible:
       state.setCreateCategoryModalVisible,
+    categoryModalBulkItems: state.categoryModalBulkItems,
+    setCategoryModalBulkItems: state.setCategoryModalBulkItems,
   })),
 );
+  const isBulk = Array.isArray(categoryModalBulkItems) && categoryModalBulkItems.length > 0;
   const sourceId = activeItem?.sourceId;
   const sourceType = activeItem?.sourceType;
 
-  // Load categories when modal becomes visible
+  // Load categories when the modal opens, and again whenever `categories`
+  // changes in the store (e.g. a category created via the "+ Create" button
+  // while this modal is open) — see loadCategories for how the 0-categories
+  // infinite-loop this used to cause is avoided.
   useEffect(() => {
     if (!addToCategoryModalVisible) {
       // reset state when modal closes
@@ -57,10 +66,12 @@ const {
       return;
     }
     loadCategories();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [addToCategoryModalVisible, categories]);
 
   const onClose = () => {
     setAddToCategoryModalVisible(false);
+    setCategoryModalBulkItems(null);
   };
 
   const onAddSuccess = () => {
@@ -76,12 +87,27 @@ const {
       let cats = categories;
       if (!cats || cats.length === 0) {
         cats = await getAllCategories();
-        setCategories(cats);
+        // Only write to the store when the fetch actually found something.
+        // Calling setCategories([]) here every time would hand the store a
+        // brand-new (but still empty) array reference on every run, which —
+        // since this effect depends on `categories` — would re-trigger this
+        // same effect forever whenever there are genuinely 0 categories.
+        if (cats.length > 0) {
+          setCategories(cats);
+        }
       }
 
       // filter out unwanted categories
       cats = cats.filter(cat => !/\([^\s@)]+@[^\s@)]+\)/.test(cat.name));
       setCategoriesLocal(cats);
+
+      if (isBulk) {
+        // "Already added" only makes sense per single item — skip it for a
+        // mixed batch and just default to the first category.
+        setAlreadyAddedCategories([]);
+        if (cats.length > 0) setSelectedCategory(cats[0].id);
+        return;
+      }
 
       // Check which categories already contain this item
       const checks = await Promise.all(
@@ -106,8 +132,32 @@ const {
     }
   };
 
+  const handleAddToCategoryBulk = async () => {
+    setLoading(true);
+    try {
+      const {succeeded, failed} = await bulkAddToCategory(
+        categoryModalBulkItems,
+        selectedCategory,
+      );
+      const category = categoriesLocal.find(c => c.id === selectedCategory);
+      Alert.alert(
+        failed.length ? 'Partially Added' : 'Success',
+        failed.length
+          ? `Added ${succeeded} item(s) to "${category?.name}".\n\n${describeFailures(failed)}`
+          : `Added ${succeeded} item(s) to "${category?.name}".`,
+      );
+      onClose();
+    } catch (error) {
+      console.error('Failed to bulk add to category:', error);
+      Alert.alert('Error', 'Failed to add items to category. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleAddToCategory = async () => {
     if (!selectedCategory) return;
+    if (isBulk) return handleAddToCategoryBulk();
 
     // Check if already in this category
     if (alreadyAddedCategories.includes(selectedCategory)) {
@@ -162,7 +212,11 @@ const {
             <Ionicons name="close" size={24} color="black" />
           </TouchableOpacity>
 
-          <Text style={styles.modalTitle}>Add to Category</Text>
+          <Text style={styles.modalTitle}>
+            {isBulk
+              ? `Add ${categoryModalBulkItems.length} Items to Category`
+              : 'Add to Category'}
+          </Text>
           {loading ? (
             <ActivityIndicator size="large" style={styles.loader} />
           ) : (

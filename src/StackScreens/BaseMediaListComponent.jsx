@@ -64,13 +64,22 @@ const BaseMediaListComponent = ({
         id: getItemId(item),
         type,
         subtype: item.type,
+        // Carried along so "Select All" produces the same shape BaseItem's
+        // per-item selectionEntry does — bulk delete needs dbId/file_path.
+        dbId: item.id,
+        file_path: item.file_path,
+        title: item.title,
       })),
     [mediaList, type],
   );
 
   return (
     <View style={styles.container}>
-      <SelectionHeader type={type} allItemsInThisList={allItemsInThisList} />
+      <SelectionHeader
+        type={type}
+        screen={screen}
+        allItemsInThisList={allItemsInThisList}
+      />
 
       <NewAssignmentsBtn />
 

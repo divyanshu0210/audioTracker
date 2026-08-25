@@ -1,22 +1,37 @@
 // SelectionHeader.js
-import React, {useCallback, useMemo} from 'react';
-import {StyleSheet, Text, TouchableOpacity, View} from 'react-native';
+import React, {useCallback, useMemo, useState} from 'react';
+import {ActivityIndicator, Alert, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import Fontisto from 'react-native-vector-icons/Fontisto';
+import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
 import {useSelectionStore} from '../stores/useSelectionStore';
 import {useShallow} from 'zustand/react/shallow';
 import {navigationRef} from '../handlers/navigationRef';
+import {ItemTypes} from '../contexts/constants';
+import {bulkShareNotesAsPdf, describeFailures, MAX_PDF_SHARE_COUNT} from './bulkActions';
+import BulkDeleteConfirmModal from './BulkDeleteConfirmModal';
 
-const SelectionHeader = ({type, allItemsInThisList}) => {
-  const {selectedItems, setSelectedItems, setSelectionMode, selectionMode} =
-    useSelectionStore(
-      useShallow(state => ({
-        selectedItems: state.selectedItems,
-        setSelectedItems: state.setSelectedItems,
-        setSelectionMode: state.setSelectionMode,
-        selectionMode: state.selectionMode,
-      })),
-    );
+const SelectionHeader = ({type, screen, allItemsInThisList}) => {
+  const [confirmVisible, setConfirmVisible] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  const {
+    selectedItems,
+    setSelectedItems,
+    setSelectionMode,
+    selectionMode,
+    setCategoryModalBulkItems,
+    setAddToCategoryModalVisible,
+  } = useSelectionStore(
+    useShallow(state => ({
+      selectedItems: state.selectedItems,
+      setSelectedItems: state.setSelectedItems,
+      setSelectionMode: state.setSelectionMode,
+      selectionMode: state.selectionMode,
+      setCategoryModalBulkItems: state.setCategoryModalBulkItems,
+      setAddToCategoryModalVisible: state.setAddToCategoryModalVisible,
+    })),
+  );
 
   const selectedItemsOfThisType = useMemo(
     () => selectedItems.filter(i => i.type === type),
@@ -57,29 +72,93 @@ const SelectionHeader = ({type, allItemsInThisList}) => {
     allItemsInThisList,
     selectedItems,
   ]);
+
+  const openAddToCategory = useCallback(() => {
+    setCategoryModalBulkItems(selectedItems);
+    setAddToCategoryModalVisible(true);
+  }, [selectedItems, setCategoryModalBulkItems, setAddToCategoryModalVisible]);
+
+  const handleShareAsPdf = useCallback(async () => {
+    const notes = selectedItems.filter(i => i.type === ItemTypes.NOTE);
+    if (!notes.length) return;
+    if (notes.length > MAX_PDF_SHARE_COUNT) {
+      Alert.alert(
+        'Too Many Notes Selected',
+        `You can share up to ${MAX_PDF_SHARE_COUNT} notes as PDF at once. Please select fewer notes and try again.`,
+      );
+      return;
+    }
+    setBusy(true);
+    try {
+      const {succeeded, failed} = await bulkShareNotesAsPdf(notes);
+      if (failed.length) {
+        Alert.alert(
+          'Some notes failed',
+          `Generated ${succeeded} of ${notes.length} PDFs.\n\n${describeFailures(failed)}`,
+        );
+      }
+    } catch (error) {
+      // Share.open rejects when the user just cancels the share sheet —
+      // not a real error, matches NoteMenuItems.handleExport's behavior.
+      console.log('Share as PDF cancelled or failed:', error);
+    } finally {
+      setBusy(false);
+    }
+  }, [selectedItems]);
+
   if (!selectionMode) return null;
+
   return (
-    <View style={styles.selectionHeader}>
-      <View style={styles.leftSection}>
-        <Text style={styles.headerTitle}>{selectedItems.length}</Text>
+    <>
+      <View style={styles.selectionHeader}>
+        <View style={styles.leftSection}>
+          <Text style={styles.headerTitle}>{selectedItems.length}</Text>
 
-        <TouchableOpacity onPress={handleSelectAll}>
-          <Text style={styles.headerButton}>
-            {isAllSelected ? 'Unselect All' : 'Select All'}
-          </Text>
-        </TouchableOpacity>
+          <TouchableOpacity onPress={handleSelectAll}>
+            <Text style={styles.headerButton}>
+              {isAllSelected ? 'Unselect All' : 'Select All'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.rightSection}>
+          {type === ItemTypes.NOTE && (
+            <TouchableOpacity onPress={handleShareAsPdf} disabled={busy}>
+              {busy ? (
+                <ActivityIndicator size="small" color="#007AFF" />
+              ) : (
+                <MaterialIcons name="picture-as-pdf" size={22} color="#007AFF" />
+              )}
+            </TouchableOpacity>
+          )}
+
+          <TouchableOpacity onPress={openAddToCategory} disabled={busy}>
+            <Ionicons name="pricetag-outline" size={21} color="#007AFF" />
+          </TouchableOpacity>
+
+          <TouchableOpacity onPress={handleForward} disabled={busy}>
+            <Fontisto name="share-a" size={20} color="#007AFF" />
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            onPress={() => setConfirmVisible(true)}
+            disabled={busy}>
+            <Ionicons name="trash-outline" size={22} color="#D32F2F" />
+          </TouchableOpacity>
+
+          <TouchableOpacity onPress={cancelSelection} style={styles.iconButton}>
+            <Ionicons name="close-circle-outline" size={26} color="#007AFF" />
+          </TouchableOpacity>
+        </View>
       </View>
 
-      <View style={styles.rightSection}>
-        <TouchableOpacity onPress={handleForward}>
-          <Fontisto name="share-a" size={23} color="#007AFF" />
-        </TouchableOpacity>
-
-        <TouchableOpacity onPress={cancelSelection} style={styles.iconButton}>
-          <Ionicons name="close-circle-outline" size={26} color="#007AFF" />
-        </TouchableOpacity>
-      </View>
-    </View>
+      <BulkDeleteConfirmModal
+        visible={confirmVisible}
+        onClose={() => setConfirmVisible(false)}
+        selectedItems={selectedItems}
+        screen={screen}
+      />
+    </>
   );
 };
 
@@ -104,7 +183,7 @@ const styles = StyleSheet.create({
   rightSection: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: 14,
   },
   headerButton: {
     color: '#007AFF',

@@ -1,12 +1,18 @@
 import {db, getDb} from './database';
 
+// Both of these used to fire the transaction without returning a Promise —
+// existing `await softDeleteItem(...)`/`await deleteNoteById(...)` calls
+// elsewhere were awaiting `undefined` and resolving instantly, running
+// subsequent code before the DB write actually completed. Now-correct async
+// behavior only delays callers by the write itself; never breaks them.
 export const softDeleteItem = (type, sourceId) => {
   const db = getDb();
 
-  db.transaction(
-    tx => {
-      tx.executeSql(
-        `
+  return new Promise((resolve, reject) => {
+    db.transaction(
+      tx => {
+        tx.executeSql(
+          `
         WITH RECURSIVE descendants AS (
           -- Always include the root item
           SELECT id
@@ -24,47 +30,56 @@ export const softDeleteItem = (type, sourceId) => {
           WHERE i.out_show = 0
         )
         UPDATE items
-        SET 
+        SET
           in_show = 0,
           out_show = 0,
           deleted_at = CURRENT_TIMESTAMP
         WHERE id IN (SELECT id FROM descendants);
         `,
-        [type, sourceId],
-        (_, result) => {
-          console.log(
-            `✅ Soft deleted ${type} (${sourceId}). Rows affected: ${result.rowsAffected}`,
-          );
-        },
-        (_, error) => {
-          console.error('❌ Soft delete error:', error);
-          return true;
-        },
-      );
-    },
-    error => console.error('❌ Transaction error:', error),
-    () =>
-      console.log(
-        `✅ Soft delete transaction completed for ${type} (${sourceId})`,
-      ),
-  );
+          [type, sourceId],
+          (_, result) => {
+            console.log(
+              `✅ Soft deleted ${type} (${sourceId}). Rows affected: ${result.rowsAffected}`,
+            );
+          },
+          (_, error) => {
+            console.error('❌ Soft delete error:', error);
+            return true;
+          },
+        );
+      },
+      error => {
+        console.error('❌ Transaction error:', error);
+        reject(error);
+      },
+      () => {
+        console.log(
+          `✅ Soft delete transaction completed for ${type} (${sourceId})`,
+        );
+        resolve();
+      },
+    );
+  });
 };
 
 // ---------------notes
 export const deleteNoteById = noteId => {
   const fastdb = getDb();
-  fastdb.transaction(tx => {
-    tx.executeSql(
-      `DELETE FROM notes WHERE rowid = ?;`, // Use rowid instead of id
-      [noteId],
-      (_, result) => {
-        console.log(`Note ${noteId} deleted successfully.`);
-      },
-      (_, error) => {
-        console.error(`Failed to delete note ${noteId}:`, error);
-        Alert.alert('Error', 'Failed to delete note.');
-      },
-    );
+  return new Promise((resolve, reject) => {
+    fastdb.transaction(tx => {
+      tx.executeSql(
+        `DELETE FROM notes WHERE rowid = ?;`, // Use rowid instead of id
+        [noteId],
+        (_, result) => {
+          console.log(`Note ${noteId} deleted successfully.`);
+          resolve(result);
+        },
+        (_, error) => {
+          console.error(`Failed to delete note ${noteId}:`, error);
+          reject(error);
+        },
+      );
+    });
   });
 };
 

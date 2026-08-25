@@ -1,5 +1,5 @@
 import {StyleSheet, View, Pressable, Alert} from 'react-native';
-import React, {useCallback, useRef} from 'react';
+import React, {useCallback, useMemo, useRef} from 'react';
 import RNFS from 'react-native-fs';
 import {isAudioOrVideo} from '../Linking/utils/handleLinkSubmit';
 import YouTubeItem from './YouTubeItem';
@@ -66,21 +66,36 @@ const BaseItem = ({type, item, subtype, screen, onFolderPress}) => {
     ),
   );
 
+  // dbId/file_path/title ride along for bulk actions (delete needs the
+  // internal PK + local path to unlink downloads; Assign never needed them,
+  // only id/type/subtype).
+  const selectionEntry = useMemo(
+    () => ({
+      id: sourceId,
+      type,
+      subtype,
+      dbId: item?.id,
+      file_path: item?.file_path,
+      title: item?.title,
+    }),
+    [sourceId, type, subtype, item?.id, item?.file_path, item?.title],
+  );
+
   const toggleSelection = useCallback(() => {
     setSelectedItems(prev =>
       prev.some(i => i.id === sourceId && i.type === type)
         ? prev.filter(i => !(i.id === sourceId && i.type === type))
-        : [...prev, {id: sourceId, type, subtype}],
+        : [...prev, selectionEntry],
     );
-  }, [setSelectedItems, sourceId, type, subtype]);
+  }, [setSelectedItems, sourceId, type, selectionEntry]);
 
   const handleItemLongPress = useCallback(() => {
     const {selectionMode} = useSelectionStore.getState();
     if (!selectionMode) {
-      setSelectedItems([{id: sourceId, type, subtype}]);
+      setSelectedItems([selectionEntry]);
       setSelectionMode(true);
     }
-  }, [setSelectedItems, setSelectionMode, sourceId, type, subtype]);
+  }, [setSelectedItems, setSelectionMode, selectionEntry]);
 
   const handleYoutubePress = useCallback(() => {
     const {videos, items} = useMediaStore.getState();

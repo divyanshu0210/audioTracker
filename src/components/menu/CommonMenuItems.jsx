@@ -38,15 +38,20 @@ const CommonMenuItems = ({
 const {
   selectedCategory,
   setAddToCategoryModalVisible,
+  setCategoryModalBulkItems,
 } = useSelectionStore(
   useShallow(state => ({
     selectedCategory: state.selectedCategory,
     setAddToCategoryModalVisible:
       state.setAddToCategoryModalVisible,
+    setCategoryModalBulkItems: state.setCategoryModalBulkItems,
   })),
 );
 
   const handleAddToCategory = () => {
+    // Make sure a leftover bulk selection from a previous SelectionHeader
+    // action doesn't hijack this single-item add.
+    setCategoryModalBulkItems(null);
     setAddToCategoryModalVisible(true);
   };
 
@@ -68,9 +73,21 @@ const {
     );
   };
 
+  // category_items.item_type stores the raw subtype for media items
+  // ('drive_file'/'drive_folder', 'youtube_video'/'youtube_playlist',
+  // 'device_file' — see handleDriveLink's addItemToCategory call and
+  // getCategoryData's ITEM_TYPES_THAT_USE_ITEMS_TABLE), not the generic
+  // ItemTypes enum ('drive'/'youtube'/'device') that sourceType is for these.
+  // Notes/notebooks have no such subtype split, so sourceType ('note'/
+  // 'notebook') already matches what's stored for them.
+  const MEDIA_TYPES_NEEDING_SUBTYPE = ['drive', 'device', 'youtube'];
+
   const handleRemoveFromCategory = async () => {
     try {
-      await removeItemFromCategory(selectedCategory, sourceId, sourceType);
+      const categoryItemType = MEDIA_TYPES_NEEDING_SUBTYPE.includes(sourceType)
+        ? item?.type
+        : sourceType;
+      await removeItemFromCategory(selectedCategory, sourceId, categoryItemType);
       filterAndSet(sourceType, sourceId, screen);
     } catch (err) {
       console.error('Error removing from category:', err);

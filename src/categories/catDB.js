@@ -108,9 +108,14 @@ export const removeItemFromCategory = (categoryId, itemId, itemType) => {
   return new Promise((resolve, reject) => {
     fastdb.transaction(
       tx => {
+        // item_id is TEXT and addItemToCategory always inserts String(itemId)
+        // — this needs the same coercion, or a numeric itemId binds as an
+        // integer and never matches the stored string (confirmed: rowsAffected
+        // was 0 even for an exact-looking match, since this driver doesn't
+        // apply SQLite's usual numeric-to-text affinity conversion on bind).
         tx.executeSql(
           'DELETE FROM category_items WHERE category_id = ? AND item_id = ? AND item_type = ?;',
-          [categoryId, itemId, itemType],
+          [categoryId, String(itemId), itemType],
           (_, result) => resolve(result),
           (_, error) => reject(error),
         );

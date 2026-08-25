@@ -89,17 +89,23 @@ export const useMediaStore = create((set, get) => ({
     }
   },
 
+  // Was filtering on f.ytube_id/f.driveId, fields no item actually has (the
+  // rest of the codebase — bulkActions.js, DriveMenuItems, YTMenuItems — all
+  // key on source_id). Those predicates were always true, so nothing was
+  // ever actually removed from these lists: the DB delete succeeded, but the
+  // item stayed visible in whatever list called this (e.g. CommonMenuItems'
+  // "Remove" from a category view).
   removeItem: (type, id) => {
     switch (type) {
       case 'youtube':
-        set(s => ({items: s.items.filter(f => f.ytube_id !== id)}));
+        set(s => ({items: s.items.filter(f => f.source_id !== id)}));
         break;
       case 'device':
-        set(s => ({deviceFiles: s.deviceFiles.filter(f => f.driveId !== id)}));
+        set(s => ({deviceFiles: s.deviceFiles.filter(f => f.source_id !== id)}));
         break;
       case 'drive':
         set(s => ({
-          driveLinksList: s.driveLinksList.filter(f => f.driveId !== id),
+          driveLinksList: s.driveLinksList.filter(f => f.source_id !== id),
         }));
         break;
     }

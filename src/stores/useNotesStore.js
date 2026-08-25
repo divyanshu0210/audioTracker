@@ -36,7 +36,13 @@ export const useNotesStore = create((set, get) => ({
   removeItem: (type, id) => {
     switch (type) {
       case 'note':
-        set(s => ({notesList: s.notesList.filter(i => i.rowid !== id)}));
+        // AllNotesScreen (the list rendered for "All Notes" and for a
+        // category's Notes tab) reads mainNotesList, not notesList — both
+        // need filtering or the removed note stays visible until refetch.
+        set(s => ({
+          notesList: s.notesList.filter(i => i.rowid !== id),
+          mainNotesList: s.mainNotesList.filter(i => i.rowid !== id),
+        }));
         break;
       case 'notebook':
         set(s => ({notebooks: s.notebooks.filter(i => i.id !== id)}));

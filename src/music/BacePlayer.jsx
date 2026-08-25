@@ -26,6 +26,7 @@ import useSettingsStore from '../Settings/settingsStore';
 import VLCPlayerComponent from './VLCPlayer/VLCPlayerComponent';
 import YouTubePlayerComponent from './VLCPlayer/YouTubePlayerComponent ';
 import AddNewNoteBtn from '../components/buttons/AddNewNoteBtn';
+import PlayerQueue from './PlayerQueue';
 import {saveDatatoBackend} from '../appMentorBackend/reportMgt';
 import {useNotesStore} from '../stores/useNotesStore';
 import {useShallow} from 'zustand/react/shallow';
@@ -379,23 +380,6 @@ const BacePlayer = () => {
     }
   }, [playerRef.current]);
 
-  // Handle playlist navigation
-  const handleNext = async () => {
-    if (!autoplay) return;
-    stopAutoAdvanceCountdown();
-
-    if (currentIndex < playlist.length - 1) {
-      await cleanupPlayer();
-      setActiveNoteId(null);
-      setCurrentIndex(currentIndex + 1);
-      setIsDataLoaded(false);
-      currentTimeRef.current = 0;
-      lastTimeRef.current = 0;
-      setShowNotes(false);
-      setIsMinimized(true);
-    }
-  };
-
   // Countdown before auto-advancing to the next playlist item when a track
   // ends on its own — an instant jump (now that cleanupPlayer's backend
   // upload no longer blocks it, see cleanupPlayer) feels too abrupt, and the
@@ -403,13 +387,54 @@ const BacePlayer = () => {
   // Manual skip-next/previous stay instant; this only wraps the onEnd path.
   const AUTOPLAY_NEXT_DELAY_SEC = 5;
 
-  const stopAutoAdvanceCountdown = () => {
+  const stopAutoAdvanceCountdown = useCallback(() => {
     if (autoAdvanceIntervalRef.current) {
       clearInterval(autoAdvanceIntervalRef.current);
       autoAdvanceIntervalRef.current = null;
     }
     setAutoAdvanceSecondsLeft(null);
-  };
+  }, []);
+
+  // Single switch-to-item routine shared by skip-next, skip-previous and the
+  // queue's tap-to-jump: save progress on the item being left, then reset the
+  // per-item playback state. These are memoized because PlayerQueue is memo'd
+  // — BacePlayer re-renders on things the queue doesn't care about (the
+  // auto-advance countdown alone re-renders it once a second), and unstable
+  // callbacks would defeat that memo every time.
+  const goToIndex = useCallback(
+    async index => {
+      if (!autoplay || index === currentIndex) return;
+      if (index < 0 || index > playlist.length - 1) return;
+      stopAutoAdvanceCountdown();
+      await cleanupPlayer();
+      setActiveNoteId(null);
+      setCurrentIndex(index);
+      setIsDataLoaded(false);
+      currentTimeRef.current = 0;
+      lastTimeRef.current = 0;
+      setShowNotes(false);
+      setIsMinimized(true);
+    },
+    [
+      autoplay,
+      currentIndex,
+      playlist.length,
+      cleanupPlayer,
+      setActiveNoteId,
+      stopAutoAdvanceCountdown,
+    ],
+  );
+
+  // Handle playlist navigation
+  const handleNext = useCallback(
+    () => goToIndex(currentIndex + 1),
+    [goToIndex, currentIndex],
+  );
+
+  const handlePrevious = useCallback(
+    () => goToIndex(currentIndex - 1),
+    [goToIndex, currentIndex],
+  );
 
   const handleAutoAdvance = () => {
     if (!autoplay || currentIndex >= playlist.length - 1) return;
@@ -426,22 +451,6 @@ const BacePlayer = () => {
         return prev - 1;
       });
     }, 1000);
-  };
-
-  const handlePrevious = async () => {
-    stopAutoAdvanceCountdown();
-    if (!autoplay) return;
-
-    if (currentIndex > 0) {
-      await cleanupPlayer();
-      setActiveNoteId(null);
-      setCurrentIndex(currentIndex - 1);
-      setIsDataLoaded(false);
-      currentTimeRef.current = 0; 
-      lastTimeRef.current = 0;
-      setShowNotes(false);
-      setIsMinimized(true);
-    }
   };
 
   const captureVLCScreenshot = useCallback(async () => {
@@ -610,46 +619,6 @@ const BacePlayer = () => {
     return null;
   };
 
-  const renderPlaylistControls = () => {
-    if (playlist.length <= 1 || !autoplay) return null;
-
-    return (
-      <View style={styles.playlistControls}>
-        <TouchableOpacity
-          onPress={handlePrevious}
-          disabled={currentIndex === 0}
-          style={[
-            styles.playlistButton,
-            currentIndex === 0 && styles.disabledButton,
-          ]}>
-          <Icon
-            name="skip-previous"
-            size={30}
-            color={currentIndex === 0 ? '#ccc' : '#555'}
-          />
-        </TouchableOpacity>
-
-        <Text style={styles.playlistText}>
-          {currentIndex + 1} / {playlist.length}
-        </Text>
-
-        <TouchableOpacity
-          onPress={handleNext}
-          disabled={currentIndex === playlist.length - 1}
-          style={[
-            styles.playlistButton,
-            currentIndex === playlist.length - 1 && styles.disabledButton,
-          ]}>
-          <Icon
-            name="skip-next"
-            size={30}
-            color={currentIndex === playlist.length - 1 ? '#ccc' : '#555'}
-          />
-        </TouchableOpacity>
-      </View>
-    );
-  };
-
   return (
     <View style={styles.container}>
       {currentItem ? (
@@ -718,8 +687,6 @@ const BacePlayer = () => {
               </View>
             )}
 
-            {!showNotes && renderPlaylistControls()}
-
             <View style={styles.btnContainer}>
               <TouchableOpacity
                 style={styles.addButton}
@@ -762,6 +729,16 @@ const BacePlayer = () => {
 
           {renderPersistentBackButton()}
           {renderDragHandle()}
+          {!showNotes && autoplay && (
+            <PlayerQueue
+              playlist={playlist}
+              currentIndex={currentIndex}
+              currentTitle={currentItem?.title}
+              onNext={handleNext}
+              onPrevious={handlePrevious}
+              onJumpToIndex={goToIndex}
+            />
+          )}
 
           {showNotes && (
             <NoteSection
@@ -848,29 +825,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: 'black',
-  },
-  playlistControls: {
-    // position: 'absolute',
-    // bottom: 60,
-    // left: 0,
-    // right: 0,
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: 'rgba(0,0,0,0.1)',
-    // paddingVertical: 10,
-  },
-  playlistButton: {
-    marginHorizontal: 20,
-    padding: 10,
-  },
-  disabledButton: {
-    opacity: 0.5,
-  },
-  playlistText: {
-    color: '#000',
-    fontSize: 16,
-    fontWeight: 'bold',
   },
   autoAdvanceOverlay: {
     position: 'absolute',

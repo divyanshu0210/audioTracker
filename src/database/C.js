@@ -256,7 +256,7 @@ export const moveNotesToDefaultNotebook = async notebookId => {
   return new Promise((resolve, reject) => {
     fastdb.transaction(tx => {
       tx.executeSql(
-        `UPDATE notes SET source_id = ?, source_type = 'notebook' WHERE source_id = ? AND source_type = 'notebook';`,
+        `UPDATE notes SET source_id = ?, source_type = 'notebook', updated_at = CURRENT_TIMESTAMP WHERE source_id = ? AND source_type = 'notebook';`,
         [String(defaultNotebookId), String(notebookId)],
         (_, result) => {
           console.log(

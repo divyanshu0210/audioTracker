@@ -109,7 +109,7 @@ public class BackupUtils {
             String[] params;
 
             if (table.equals("notes")) {
-                query = "SELECT rowid,* FROM notes WHERE created_at >= ? AND created_at < ?";
+                query = "SELECT rowid,* FROM notes WHERE updated_at >= ? AND updated_at < ?";
                 params = new String[]{start, end};
 
             } else if (table.equals("video_watch_history")) {
@@ -117,7 +117,7 @@ public class BackupUtils {
                 params = new String[]{start, end};
 
             } else {
-                query = "SELECT * FROM " + table + " WHERE created_at >= ? AND created_at < ?";
+                query = "SELECT * FROM " + table + " WHERE updated_at >= ? AND updated_at < ?";
                 params = new String[]{start, end};
             }
 
@@ -126,7 +126,18 @@ public class BackupUtils {
             while (cursor.moveToNext()) {
                 JSONObject row = new JSONObject();
                 for (int i = 0; i < cursor.getColumnCount(); i++) {
-                    row.put(cursor.getColumnName(i), cursor.getString(i));
+                    // A NULL column must be written as an explicit JSON null.
+                    // JSONObject.put(key, null) REMOVES the key, and restore
+                    // only updates columns present in the row — so a column
+                    // going value -> NULL (deleted_at cleared when a category
+                    // is revived, file_path cleared when a download is
+                    // removed) could never be applied, and the old non-null
+                    // value survived the restore.
+                    if (cursor.isNull(i)) {
+                        row.put(cursor.getColumnName(i), JSONObject.NULL);
+                    } else {
+                        row.put(cursor.getColumnName(i), cursor.getString(i));
+                    }
                 }
                 arr.put(row);
             }

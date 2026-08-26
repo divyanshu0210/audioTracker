@@ -6,15 +6,26 @@ export const addCategory = (name, color) => {
   return new Promise((resolve, reject) => {
     fastdb.transaction(
       tx => {
-        // First, check if the category already exists
+        // First, check if the category already exists (prefer a live row;
+        // fall back to the most recently soft-deleted one, which gets revived)
         tx.executeSql(
-          'SELECT id FROM categories WHERE name = ?;',
+          'SELECT id, deleted_at FROM categories WHERE name = ? ORDER BY deleted_at IS NULL DESC, deleted_at DESC LIMIT 1;',
           [name],
           (_, selectResult) => {
             if (selectResult.rows.length > 0) {
-              // Category already exists, return its ID
-              const existingId = selectResult.rows.item(0).id;
-              resolve(existingId);
+              const existing = selectResult.rows.item(0);
+              if (existing.deleted_at) {
+                // Revive the soft-deleted category
+                tx.executeSql(
+                  'UPDATE categories SET deleted_at = NULL, color = ? WHERE id = ?;',
+                  [color, existing.id],
+                  () => resolve(existing.id),
+                  (_, updateError) => reject(updateError),
+                );
+              } else {
+                // Category already exists, return its ID
+                resolve(existing.id);
+              }
             } else {
               // Insert new category
               tx.executeSql(
@@ -61,7 +72,8 @@ export const getAllCategories = (query = null) => {
       let sql = `
         SELECT *, 'category' AS type
         FROM categories
-        WHERE name NOT LIKE '%[MENTEE_CAT_Filter]%'
+        WHERE deleted_at IS NULL
+          AND name NOT LIKE '%[MENTEE_CAT_Filter]%'
           AND name NOT LIKE '%@%'         -- ❗ exclude emails
       `;
 
@@ -95,8 +107,13 @@ export const addItemToCategory = (categoryId, itemId, itemType) => {
   return new Promise((resolve, reject) => {
     fastdb.transaction(
       tx => {
+        // Only conflicts with a *live* link (partial unique index scoped to
+        // deleted_at IS NULL) — a previously soft-deleted link just gets a
+        // fresh row instead of needing to be revived.
         tx.executeSql(
-          'INSERT OR IGNORE INTO category_items (category_id, item_id, item_type) VALUES (?, ?, ?);',
+          `INSERT INTO category_items (category_id, item_id, item_type) VALUES (?, ?, ?)
+           ON CONFLICT(category_id, item_id, item_type) WHERE deleted_at IS NULL
+           DO NOTHING;`,
           [categoryId, String(itemId), itemType],
           (_, result) => resolve(result),
           (_, error) => reject(error),
@@ -118,7 +135,7 @@ export const removeItemFromCategory = (categoryId, itemId, itemType) => {
         // was 0 even for an exact-looking match, since this driver doesn't
         // apply SQLite's usual numeric-to-text affinity conversion on bind).
         tx.executeSql(
-          'DELETE FROM category_items WHERE category_id = ? AND item_id = ? AND item_type = ?;',
+          'UPDATE category_items SET deleted_at = CURRENT_TIMESTAMP WHERE category_id = ? AND item_id = ? AND item_type = ? AND deleted_at IS NULL;',
           [categoryId, String(itemId), itemType],
           (_, result) => resolve(result),
           (_, error) => reject(error),
@@ -189,7 +206,7 @@ export const getCategoryData = (categoryId, types) => {
         }
 
         queries.push(`
-          SELECT 
+          SELECT
             ${selectFields},
             ci.item_type,
             ci.created_at AS category_added_at
@@ -199,6 +216,8 @@ export const getCategoryData = (categoryId, types) => {
           ${extraJoins}
           WHERE ci.category_id = ?
             AND ci.item_type = ?
+            AND ci.deleted_at IS NULL
+            AND t.deleted_at IS NULL
         `);
 
         params.push(categoryId, type);
@@ -238,8 +257,8 @@ export const checkItemInCategory = (categoryId, itemId, itemType) => {
     fastdb.transaction(
       tx => {
         tx.executeSql(
-          `SELECT 1 FROM category_items 
-             WHERE category_id = ? AND item_id = ? AND item_type = ?;`,
+          `SELECT 1 FROM category_items
+             WHERE category_id = ? AND item_id = ? AND item_type = ? AND deleted_at IS NULL;`,
           [categoryId, String(itemId), itemType],
           (_, result) => resolve(result.rows.length > 0),
           (_, error) => reject(error),
@@ -255,16 +274,16 @@ export const deleteCategories = categoryIds => {
   return new Promise((resolve, reject) => {
     fastdb.transaction(
       tx => {
-        // First delete the category items
+        // First soft-delete the category items
         tx.executeSql(
-          'DELETE FROM category_items WHERE category_id IN (' +
+          'UPDATE category_items SET deleted_at = CURRENT_TIMESTAMP WHERE category_id IN (' +
             categoryIds.map(() => '?').join(',') +
-            ');',
+            ') AND deleted_at IS NULL;',
           categoryIds,
           () => {
-            // Then delete the categories themselves
+            // Then soft-delete the categories themselves
             tx.executeSql(
-              'DELETE FROM categories WHERE id IN (' +
+              'UPDATE categories SET deleted_at = CURRENT_TIMESTAMP WHERE id IN (' +
                 categoryIds.map(() => '?').join(',') +
                 ');',
               categoryIds,

@@ -1,4 +1,5 @@
 import {db, getDb} from './database';
+import {SOFT_DELETE_NOTE_IMAGES_SQL} from '../notes/richDB';
 
 // Both of these used to fire the transaction without returning a Promise —
 // existing `await softDeleteItem(...)`/`await deleteNoteById(...)` calls
@@ -68,7 +69,7 @@ export const deleteNoteById = noteId => {
   return new Promise((resolve, reject) => {
     fastdb.transaction(tx => {
       tx.executeSql(
-        `DELETE FROM notes WHERE rowid = ?;`, // Use rowid instead of id
+        `UPDATE notes SET content = '', text_content = '', deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE rowid = ?;`,
         [noteId],
         (_, result) => {
           console.log(`Note ${noteId} deleted successfully.`);
@@ -79,6 +80,7 @@ export const deleteNoteById = noteId => {
           reject(error);
         },
       );
+      tx.executeSql(SOFT_DELETE_NOTE_IMAGES_SQL, [noteId]);
     });
   });
 };
@@ -93,7 +95,7 @@ export const deleteNotebook = (notebookId, options = {deleteNotes: true}) => {
     fastdb.transaction(tx => {
       const deleteNotebookQuery = () => {
         tx.executeSql(
-          `DELETE FROM notebooks WHERE id = ?;`,
+          `UPDATE notebooks SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?;`,
           [notebookId],
           (_, notebookResult) => {
             console.log(`Notebook ${notebookId} deleted.`);
@@ -108,7 +110,15 @@ export const deleteNotebook = (notebookId, options = {deleteNotes: true}) => {
 
       if (deleteNotes) {
         tx.executeSql(
-          `DELETE FROM notes WHERE source_id = ? AND source_type = 'notebook';`,
+          `UPDATE images SET image_data = NULL, deleted_at = CURRENT_TIMESTAMP
+           WHERE deleted_at IS NULL
+             AND note_rowid IN (
+               SELECT rowid FROM notes WHERE source_id = ? AND source_type = 'notebook'
+             );`,
+          [String(notebookId)],
+        );
+        tx.executeSql(
+          `UPDATE notes SET content = '', text_content = '', deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE source_id = ? AND source_type = 'notebook';`,
           [String(notebookId)],
           (_, notesResult) => {
             console.log(`Deleted notes of notebook ${notebookId}`);

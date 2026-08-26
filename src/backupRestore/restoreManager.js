@@ -117,11 +117,52 @@ export async function loadPendingBackups(userId) {
 /* Insert helpers                      */
 /* ---------------------------------- */
 
+const TABLES_WITH_UPDATED_AT = new Set([
+  'items',
+  'youtube_meta',
+  'notebooks',
+  'categories',
+  'category_items',
+  'notes',
+  'images',
+]);
+
+// A backup written before updated_at existed has no such column, so the insert
+// omits it and the column DEFAULT (CURRENT_TIMESTAMP) stamps every restored row
+// with the *restore* time. That is actively destructive: runCompaction
+// re-snapshots an old range by re-querying the live DB on updated_at, so after
+// a restore every historical range reads as empty — compaction then writes no
+// replacement file and deletes/ghosts the originals, erasing that history from
+// Drive. Carrying created_at forward as updated_at keeps rows in the range they
+// actually belong to. (video_watch_history is excluded — it has no updated_at
+// and is ranged on lastWatchedAt instead.)
+const withPreservedUpdatedAt = (table, row) => {
+  if (!TABLES_WITH_UPDATED_AT.has(table)) return row;
+  if (row.updated_at != null && row.updated_at !== '') return row;
+  if (row.created_at == null || row.created_at === '') return row;
+  return {...row, updated_at: row.created_at};
+};
+
+// Every table here is upserted rather than INSERT OR REPLACE'd. REPLACE
+// resolves a key conflict by DELETING the existing row first, and that delete
+// fires ON DELETE CASCADE — items.parent_id, youtube_meta.item_id and
+// category_items.category_id all cascade. Since a soft-delete now touches a
+// whole item subtree at once (softDeleteItem updates every descendant), a
+// parent and its children land in the same backup file, and replaying it with
+// REPLACE would delete children that were just inserted, then fail the
+// deferred FK check at COMMIT (error 787). An upsert never deletes, so no
+// cascade fires and rows are updated in place.
+//
+// notes is exempt: it is an FTS5 virtual table (SQLite does not support UPSERT
+// on virtual tables) but it carries no foreign keys and nothing references it,
+// so REPLACE is harmless there.
 const insertData = (data, label, tx) => {
   for (const table of TABLE_ORDER) {
     if (!Array.isArray(data[table])) continue;
 
-    for (const row of data[table]) {
+    for (const rawRow of data[table]) {
+      const row = withPreservedUpdatedAt(table, rawRow);
+
       if (table === 'notes' && row.rowid != null) {
         const {rowid, ...rest} = row;
         const cols = Object.keys(rest);
@@ -142,8 +183,32 @@ const insertData = (data, label, tx) => {
       const cols = Object.keys(row);
       const vals = Object.values(row);
       const qs = cols.map(() => '?').join(',');
+
+      // Rows without an id can't be matched for the DO UPDATE half; fall back
+      // to a plain insert that simply skips anything already present.
+      const updatable = cols.filter(c => c !== 'id');
+
+      // Only overwrite when the incoming row is genuinely newer. Replaying a
+      // row at its existing updated_at would otherwise still count as an
+      // UPDATE, and the updated_at trigger — which only stands down when the
+      // statement changes updated_at — would fire and restamp it with the
+      // restore time, silently undoing withPreservedUpdatedAt. It also makes
+      // restore idempotent, so a resumed or re-listed file is harmless.
+      const freshnessGuard =
+        TABLES_WITH_UPDATED_AT.has(table) && cols.includes('updated_at')
+          ? ` WHERE ${table}.updated_at IS NULL
+               OR excluded.updated_at > ${table}.updated_at`
+          : '';
+
+      const conflictAction =
+        row.id != null && updatable.length
+          ? `ON CONFLICT(id) DO UPDATE SET ${updatable
+              .map(c => `${c} = excluded.${c}`)
+              .join(', ')}${freshnessGuard}`
+          : 'ON CONFLICT DO NOTHING';
+
       tx.executeSql(
-        `INSERT OR REPLACE INTO ${table} (${cols.join(',')}) VALUES (${qs})`,
+        `INSERT INTO ${table} (${cols.join(',')}) VALUES (${qs}) ${conflictAction}`,
         vals,
         () => {},
         (_, error) => {
@@ -153,6 +218,49 @@ const insertData = (data, label, tx) => {
       );
     }
   }
+};
+
+// A backup file can legitimately contain a row whose FK parent is absent from
+// every backup — e.g. a category_items link whose category was created in a
+// window no surviving backup file covers. Foreign keys are deferred to COMMIT,
+// so a single such orphan fails the whole transaction (error 787) and aborts
+// the entire restore, losing everything else in the file. This runs after the
+// inserts, names each offender in the log, and drops just those rows so the
+// rest of the restore survives.
+const reconcileForeignKeys = (tx, label) => {
+  tx.executeSql(
+    'PRAGMA foreign_key_check',
+    [],
+    (_, {rows}) => {
+      for (let i = 0; i < rows.length; i++) {
+        const violation = rows.item(i);
+        // PRAGMA foreign_key_check columns: table, rowid, parent, fkid
+        const table = violation.table;
+        const rowid = violation.rowid;
+
+        console.warn(
+          `[Restore] Orphan row dropped: ${label} → ${table} rowid=${rowid} ` +
+            `(no matching parent in ${violation.parent})`,
+        );
+
+        if (!table || rowid == null) continue;
+
+        tx.executeSql(
+          `DELETE FROM ${table} WHERE rowid = ?`,
+          [rowid],
+          () => {},
+          (__, err) => {
+            console.error(`[Restore] Failed dropping orphan in ${table}:`, err);
+            return true;
+          },
+        );
+      }
+    },
+    (_, err) => {
+      console.error('[Restore] foreign_key_check failed:', err);
+      return true;
+    },
+  );
 };
 
 const upsertBackupFileEntry = (tx, fileName, driveId) => {
@@ -550,6 +658,7 @@ async function runRestore(userId, backups, onProgress=null) {
           tx => {
             tx.executeSql('PRAGMA defer_foreign_keys = ON');
             insertData(data, name, tx);
+            reconcileForeignKeys(tx, name);
             if (driveId) {
               upsertBackupFileEntry(tx, name, driveId);
             }
@@ -638,6 +747,24 @@ async function runRestore(userId, backups, onProgress=null) {
     await new Promise((resolve, reject) => {
       db.transaction(
         tx => {
+          // notes is an FTS5 virtual table, whose columns cannot carry a
+          // DEFAULT — a backup written before updated_at existed omits that
+          // column, so those rows restore with updated_at NULL instead of a
+          // timestamp. The native backup range query (updated_at >= ? AND
+          // < ?) never matches NULL, so without this backfill a restored
+          // note would never be backed up again until it was next edited.
+          tx.executeSql(
+            `UPDATE notes
+             SET updated_at = COALESCE(NULLIF(created_at, ''), CURRENT_TIMESTAMP)
+             WHERE updated_at IS NULL OR updated_at = ''`,
+            [],
+            () => {},
+            (_, err) => {
+              console.error('[Restore] notes.updated_at backfill failed:', err);
+              return true;
+            },
+          );
+
           tx.executeSql(
             `INSERT INTO notes(notes) VALUES('rebuild')`,
             [],

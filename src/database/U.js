@@ -64,7 +64,7 @@ export const moveNoteToNotebook = async (noteId, newNotebookId) => {
   return new Promise((resolve, reject) => {
     fastdb.transaction(tx => {
       tx.executeSql(
-        'UPDATE notes SET source_id = ?, source_type = ? WHERE rowid = ?',
+        'UPDATE notes SET source_id = ?, source_type = ?, updated_at = CURRENT_TIMESTAMP WHERE rowid = ?',
         [String(newNotebookId), 'notebook', noteId],
         (_, result) => {
           if (result.rowsAffected > 0) {

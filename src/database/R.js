@@ -40,6 +40,7 @@ export const getChildrenByParent = async (parentId = null, types = null) => {
           UPDATE items
           SET in_show = 1
           WHERE parent_id = ?
+            AND in_show = 0
           ${typeCondition}
         `;
 
@@ -127,9 +128,10 @@ export const getAllNotesModifiedToday = () => {
   return new Promise((resolve, reject) => {
     fastdb.transaction(tx => {
       tx.executeSql(
-        `SELECT rowid, source_id, source_type, title AS noteTitle, content AS noteContent, text_content, created_at 
-         FROM notes 
-         WHERE date(created_at) = date('now', 'localtime');`, // Filters only today's notes
+        `SELECT rowid, source_id, source_type, title AS noteTitle, content AS noteContent, text_content, created_at
+         FROM notes
+         WHERE deleted_at IS NULL
+           AND date(updated_at) = date('now', 'localtime');`, // Filters only today's notes
         [],
         (txObj, resultSet) => {
           const results = [];
@@ -208,7 +210,7 @@ export const fetchNotes = ({
         FROM notes n
       `;
       const joins = [];
-      const conditions = [];
+      const conditions = ['n.deleted_at IS NULL'];
       const params = [];
 
       // ─────────────────────────────────────────
@@ -238,6 +240,7 @@ export const fetchNotes = ({
           JOIN category_items ci
             ON ci.item_id = n.rowid
             AND ci.item_type = 'note'
+            AND ci.deleted_at IS NULL
         `);
 
         conditions.push(`ci.category_id = ?`);
@@ -361,7 +364,7 @@ export const fetchNotebooks = callback => {
   const fastdb = getDb();
   fastdb.transaction(tx => {
     tx.executeSql(
-      'SELECT *, "notebook" AS type FROM notebooks ORDER BY created_at DESC;',
+      'SELECT *, "notebook" AS type FROM notebooks WHERE deleted_at IS NULL ORDER BY created_at DESC;',
       [],
       (_, {rows}) => callback(rows._array), // Pass notebooks array to callback
       error => console.error('Error fetching notebooks:', error),

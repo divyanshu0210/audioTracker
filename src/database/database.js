@@ -85,6 +85,20 @@ export const initDatabase = async () => {
     error => console.error('Error creating Backup table:', error),
     );
 
+    // The updated_at triggers below are created with IF NOT EXISTS, so an
+    // existing database would keep an older definition forever. Drop them
+    // first so a changed trigger body actually takes effect on upgrade.
+    [
+      'trg_items_updated_at',
+      'trg_youtube_meta_updated_at',
+      'trg_images_updated_at',
+      'trg_notebooks_updated_at',
+      'trg_categories_updated_at',
+      'trg_category_items_updated_at',
+    ].forEach(trigger => {
+      tx.executeSql(`DROP TRIGGER IF EXISTS ${trigger};`);
+    });
+
     tx.executeSql(
       `CREATE TABLE IF NOT EXISTS items (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -114,6 +128,7 @@ export const initDatabase = async () => {
       in_show INTEGER NOT NULL DEFAULT 0,
 
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       deleted_at TIMESTAMP DEFAULT NULL,
 
       UNIQUE (type, source_id),
@@ -138,6 +153,7 @@ export const initDatabase = async () => {
     thumbnail TEXT,
 
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
     UNIQUE (item_id),
     FOREIGN KEY (item_id) REFERENCES items(id) ON DELETE CASCADE
@@ -166,6 +182,30 @@ export const initDatabase = async () => {
    ON youtube_meta(item_id);`,
     );
 
+    tx.executeSql(
+      `CREATE TRIGGER IF NOT EXISTS trg_items_updated_at
+       AFTER UPDATE ON items
+       WHEN NEW.updated_at IS OLD.updated_at
+       BEGIN
+         UPDATE items SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
+       END;`,
+      [],
+      () => console.log('items updated_at trigger created successfully'),
+      error => console.error('Error creating items updated_at trigger:', error),
+    );
+
+    tx.executeSql(
+      `CREATE TRIGGER IF NOT EXISTS trg_youtube_meta_updated_at
+       AFTER UPDATE ON youtube_meta
+       WHEN NEW.updated_at IS OLD.updated_at
+       BEGIN
+         UPDATE youtube_meta SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
+       END;`,
+      [],
+      () => console.log('youtube_meta updated_at trigger created successfully'),
+      error => console.error('Error creating youtube_meta updated_at trigger:', error),
+    );
+
     // ---------------------------------------- FTS5 for notes
 
     tx.executeSql(
@@ -173,22 +213,43 @@ export const initDatabase = async () => {
         id INTEGER PRIMARY KEY,
         note_rowid INTEGER,
         image_data TEXT,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        deleted_at DATETIME DEFAULT NULL
       );`,
       [],
       () => console.log('images table created successfully'),
       error => console.error('Error creating images table:', error),
     );
 
-   
+    tx.executeSql(
+      `CREATE INDEX IF NOT EXISTS idx_images_deleted_at
+   ON images(deleted_at);`,
+    );
+
+    tx.executeSql(
+      `CREATE TRIGGER IF NOT EXISTS trg_images_updated_at
+       AFTER UPDATE ON images
+       WHEN NEW.updated_at IS OLD.updated_at
+       BEGIN
+         UPDATE images SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
+       END;`,
+      [],
+      () => console.log('images updated_at trigger created successfully'),
+      error => console.error('Error creating images updated_at trigger:', error),
+    );
+
+
     tx.executeSql(
       `CREATE VIRTUAL TABLE IF NOT EXISTS notes USING fts5(
             source_id,
             source_type UNINDEXED,
             title,
             content,
-            text_content,  
+            text_content,
             created_at UNINDEXED,
+            updated_at UNINDEXED,
+            deleted_at UNINDEXED,
             tokenize='porter'
         );`,
       [],
@@ -198,14 +259,33 @@ export const initDatabase = async () => {
 
     tx.executeSql(
       `CREATE TABLE IF NOT EXISTS notebooks (
-            id INTEGER PRIMARY KEY AUTOINCREMENT, 
-            title TEXT, 
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT,
             color TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            deleted_at TIMESTAMP DEFAULT NULL
           );`,
       [],
       () => console.log('notebooks table created successfully'),
       error => console.error('Error creating notebooks table:', error),
+    );
+
+    tx.executeSql(
+      `CREATE INDEX IF NOT EXISTS idx_notebooks_deleted_at
+   ON notebooks(deleted_at);`,
+    );
+
+    tx.executeSql(
+      `CREATE TRIGGER IF NOT EXISTS trg_notebooks_updated_at
+       AFTER UPDATE ON notebooks
+       WHEN NEW.updated_at IS OLD.updated_at
+       BEGIN
+         UPDATE notebooks SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
+       END;`,
+      [],
+      () => console.log('notebooks updated_at trigger created successfully'),
+      error => console.error('Error creating notebooks updated_at trigger:', error),
     );
 
     // ---------------------------------------- report
@@ -234,9 +314,11 @@ export const initDatabase = async () => {
     tx.executeSql(
       `CREATE TABLE IF NOT EXISTS categories (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL UNIQUE,
+        name TEXT NOT NULL,
         color TEXT,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        deleted_at TIMESTAMP DEFAULT NULL
       );`,
       [],
       () => console.log('Categories table created successfully'),
@@ -244,18 +326,69 @@ export const initDatabase = async () => {
     );
 
     tx.executeSql(
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_categories_name_live
+   ON categories(name) WHERE deleted_at IS NULL;`,
+      [],
+      () => console.log('idx_categories_name_live created successfully'),
+      error => console.error('Error creating idx_categories_name_live:', error),
+    );
+
+    tx.executeSql(
+      `CREATE INDEX IF NOT EXISTS idx_categories_deleted_at
+   ON categories(deleted_at);`,
+    );
+
+    tx.executeSql(
+      `CREATE TRIGGER IF NOT EXISTS trg_categories_updated_at
+       AFTER UPDATE ON categories
+       WHEN NEW.updated_at IS OLD.updated_at
+       BEGIN
+         UPDATE categories SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
+       END;`,
+      [],
+      () => console.log('categories updated_at trigger created successfully'),
+      error => console.error('Error creating categories updated_at trigger:', error),
+    );
+
+    tx.executeSql(
       `CREATE TABLE IF NOT EXISTS category_items (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         category_id INTEGER NOT NULL,
-        item_id TEXT NOT NULL, 
+        item_id TEXT NOT NULL,
         item_type TEXT NOT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE CASCADE,
-        UNIQUE(category_id, item_id, item_type)  
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        deleted_at TIMESTAMP DEFAULT NULL,
+        FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE CASCADE
       );`,
       [],
       () => console.log('Category_items table created successfully'),
       error => console.error('Error creating category_items table:', error),
+    );
+
+    tx.executeSql(
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_category_items_live
+   ON category_items(category_id, item_id, item_type) WHERE deleted_at IS NULL;`,
+      [],
+      () => console.log('idx_category_items_live created successfully'),
+      error => console.error('Error creating idx_category_items_live:', error),
+    );
+
+    tx.executeSql(
+      `CREATE INDEX IF NOT EXISTS idx_category_items_deleted_at
+   ON category_items(deleted_at);`,
+    );
+
+    tx.executeSql(
+      `CREATE TRIGGER IF NOT EXISTS trg_category_items_updated_at
+       AFTER UPDATE ON category_items
+       WHEN NEW.updated_at IS OLD.updated_at
+       BEGIN
+         UPDATE category_items SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
+       END;`,
+      [],
+      () => console.log('category_items updated_at trigger created successfully'),
+      error => console.error('Error creating category_items updated_at trigger:', error),
     );
   });
 };

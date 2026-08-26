@@ -204,9 +204,10 @@ export const bulkDeleteItems = async (items, {deleteNotebookNotes, screen}) => {
   return {succeeded: items.length - failed.length, failed};
 };
 
-// addItemToCategory is INSERT OR IGNORE — idempotent, safe to fire for every
-// item without pre-checking membership (unlike the single-item modal, which
-// checks per-category to show a "✓ already added" label).
+// addItemToCategory no-ops on an existing live link (ON CONFLICT DO NOTHING)
+// — idempotent, safe to fire for every item without pre-checking membership
+// (unlike the single-item modal, which checks per-category to show a
+// "✓ already added" label).
 export const bulkAddToCategory = async (items, categoryId) => {
   const results = await Promise.allSettled(
     items.map(item => addItemToCategory(categoryId, item.id, item.subtype || item.type)),

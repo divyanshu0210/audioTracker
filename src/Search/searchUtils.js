@@ -14,7 +14,9 @@ const getCategoryParents = (categoryId, db) =>
           INNER JOIN category_items
             ON category_items.item_id = items.source_id
             AND category_items.item_type = items.type
+            AND category_items.deleted_at IS NULL
           WHERE category_items.category_id = ?
+            AND items.deleted_at IS NULL
           `,
         [categoryId],
         (_, {rows}) => {
@@ -177,11 +179,12 @@ export const searchAllTables = async (
           ON category_items.item_id = notebooks.id
           AND category_items.item_type = 'notebook'
           AND category_items.category_id = ?
+          AND category_items.deleted_at IS NULL
       `;
       notebookParams.push(categoryId);
     }
 
-    notebookQuery += ` WHERE LOWER(notebooks.title) LIKE ?`;
+    notebookQuery += ` WHERE notebooks.deleted_at IS NULL AND LOWER(notebooks.title) LIKE ?`;
     notebookParams.push(q);
 
     await new Promise(res => {
@@ -220,7 +223,9 @@ export const searchNotebookNotesInCategory = async (categoryId, text) => {
         INNER JOIN category_items ci
           ON ci.item_id = nb.id
           AND ci.item_type = 'notebook'
+          AND ci.deleted_at IS NULL
         WHERE ci.category_id = ?
+          AND nb.deleted_at IS NULL
         `,
         [categoryId],
         (_, {rows}) => {

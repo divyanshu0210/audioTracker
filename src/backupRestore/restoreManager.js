@@ -6,6 +6,7 @@ import {getGoogleAccessToken} from '../auth/tokenManager';
 import {extractEpochs} from '../Settings/BackupExplorerScreen';
 import useBackupStore from '../stores/backupStore';
 import useRestoreStore from './restoreStore';
+import {decodeHtmlEntities} from '../notes/htmlText.js';
 import { startBackgroundRestore } from '../backgroundService/newBackgroundService';
 
 /* ---------------------------------- */
@@ -165,6 +166,12 @@ const insertData = (data, label, tx) => {
 
       if (table === 'notes' && row.rowid != null) {
         const {rowid, ...rest} = row;
+        // Backups written before entity decoding carry raw "&nbsp;" in
+        // text_content. notes IS the FTS5 index, so normalising on the way in
+        // keeps both the list preview and search clean.
+        if (typeof rest.text_content === 'string') {
+          rest.text_content = decodeHtmlEntities(rest.text_content);
+        }
         const cols = Object.keys(rest);
         const vals = Object.values(rest);
         const qs = ['?', ...cols.map(() => '?')].join(',');

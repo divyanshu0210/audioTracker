@@ -29,6 +29,7 @@ import {useImagePersistence} from '../useImagePersistence.jsx';
 import {cacheImageFile} from '../utils/imageFileCache.js';
 import {LoadingBar} from '../../components/LoadingBar.jsx';
 import {useNotesStore} from '../../stores/useNotesStore.js';
+import {decodeHtmlEntities} from '../htmlText.js';
 
 // Grey SVG placeholder that carries the REAL image dimensions as its intrinsic
 // size. With `height:auto` the browser scales it exactly like the real image
@@ -112,6 +113,7 @@ function stripHtml(html, latestTitle = '') {
   );
   cleaned = cleaned.replace(/<button[\s\S]*?<\/button>/gi, ' ');
   cleaned = cleaned.replace(/<[^>]+>/g, ' ');
+  cleaned = decodeHtmlEntities(cleaned);
   cleaned = cleaned.replace(/\s+/g, ' ').trim();
   return latestTitle ? `${latestTitle}\n\n${cleaned}` : cleaned;
 }

@@ -1,6 +1,14 @@
 // SelectionHeader.js
 import React, {useCallback, useMemo, useState} from 'react';
-import {ActivityIndicator, Alert, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
+import {
+  ActivityIndicator,
+  Alert,
+  StyleSheet,
+  Text,
+  ToastAndroid,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import Fontisto from 'react-native-vector-icons/Fontisto';
 import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
@@ -8,11 +16,19 @@ import {useSelectionStore} from '../stores/useSelectionStore';
 import {useShallow} from 'zustand/react/shallow';
 import {navigationRef} from '../handlers/navigationRef';
 import {ItemTypes} from '../contexts/constants';
-import {bulkShareNotesAsPdf, describeFailures, MAX_PDF_SHARE_COUNT} from './bulkActions';
+import {
+  bulkMoveNotesToNotebook,
+  bulkShareNotesAsPdf,
+  describeFailures,
+  getMovableNotes,
+  MAX_PDF_SHARE_COUNT,
+} from './bulkActions';
 import BulkDeleteConfirmModal from './BulkDeleteConfirmModal';
+import SelectNotebookModal from '../components/modals/SelectNotebookModal';
 
 const SelectionHeader = ({type, screen, allItemsInThisList}) => {
   const [confirmVisible, setConfirmVisible] = useState(false);
+  const [moveVisible, setMoveVisible] = useState(false);
   const [busy, setBusy] = useState(false);
 
   const {
@@ -37,6 +53,26 @@ const SelectionHeader = ({type, screen, allItemsInThisList}) => {
     () => selectedItems.filter(i => i.type === type),
     [selectedItems, type],
   );
+
+  // Only notebook notes can change notebook — see isMovableNote. A selection
+  // straight out of "Select All" in All Notes routinely mixes in notes that
+  // belong to a drive/youtube item, so the button appears as long as at least
+  // one note can move and the rest are reported as skipped afterwards.
+  const movableNotes = useMemo(
+    () => getMovableNotes(selectedItems),
+    [selectedItems],
+  );
+
+  // The "Current" badge only means something when every movable note starts
+  // in the same notebook; for a mixed-notebook selection there is no single
+  // current notebook to mark, so none is passed.
+  const currentNotebookId = useMemo(() => {
+    if (!movableNotes.length) return undefined;
+    const first = String(movableNotes[0].source_id);
+    return movableNotes.every(n => String(n.source_id) === first)
+      ? first
+      : undefined;
+  }, [movableNotes]);
 
   const isAllSelected = useMemo(
     () => selectedItemsOfThisType.length === allItemsInThisList.length,
@@ -77,6 +113,40 @@ const SelectionHeader = ({type, screen, allItemsInThisList}) => {
     setCategoryModalBulkItems(selectedItems);
     setAddToCategoryModalVisible(true);
   }, [selectedItems, setCategoryModalBulkItems, setAddToCategoryModalVisible]);
+
+  const handleMoveToNotebook = useCallback(
+    async notebook => {
+      setBusy(true);
+      try {
+        const {succeeded, failed, skipped} = await bulkMoveNotesToNotebook(
+          selectedItems,
+          notebook,
+        );
+        setSelectedItems([]);
+        setSelectionMode(false);
+        if (failed.length) {
+          Alert.alert(
+            'Some notes failed to move',
+            `Moved ${succeeded} of ${succeeded + failed.length} notes.\n\n${describeFailures(failed)}`,
+          );
+        } else {
+          const skippedNote = skipped
+            ? ` (${skipped} skipped — only notebook notes can be moved)`
+            : '';
+          ToastAndroid.show(
+            `Moved ${succeeded} note(s)${skippedNote}`,
+            ToastAndroid.SHORT,
+          );
+        }
+      } catch (error) {
+        console.error('Bulk move failed:', error);
+        Alert.alert('Move failed', 'Something went wrong moving the selected notes.');
+      } finally {
+        setBusy(false);
+      }
+    },
+    [selectedItems, setSelectedItems, setSelectionMode],
+  );
 
   const handleShareAsPdf = useCallback(async () => {
     const notes = selectedItems.filter(i => i.type === ItemTypes.NOTE);
@@ -132,6 +202,12 @@ const SelectionHeader = ({type, screen, allItemsInThisList}) => {
             </TouchableOpacity>
           )}
 
+          {type === ItemTypes.NOTE && movableNotes.length > 0 && (
+            <TouchableOpacity onPress={() => setMoveVisible(true)} disabled={busy}>
+              <MaterialIcons name="drive-file-move-outline" size={22} color="#007AFF" />
+            </TouchableOpacity>
+          )}
+
           <TouchableOpacity onPress={openAddToCategory} disabled={busy}>
             <Ionicons name="pricetag-outline" size={21} color="#007AFF" />
           </TouchableOpacity>
@@ -151,6 +227,13 @@ const SelectionHeader = ({type, screen, allItemsInThisList}) => {
           </TouchableOpacity>
         </View>
       </View>
+
+      <SelectNotebookModal
+        visible={moveVisible}
+        onClose={() => setMoveVisible(false)}
+        onSelect={handleMoveToNotebook}
+        selectedNotebookId={currentNotebookId}
+      />
 
       <BulkDeleteConfirmModal
         visible={confirmVisible}

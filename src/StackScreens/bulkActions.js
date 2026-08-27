@@ -6,13 +6,13 @@
 // type/subtype and run concurrently via Promise.allSettled, so one failure
 // (a missing file, a stale id) doesn't block the rest of the batch. Selected
 // items come from useSelectionStore as {id, type, subtype, dbId, file_path,
-// title} — see BaseItem's selectionEntry.
+// title, source_type, source_id} — see BaseItem's selectionEntry.
 
 import RNFS from 'react-native-fs';
 import {ItemTypes} from '../contexts/constants';
 import {deleteNoteById, deleteNotebook, softDeleteItem} from '../database/D';
 import {moveNotesToDefaultNotebook} from '../database/C';
-import {updateItemFields} from '../database/U';
+import {moveNoteToNotebook, updateItemFields} from '../database/U';
 import {addItemToCategory} from '../categories/catDB';
 import {convertToPdf} from '../notes/utils/convertToPDF';
 import Share from 'react-native-share';
@@ -92,21 +92,32 @@ const deleteNoteItem = async item => {
 // every other deleted notebook, and it's easy to sweep in unintentionally via
 // "Select All", which would wipe out every note with no other notebook far
 // more readily than deleting it deliberately from its own menu would.
+// Returns the notebook row its notes were handed off to when they're kept, so
+// the caller can repoint them in the store — otherwise All Notes keeps showing
+// the deleted notebook's name and colour on them. null when the notes went too.
 const deleteNotebookItem = async (item, deleteNotes) => {
   if (item.title === DEFAULT_NOTEBOOK_TITLE) {
     throw new Error("Default Notebook cannot be deleted");
   }
+  let notesMovedTo = null;
   if (!deleteNotes) {
-    await moveNotesToDefaultNotebook(item.id);
+    notesMovedTo = await moveNotesToDefaultNotebook(item.id);
   }
   await deleteNotebook(item.id, {deleteNotes});
+  return notesMovedTo;
 };
 
 // Removes/updates successfully-processed items across every store that might
 // be showing them, so the UI reflects the batch without needing a manual
 // refresh. Drive items un-downloaded (not removed) inside a folder just get
 // file_path cleared rather than filtered out.
-const applyStoreUpdates = (removed, downloadCleared) => {
+const applyStoreUpdates = (
+  removed,
+  downloadCleared,
+  deleteNotebookNotes,
+  notesKeptFrom,
+  notesMovedTo,
+) => {
   const isRemoved = (id, type) =>
     removed.some(r => r.id === id && r.type === type);
   const isDownloadCleared = (id, type) =>
@@ -119,10 +130,24 @@ const applyStoreUpdates = (removed, downloadCleared) => {
   }
 
   if (removed.some(r => r.type === ItemTypes.NOTEBOOK)) {
-    const {setNotebooks} = useNotesStore.getState();
+    const {setNotebooks, removeNotesOfNotebook} = useNotesStore.getState();
     setNotebooks(prev =>
       prev.filter(n => !isRemoved(String(n.id), ItemTypes.NOTEBOOK)),
     );
+    // When the notes went with the notebook they must also leave All Notes;
+    // filtering notebooks alone leaves them visible until the next refetch.
+    if (deleteNotebookNotes) {
+      removed
+        .filter(r => r.type === ItemTypes.NOTEBOOK)
+        .forEach(r => removeNotesOfNotebook(r.id));
+    }
+  }
+
+  // Notes that outlived their notebook now belong to the Default Notebook —
+  // one store write for every notebook in the batch, since they all hand off
+  // to the same place.
+  if (notesKeptFrom.length && notesMovedTo != null) {
+    useNotesStore.getState().reassignNotesOfNotebooks(notesKeptFrom, notesMovedTo);
   }
 
   if (removed.some(r => r.type === ItemTypes.YOUTUBE)) {
@@ -163,6 +188,8 @@ const applyStoreUpdates = (removed, downloadCleared) => {
 export const bulkDeleteItems = async (items, {deleteNotebookNotes, screen}) => {
   const removed = [];
   const downloadCleared = [];
+  const notesKeptFrom = [];
+  let notesMovedTo = null;
 
   const results = await Promise.allSettled(
     items.map(async item => {
@@ -171,10 +198,15 @@ export const bulkDeleteItems = async (items, {deleteNotebookNotes, screen}) => {
           await deleteNoteItem(item);
           removed.push(item);
           break;
-        case ItemTypes.NOTEBOOK:
-          await deleteNotebookItem(item, deleteNotebookNotes);
+        case ItemTypes.NOTEBOOK: {
+          const movedTo = await deleteNotebookItem(item, deleteNotebookNotes);
           removed.push(item);
+          if (movedTo != null) {
+            notesKeptFrom.push(item.id);
+            notesMovedTo = movedTo;
+          }
           break;
+        }
         case ItemTypes.DRIVE: {
           const {removedFromList, clearedDownload} = await deleteDriveItem(item, screen);
           if (removedFromList) removed.push(item);
@@ -195,7 +227,13 @@ export const bulkDeleteItems = async (items, {deleteNotebookNotes, screen}) => {
     }),
   );
 
-  applyStoreUpdates(removed, downloadCleared);
+  applyStoreUpdates(
+    removed,
+    downloadCleared,
+    deleteNotebookNotes,
+    notesKeptFrom,
+    notesMovedTo,
+  );
 
   const failed = results
     .map((r, i) => (r.status === 'rejected' ? {item: items[i], error: r.reason} : null))
@@ -216,6 +254,55 @@ export const bulkAddToCategory = async (items, categoryId) => {
     .map((r, i) => (r.status === 'rejected' ? {item: items[i], error: r.reason} : null))
     .filter(Boolean);
   return {succeeded: items.length - failed.length, failed};
+};
+
+// Only notes that live in a notebook can be moved to another notebook. A note
+// attached to a drive file / youtube video / device file is anchored to that
+// item (source_type + source_id point at it), so "moving" it would orphan it
+// from the thing it annotates — the per-item menu gates Move the same way
+// (NoteMenuItems only renders it for source_type === 'notebook').
+export const isMovableNote = item =>
+  item.type === ItemTypes.NOTE && item.source_type === 'notebook';
+
+export const getMovableNotes = items => items.filter(isMovableNote);
+
+// Moves every movable note in the selection into `notebookId`. Non-movable
+// items are ignored rather than failed — a mixed selection ("Select All" in
+// All Notes) is the normal case, not an error; they come back as `skipped`
+// for the caller to report. Notes already in the target notebook are dropped
+// silently: the write would be a no-op but would still bump updated_at, and
+// they're already where the user asked them to be, so calling them "skipped"
+// would read as a problem.
+export const bulkMoveNotesToNotebook = async (items, notebook) => {
+  const notebookNotes = getMovableNotes(items);
+  const skipped = items.length - notebookNotes.length;
+  const movable = notebookNotes.filter(
+    item => String(item.source_id) !== String(notebook.id),
+  );
+
+  const results = await Promise.allSettled(
+    movable.map(async item => {
+      const success = await moveNoteToNotebook(item.id, notebook.id);
+      // moveNoteToNotebook resolves false (not rejects) when the row wasn't
+      // found — surface it as a failure so it reaches describeFailures.
+      if (!success) throw new Error('Note not found');
+    }),
+  );
+
+  const moved = [];
+  const failed = [];
+  results.forEach((result, i) => {
+    if (result.status === 'fulfilled') {
+      moved.push(movable[i].id);
+    } else {
+      failed.push({item: movable[i], error: result.reason});
+    }
+  });
+
+  // One store write for the whole batch — see moveNotesInState.
+  useNotesStore.getState().moveNotesInState(moved, notebook);
+
+  return {succeeded: moved.length, failed, skipped};
 };
 
 const PDF_CONVERT_TIMEOUT_MS = 20000;

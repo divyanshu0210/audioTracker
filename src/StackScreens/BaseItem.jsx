@@ -68,7 +68,10 @@ const BaseItem = ({type, item, subtype, screen, onFolderPress}) => {
 
   // dbId/file_path/title ride along for bulk actions (delete needs the
   // internal PK + local path to unlink downloads; Assign never needed them,
-  // only id/type/subtype).
+  // only id/type/subtype). source_type/source_id are the note's own origin —
+  // bulk Move needs them to tell notebook notes (movable) from notes attached
+  // to a drive/youtube/device item (not movable), and to know which notebook
+  // the selection is currently in.
   const selectionEntry = useMemo(
     () => ({
       id: sourceId,
@@ -77,8 +80,19 @@ const BaseItem = ({type, item, subtype, screen, onFolderPress}) => {
       dbId: item?.id,
       file_path: item?.file_path,
       title: item?.title,
+      source_type: item?.source_type,
+      source_id: item?.source_id,
     }),
-    [sourceId, type, subtype, item?.id, item?.file_path, item?.title],
+    [
+      sourceId,
+      type,
+      subtype,
+      item?.id,
+      item?.file_path,
+      item?.title,
+      item?.source_type,
+      item?.source_id,
+    ],
   );
 
   const toggleSelection = useCallback(() => {

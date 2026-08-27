@@ -51,9 +51,14 @@ const SelectNotebookModal = ({
     setChosenNotebookId(prevId => prevId === notebookId ? null : notebookId);
   };
 
+  // Hands back the whole notebook row, not just its id: this list comes
+  // straight from the DB, so the caller can't assume the chosen notebook is
+  // in useNotesStore.notebooks (in category mode that holds only the
+  // category's notebooks) and has nowhere else to read its name/colour from.
   const handleMove = () => {
-    if (chosenNotebookId && chosenNotebookId !== selectedNotebookId) {
-      onSelect(chosenNotebookId);
+    const chosen = notebooks.find(nb => nb.id === chosenNotebookId);
+    if (chosen && String(chosen.id) !== String(selectedNotebookId)) {
+      onSelect(chosen);
     }
     onClose();
   };

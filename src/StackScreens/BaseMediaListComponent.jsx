@@ -65,10 +65,13 @@ const BaseMediaListComponent = ({
         type,
         subtype: item.type,
         // Carried along so "Select All" produces the same shape BaseItem's
-        // per-item selectionEntry does — bulk delete needs dbId/file_path.
+        // per-item selectionEntry does — bulk delete needs dbId/file_path,
+        // bulk move needs source_type/source_id.
         dbId: item.id,
         file_path: item.file_path,
         title: item.title,
+        source_type: item.source_type,
+        source_id: item.source_id,
       })),
     [mediaList, type],
   );

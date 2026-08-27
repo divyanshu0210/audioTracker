@@ -16,24 +16,26 @@ import {moveNoteToNotebook} from '../../database/U';
 import SelectNotebookModal from './SelectNotebookModal';
 
 const MoveNoteModal = () => {
-  const {movingNote, setMovingNote, setNotesList, setMainNotesList} =
-    useNotesStore(
-      useShallow(state => ({
-        movingNote: state.movingNote,
-        setMovingNote: state.setMovingNote,
-        setNotesList: state.setNotesList,
-        setMainNotesList: state.setMainNotesList,
-      })),
-    );
+  const {movingNote, setMovingNote, moveNoteInState} = useNotesStore(
+    useShallow(state => ({
+      movingNote: state.movingNote,
+      setMovingNote: state.setMovingNote,
+      moveNoteInState: state.moveNoteInState,
+    })),
+  );
 
-  const handleMoveNotebook = async newNotebookId => {
+  const handleMoveNotebook = async newNotebook => {
     if (!movingNote) return;
     try {
-      const success = await moveNoteToNotebook(movingNote.rowid, newNotebookId);
+      const success = await moveNoteToNotebook(
+        movingNote.rowid,
+        newNotebook.id,
+      );
       if (success) {
         Alert.alert('Success', 'Note moved successfully');
-        setNotesList(prev => prev.filter(note => note.rowid !== movingNote.rowid));
-        setMainNotesList(prev => prev.filter(note => note.rowid !== movingNote.rowid));
+        // Only leaves the notebook-scoped list — a moved note still belongs
+        // in All Notes, just under a different notebook.
+        moveNoteInState(movingNote.rowid, newNotebook);
       } else {
         Alert.alert('Failed', 'Failed to move note. Please try again.');
       }

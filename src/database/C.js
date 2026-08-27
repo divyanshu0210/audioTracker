@@ -208,28 +208,63 @@ export const addNotebook = (title, color, callback) => {
   });
 };
 
-export const getOrCreateDefaultNotebookId = async () => {
+const DEFAULT_NOTEBOOK_COLOR = '#3B82F6';
+
+// Resolves the whole row, not just the id: callers that move notes here also
+// have to repaint those notes in the store, and the name/colour has to come
+// from somewhere that's correct even when the notebook was created a moment
+// ago by this very call (so it isn't in useNotesStore.notebooks yet).
+export const getOrCreateDefaultNotebook = async () => {
   const fastdb = getDb();
 
   return new Promise((resolve, reject) => {
     fastdb.transaction(tx => {
-      // Step 1: Check if a notebook with the name "Default Notebook" exists
+      // Step 1: find the Default Notebook, deleted or not. It can itself be
+      // deleted (NBMenuItems offers that, taking its notes with it), and a
+      // soft-deleted row used to be returned as-is: every later "delete
+      // notebook, keep notes" then parked its notes in a notebook the
+      // Notebooks tab doesn't show, leaving them stranded.
       tx.executeSql(
-        `SELECT id FROM notebooks WHERE title = ? LIMIT 1;`,
+        `SELECT id, title, color, created_at, deleted_at FROM notebooks
+           WHERE title = ? LIMIT 1;`,
         ['Default Notebook'],
         (_, result) => {
           if (result.rows.length > 0) {
-            // Exists: return the id
-            const notebookId = result.rows.item(0).id;
-            resolve(notebookId);
+            const notebook = result.rows.item(0);
+            if (!notebook.deleted_at) {
+              resolve(notebook);
+              return;
+            }
+            // Step 1b: restore it rather than inserting a second one. Safe
+            // because deleting it stamped deleted_at on its notes too, and
+            // that's what hides them (fetchNotes filters n.deleted_at) — so
+            // they stay gone. Anything parked here while it was deleted
+            // becomes reachable again, which is exactly what's wanted.
+            tx.executeSql(
+              `UPDATE notebooks SET deleted_at = NULL WHERE id = ?;`,
+              [notebook.id],
+              () => {
+                console.log(`Restored deleted Default Notebook (ID: ${notebook.id})`);
+                resolve({...notebook, deleted_at: null});
+              },
+              (_, error) => {
+                console.error('Error restoring default notebook:', error);
+                reject(error);
+                return false;
+              },
+            );
           } else {
-            // Step 2: Create it and return the new id
+            // Step 2: Create it and return the new row
             tx.executeSql(
               `INSERT INTO notebooks (title, color) VALUES (?, ?);`,
-              ['Default Notebook', '#3B82F6'],
+              ['Default Notebook', DEFAULT_NOTEBOOK_COLOR],
               (_, insertResult) => {
-                const newId = insertResult.insertId;
-                resolve(newId);
+                resolve({
+                  id: insertResult.insertId,
+                  title: 'Default Notebook',
+                  color: DEFAULT_NOTEBOOK_COLOR,
+                  created_at: new Date().toISOString(),
+                });
               },
               (_, error) => {
                 console.error('Error inserting default notebook:', error);
@@ -249,20 +284,26 @@ export const getOrCreateDefaultNotebookId = async () => {
   });
 };
 
+export const getOrCreateDefaultNotebookId = async () =>
+  (await getOrCreateDefaultNotebook()).id;
+
+// Resolves the notebook the notes landed in, so the caller can repoint them in
+// the store as well — without it All Notes goes on showing the deleted
+// notebook's name and colour under each note until the next refetch.
 export const moveNotesToDefaultNotebook = async notebookId => {
   const fastdb = getDb();
-  const defaultNotebookId = await getOrCreateDefaultNotebookId();
+  const defaultNotebook = await getOrCreateDefaultNotebook();
 
   return new Promise((resolve, reject) => {
     fastdb.transaction(tx => {
       tx.executeSql(
         `UPDATE notes SET source_id = ?, source_type = 'notebook', updated_at = CURRENT_TIMESTAMP WHERE source_id = ? AND source_type = 'notebook';`,
-        [String(defaultNotebookId), String(notebookId)],
-        (_, result) => {
+        [String(defaultNotebook.id), String(notebookId)],
+        () => {
           console.log(
-            `Moved notes to default notebook (ID: ${defaultNotebookId})`,
+            `Moved notes to default notebook (ID: ${defaultNotebook.id})`,
           );
-          resolve(result);
+          resolve(defaultNotebook);
         },
         (_, error) => {
           console.error('Failed to move notes to default notebook:', error);

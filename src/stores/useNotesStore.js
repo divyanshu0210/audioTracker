@@ -1,4 +1,5 @@
 import {create} from 'zustand';
+import {fetchNotebookNoteCounts} from '../database/R';
 
 // Rewrites which notebook a set of notes belongs to, in a single pass over
 // both lists. `matches` picks the notes: callers select either by rowid (an
@@ -62,6 +63,54 @@ export const useNotesStore = create((set, get) => ({
     })),
 
   setEditingNotebook: val => set({editingNotebook: val}),
+
+  // A notebook can come back from the dead: getOrCreateDefaultNotebook
+  // restores a soft-deleted Default Notebook instead of inserting a duplicate.
+  // Paths that patch `notebooks` in place rather than refetching (bulk delete
+  // filters the list) would otherwise leave the revived one missing from the
+  // Notebooks tab until the next full refresh — while its notes are already
+  // pointing at it. No-ops when it's already listed.
+  upsertNotebook: notebook =>
+    set(s => {
+      if (!notebook) return {};
+      if (s.notebooks.some(nb => String(nb.id) === String(notebook.id))) {
+        return {};
+      }
+      // `type` and the DESC-by-created_at order are what fetchNotebooks
+      // produces; a row inserted here has to match or it renders wrong and
+      // jumps position on the next refetch.
+      const added = {type: 'notebook', ...notebook};
+      return {
+        notebooks: [...s.notebooks, added].sort((a, b) =>
+          String(b.created_at || '').localeCompare(String(a.created_at || '')),
+        ),
+      };
+    }),
+
+  // Counts live in their own map rather than on the notebook rows: `notebooks`
+  // gets wholesale-replaced by fetchNotebooks on every pull-to-refresh and by
+  // NBMenuItems.refreshNotebooks, and rows straight from the DB carry no
+  // count — so a count stored on the row vanishes on each of those. Keyed by
+  // id as a string because callers hold ids as both.
+  //
+  // A separate loaded flag distinguishes "not counted yet" from "counted,
+  // zero": a notebook with no notes is simply absent from the query's result.
+  notebookNoteCounts: {},
+  notebookCountsLoaded: false,
+
+  // Counts can't be derived from mainNotesList — that's paginated — so they
+  // have to come from the DB. Only the counts are refetched, never the
+  // notebook list: in category mode `notebooks` holds just that category's
+  // notebooks (HomeTabs.loadNotebooks), and refetching would replace it with
+  // all of them.
+  refreshNotebookCounts: async () => {
+    try {
+      const counts = await fetchNotebookNoteCounts();
+      set({notebookNoteCounts: counts, notebookCountsLoaded: true});
+    } catch (error) {
+      console.error('Failed to refresh notebook counts:', error);
+    }
+  },
 
   setMovingNote: val => set({movingNote: val}),
 

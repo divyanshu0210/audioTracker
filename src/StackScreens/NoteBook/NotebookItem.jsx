@@ -5,8 +5,22 @@ import {StyleSheet, Text, View} from 'react-native';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
 import {useAppState} from '../../contexts/AppStateContext';
 import { ItemTypes } from '../../contexts/constants';
+import {useNotesStore} from '../../stores/useNotesStore';
 
 const NotebookItem = ({item}) => {
+  // Read from the counts map rather than the row, so refreshing the notebook
+  // list doesn't blank the badge. undefined until the first count lands — a
+  // "0" then would state something false rather than "not counted yet".
+  const noteCount = useNotesStore(state =>
+    state.notebookCountsLoaded
+      ? state.notebookNoteCounts[String(item.id)] || 0
+      : undefined,
+  );
+  const counted = noteCount !== undefined;
+  const isEmpty = !noteCount;
+  const countLabel = isEmpty
+    ? 'No notes'
+    : `${noteCount} ${noteCount === 1 ? 'note' : 'notes'}`;
   return (
     <View style={styles.notebookItem}>
       {/* <View style={[styles.colorBar, {backgroundColor: item.color}]} /> */}
@@ -17,10 +31,16 @@ const NotebookItem = ({item}) => {
         style={{marginRight: 8}}
       />
       <View style={styles.notebookInfo}>
-        <Text style={styles.notebookTitle}>{item.title}</Text>
-        {/* <Text style={styles.notebookDate}>
-          Created at: {new Date(item.created_at).toLocaleString()}
-        </Text> */}
+        {/* Title shrinks and ellipsises first; the count keeps its width so a
+            long notebook name can't push it off the row. */}
+        <Text style={styles.notebookTitle} numberOfLines={1}>
+          {item.title}
+        </Text>
+        {counted && (
+          <Text style={[styles.count, isEmpty && styles.countEmpty]}>
+            {` · ${countLabel}`}
+          </Text>
+        )}
       </View>
       {/* <BaseMenu item={item} type={ItemTypes.NOTEBOOK}/> */}
     </View>
@@ -43,15 +63,20 @@ const styles = StyleSheet.create({
   },
   notebookInfo: {
     flex: 1,
-    // paddingLeft: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   notebookTitle: {
     fontSize: 15,
     fontWeight: 'bold',
     color: '#000',
+    flexShrink: 1,
   },
-  notebookDate: {
-    fontSize: 12,
-    color: '#555',
+  count: {
+    fontSize: 13,
+    color: '#8a8a8f',
+  },
+  countEmpty: {
+    color: '#b8b8be',
   },
 });

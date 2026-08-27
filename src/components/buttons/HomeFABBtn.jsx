@@ -21,7 +21,7 @@ import {
 import DriveLinkModal from '../modules/DriveLink';
 import MyModal from '../MyModal';
 import {createNewNote} from '../../notes/richDB';
-import {getOrCreateDefaultNotebookId} from '../../database/C';
+import {getOrCreateDefaultNotebook} from '../../database/C';
 import {fetchNotebooks} from '../../database/R';
 import useDbStore from '../../database/dbStore';
 import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
@@ -51,7 +51,8 @@ const HomeFABBtn = () => {
   const selectedCategory = useSelectionStore(state => state.selectedCategory);
 
   const setActiveNoteId = useNotesStore(state => state.setActiveNoteId);
-  const defaultNotebookId = useNotesStore(state => state.defaultNotebookId);
+  const setDefaultNotebookId = useNotesStore(state => state.setDefaultNotebookId);
+  const upsertNotebook = useNotesStore(state => state.upsertNotebook);
 
   const {addNBbottomSheetRef, mentorMenteeRequestBottomSheetRef} =
     useAppState();
@@ -116,14 +117,20 @@ const HomeFABBtn = () => {
   const handleAddNoteButton = async () => {
     setInserting(true);
     try {
+      // Resolved here rather than read from defaultNotebookId, which is set
+      // once at login: delete the Default Notebook mid-session and that id
+      // points at a soft-deleted notebook, so the new note lands somewhere
+      // the Notebooks tab can't reach. This revives it instead (same id).
+      const defaultNotebook = await getOrCreateDefaultNotebook();
+      setDefaultNotebookId(defaultNotebook.id);
+      upsertNotebook(defaultNotebook);
+
       const noteId = generateId();
       setActiveNoteId(noteId);
       createNoteInstant(
-        defaultNotebookId,
+        defaultNotebook.id,
         'notebook',
-        {
-          title: 'Default Notebook',
-        },
+        defaultNotebook,
         noteId,
       );
       navigationRef.navigate('NotesSectionWithBack');

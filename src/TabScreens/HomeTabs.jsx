@@ -101,6 +101,9 @@ const HomeTabs = ({categoryId}) => {
           ? await getCategoryData(categoryId, ['notebook'])
           : await fetchNotebooks(setNotebooks);
         setNotebooks(storedItems || []);
+        // Pull-to-refresh is exactly when the numbers should be re-read, and
+        // NotebookScreen's focus effect won't fire — it never lost focus.
+        useNotesStore.getState().refreshNotebookCounts();
       } catch (error) {
         console.error('Error fetching notebooks:', error);
       } finally {

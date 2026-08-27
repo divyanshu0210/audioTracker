@@ -360,6 +360,38 @@ if (searchQuery) {
   });
 };
 
+// Note counts for every notebook, as {notebookId: count}. Deliberately not
+// folded into fetchNotebooks: notebooks also arrive via getCategoryData in
+// category mode, and one standalone count query serves both without either
+// query having to know about the other. source_id is the key as stored (TEXT
+// — notes is FTS5), so no CAST is needed on either side.
+export const fetchNotebookNoteCounts = () => {
+  const fastdb = getDb();
+  return new Promise((resolve, reject) => {
+    fastdb.transaction(tx => {
+      tx.executeSql(
+        `SELECT source_id, COUNT(*) AS noteCount FROM notes
+          WHERE source_type = 'notebook' AND deleted_at IS NULL
+          GROUP BY source_id;`,
+        [],
+        (_, {rows}) => {
+          const counts = {};
+          for (let i = 0; i < rows.length; i++) {
+            const row = rows.item(i);
+            counts[String(row.source_id)] = row.noteCount;
+          }
+          resolve(counts);
+        },
+        (_, error) => {
+          console.error('Error counting notes per notebook:', error);
+          reject(error);
+          return false;
+        },
+      );
+    });
+  });
+};
+
 export const fetchNotebooks = callback => {
   const fastdb = getDb();
   fastdb.transaction(tx => {

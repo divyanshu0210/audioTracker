@@ -1,5 +1,6 @@
 import {create} from 'zustand';
 import {fetchNotebookNoteCounts} from '../database/R';
+import {useSelectionStore} from './useSelectionStore';
 
 // Rewrites which notebook a set of notes belongs to, in a single pass over
 // both lists. `matches` picks the notes: callers select either by rowid (an
@@ -73,6 +74,12 @@ export const useNotesStore = create((set, get) => ({
   upsertNotebook: notebook =>
     set(s => {
       if (!notebook) return {};
+      // With a category selected, `notebooks` is that category's subset only
+      // (HomeScreen passes selectedCategory straight in as HomeTabs'
+      // categoryId), and this notebook was revived by a DB call that knows
+      // nothing about the filter — adding it would show a notebook that isn't
+      // in the category. The next load puts it right.
+      if (useSelectionStore.getState().selectedCategory) return {};
       if (s.notebooks.some(nb => String(nb.id) === String(notebook.id))) {
         return {};
       }
@@ -120,12 +127,17 @@ export const useNotesStore = create((set, get) => ({
   // notification per note.
   // `notebook` is the destination row, handed over by SelectNotebookModal —
   // see applyNotebookMove.
-  moveNotesInState: (rowids, notebook) =>
+  moveNotesInState: (rowids, notebook) => {
     set(s => {
       const moved = new Set(rowids);
       if (!moved.size || !notebook) return {};
       return applyNotebookMove(s, n => moved.has(n.rowid), notebook);
-    }),
+    });
+    // Every action here changes how many notes a notebook holds, so the
+    // badge has to be re-read. The Notebooks tab's focus effect can't cover
+    // it: these all run while that tab is already focused, so it never fires.
+    get().refreshNotebookCounts();
+  },
 
   moveNoteInState: (rowid, notebook) =>
     get().moveNotesInState([rowid], notebook),
@@ -137,7 +149,7 @@ export const useNotesStore = create((set, get) => ({
   // longer exists — until the next refetch.
   // `toNotebook` is the destination row (from moveNotesToDefaultNotebook), not
   // an id — see applyNotebookMove.
-  reassignNotesOfNotebooks: (fromNotebookIds, toNotebook) =>
+  reassignNotesOfNotebooks: (fromNotebookIds, toNotebook) => {
     set(s => {
       const from = new Set(fromNotebookIds.map(String));
       if (!from.size || !toNotebook) return {};
@@ -146,12 +158,14 @@ export const useNotesStore = create((set, get) => ({
         n => n.source_type === 'notebook' && from.has(String(n.source_id)),
         toNotebook,
       );
-    }),
+    });
+    get().refreshNotebookCounts();
+  },
 
   // Deleting a notebook *together with its notes* has to clear those notes
   // from All Notes too — removeItem('notebook') only drops the notebook row,
   // leaving its notes visible in mainNotesList until the next refetch.
-  removeNotesOfNotebook: notebookId =>
+  removeNotesOfNotebook: notebookId => {
     set(s => {
       const belongs = n =>
         n.source_type === 'notebook' &&
@@ -160,7 +174,9 @@ export const useNotesStore = create((set, get) => ({
         notesList: s.notesList.filter(n => !belongs(n)),
         mainNotesList: s.mainNotesList.filter(n => !belongs(n)),
       };
-    }),
+    });
+    get().refreshNotebookCounts();
+  },
 
   removeItem: (type, id) => {
     switch (type) {

@@ -1,6 +1,7 @@
 // import SQLite from 'react-native-sqlite-storage';
 
 import {getDb} from './database';
+import {useNotesStore} from '../stores/useNotesStore';
 
 export const upsertItem = ({
   source_id,
@@ -245,7 +246,13 @@ export const getOrCreateDefaultNotebook = async () => {
               [notebook.id],
               () => {
                 console.log(`Restored deleted Default Notebook (ID: ${notebook.id})`);
-                resolve({...notebook, deleted_at: null});
+                const restored = {...notebook, deleted_at: null};
+                // Reviving is a change this function makes on its own, so it
+                // owns putting the notebook back on screen. Callers used to
+                // each do it and each one that forgot left the notebook
+                // missing from the Notebooks tab while holding notes.
+                useNotesStore.getState().upsertNotebook(restored);
+                resolve(restored);
               },
               (_, error) => {
                 console.error('Error restoring default notebook:', error);
@@ -259,12 +266,25 @@ export const getOrCreateDefaultNotebook = async () => {
               `INSERT INTO notebooks (title, color) VALUES (?, ?);`,
               ['Default Notebook', DEFAULT_NOTEBOOK_COLOR],
               (_, insertResult) => {
-                resolve({
-                  id: insertResult.insertId,
-                  title: 'Default Notebook',
-                  color: DEFAULT_NOTEBOOK_COLOR,
-                  created_at: new Date().toISOString(),
-                });
+                // Read the row back rather than assembling it here: SQLite
+                // writes created_at as "YYYY-MM-DD HH:MM:SS" and a JS
+                // toISOString() differs from that, which sorts the notebook to
+                // the wrong place in the list until the next refetch moves it.
+                tx.executeSql(
+                  `SELECT id, title, color, created_at, deleted_at FROM notebooks
+                     WHERE id = ?;`,
+                  [insertResult.insertId],
+                  (__, inserted) => {
+                    const created = inserted.rows.item(0);
+                    useNotesStore.getState().upsertNotebook(created);
+                    resolve(created);
+                  },
+                  (__, error) => {
+                    console.error('Error reading back default notebook:', error);
+                    reject(error);
+                    return false;
+                  },
+                );
               },
               (_, error) => {
                 console.error('Error inserting default notebook:', error);

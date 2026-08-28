@@ -15,14 +15,12 @@ const NBMenuItems = ({item, hideMenu}) => {
     setEditingNotebook,
     removeNotesOfNotebook,
     reassignNotesOfNotebooks,
-    upsertNotebook,
   } = useNotesStore(
     useShallow(state => ({
       setNotebooks: state.setNotebooks,
       setEditingNotebook: state.setEditingNotebook,
       removeNotesOfNotebook: state.removeNotesOfNotebook,
       reassignNotesOfNotebooks: state.reassignNotesOfNotebooks,
-      upsertNotebook: state.upsertNotebook,
     })),
   );
 
@@ -51,11 +49,6 @@ const NBMenuItems = ({item, hideMenu}) => {
       const defaultNotebook = await moveNotesToDefaultNotebook(item.id);
       await deleteNotebook(item.id, {deleteNotes: false});
       reassignNotesOfNotebooks([item.id], defaultNotebook);
-      // The Default Notebook may have just been revived from soft-deleted by
-      // moveNotesToDefaultNotebook. Put it on screen directly instead of
-      // relying on the refetch below to notice — it now holds these notes, so
-      // it must be reachable.
-      upsertNotebook(defaultNotebook);
       refreshNotebooks();
     } catch (error) {
       console.error('Error moving notes or deleting notebook:', error);

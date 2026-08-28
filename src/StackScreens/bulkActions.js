@@ -145,14 +145,10 @@ const applyStoreUpdates = (
 
   // Notes that outlived their notebook now belong to the Default Notebook —
   // one store write for every notebook in the batch, since they all hand off
-  // to the same place. The upsert covers the case where the Default Notebook
-  // was itself deleted earlier and moveNotesToDefaultNotebook just revived it:
-  // the filter above only removes notebooks, so nothing else would put it back
-  // on screen even though it now holds these notes.
+  // to the same place. If that notebook had to be revived, getOrCreateDefault-
+  // Notebook already put it back in the list.
   if (notesKeptFrom.length && notesMovedTo != null) {
-    const {reassignNotesOfNotebooks, upsertNotebook} = useNotesStore.getState();
-    upsertNotebook(notesMovedTo);
-    reassignNotesOfNotebooks(notesKeptFrom, notesMovedTo);
+    useNotesStore.getState().reassignNotesOfNotebooks(notesKeptFrom, notesMovedTo);
   }
 
   if (removed.some(r => r.type === ItemTypes.YOUTUBE)) {

@@ -52,7 +52,6 @@ const HomeFABBtn = () => {
 
   const setActiveNoteId = useNotesStore(state => state.setActiveNoteId);
   const setDefaultNotebookId = useNotesStore(state => state.setDefaultNotebookId);
-  const upsertNotebook = useNotesStore(state => state.upsertNotebook);
 
   const {addNBbottomSheetRef, mentorMenteeRequestBottomSheetRef} =
     useAppState();
@@ -123,7 +122,6 @@ const HomeFABBtn = () => {
       // the Notebooks tab can't reach. This revives it instead (same id).
       const defaultNotebook = await getOrCreateDefaultNotebook();
       setDefaultNotebookId(defaultNotebook.id);
-      upsertNotebook(defaultNotebook);
 
       const noteId = generateId();
       setActiveNoteId(noteId);

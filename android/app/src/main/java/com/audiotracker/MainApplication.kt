@@ -27,8 +27,9 @@ class MainApplication : Application(), ReactApplication {
               //add(ShellPackage()) 
               add(FileMetaPackage())
               add(BackupModulePackage())
+              add(PlaybackServicePackage())
+              add(PipPackage())
              //  add(RNBackgroundFetchPackage())
-              //add(PipPackage())
             }
  
 

@@ -18,6 +18,7 @@ import PlayerSettings from './PlayerSettings';
 import SliderWithTime from './SliderWithTime';
 import {updateItemFields} from '../../database/U';
 import usePlayerTimeStore from './usePlayerTimeStore';
+import {usePipMode} from '../usePipMode';
 import {useShallow} from 'zustand/react/shallow';
 
 const playbackRates = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
@@ -75,6 +76,10 @@ const VLCPlayerComponent = forwardRef(
       }),
       [handleSeek, togglePlayPause],
     );
+
+    // In PiP the window is only big enough for the video itself, and Android
+    // doesn't deliver touches to it anyway — every control here is dead weight.
+    const {isInPip} = usePipMode();
 
     // ─── Refs ─────────────────────────────────────────────────────────────────
     const vlcPlayerRef = useRef(null);
@@ -242,7 +247,11 @@ const VLCPlayerComponent = forwardRef(
         onCenterDoubleTap={togglePlayPause}>
         {/* Header */}
         <Animated.View
-          style={[styles.headerOverlay, {opacity: controlsOpacity}]}>
+          style={[
+            styles.headerOverlay,
+            {opacity: controlsOpacity},
+            isInPip && styles.hiddenInPip,
+          ]}>
           <View style={styles.headerContent}>
             <TouchableOpacity onPress={onBack} style={styles.backButton}>
               <Icon name="arrow-back" size={24} color="white" />
@@ -302,16 +311,18 @@ const VLCPlayerComponent = forwardRef(
         />
 
         {/* Each child below re-renders independently via its own store subscription */}
-        <PlayPauseOverlay
-          controlsOpacity={controlsOpacity}
-          onTogglePlayPause={togglePlayPause}
-          isAudio={isAudio}
-          isPaused={isPaused}
-        />
+        {!isInPip && (
+          <PlayPauseOverlay
+            controlsOpacity={controlsOpacity}
+            onTogglePlayPause={togglePlayPause}
+            isAudio={isAudio}
+            isPaused={isPaused}
+          />
+        )}
 
-        <SkipIndicator />
+        {!isInPip && <SkipIndicator />}
 
-        <BottomControls
+        {!isInPip && <BottomControls
           controlsOpacity={controlsOpacity}
           isAudio={isAudio}
           isMinimized={isMinimized}
@@ -323,7 +334,7 @@ const VLCPlayerComponent = forwardRef(
           playbackRateIndex={playbackRateIndex}
           settingsRef={settingsRef}
           isPaused={isPaused}
-        />
+        />}
       </SkipHandler>
     );
   },
@@ -412,6 +423,7 @@ const BottomControls = React.memo(
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
+  hiddenInPip: {display: 'none'},
   videoPlayer: {flex: 1, width: '100%'},
   audioPlayer: {height: 100, width: '100%'},
   headerOverlay: {

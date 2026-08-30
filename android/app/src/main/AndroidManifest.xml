@@ -9,6 +9,10 @@
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- For PlaybackService: without a foreground service the process is only
+         cached once the app is backgrounded, and Android reclaims it
+         mid-playback after a few minutes. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
@@ -81,6 +85,15 @@
   <service
     android:name="com.asterinet.react.bgactions.RNBackgroundActionsTask"
     android:foregroundServiceType="dataSync"/>
+
+  <!-- Keeps the process alive while media plays; see playbackKeepAlive.js.
+       Its own service, not a react-native-background-actions task: downloads
+       and restore already share that single service, and playback overlaps
+       both. -->
+  <service
+    android:name=".PlaybackService"
+    android:exported="false"
+    android:foregroundServiceType="mediaPlayback"/>
 
     <service
     android:name="androidx.work.impl.foreground.SystemForegroundService"

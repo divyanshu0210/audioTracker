@@ -36,11 +36,21 @@ import {
   activateKeepAwake,
   deactivateKeepAwake,
 } from '@sayem314/react-native-keep-awake';
+import {
+  startPlaybackKeepAlive,
+  stopPlaybackKeepAlive,
+} from '../backgroundService/playbackKeepAlive';
+import {usePipMode} from './usePipMode';
 // const {PipModule} = NativeModules;
 
 const isAudioFile = mimeType => {
   return mimeType.startsWith('audio/');
 };
+
+// How much media time may sit unsaved before we force a write. Progress only
+// reaches the DB when an interval closes, so without this a process death
+// mid-session loses the *entire* session rather than a trailing few seconds.
+const PROGRESS_CHECKPOINT_SECONDS = 120;
 
 const NoteSection = React.memo(
   ({editorRef, source_type, playerRef, captureVLCScreenshot, showPlayerMinimized, isHidden}) => {
@@ -112,6 +122,22 @@ const BacePlayer = () => {
   const playbackSpeedRef = useRef(1);
   const isPausedRef = useRef(pauseOnStart ?? false);
   const durationRef = useRef(0);
+  // Read by handleIsPausedChange for the playback notification. Refs, not
+  // dependencies: that callback is handed to a memoized player, and rebuilding
+  // it on every track change would defeat the memo.
+  const currentItemTitleRef = useRef(null);
+  // Whether this source can actually play with the app backgrounded. VLC can
+  // (playInBackground). The YouTube path is an embed in a WebView, and the
+  // embedded player pauses itself once the page is hidden — holding a
+  // mediaPlayback service for it would just pin an undismissable "Playing"
+  // notification over media that stopped.
+  const canPlayInBackgroundRef = useRef(false);
+  // PiP only makes sense for something with a picture — an audio file shrunk
+  // into a video window is just an empty black rectangle.
+  const isVideoRef = useRef(false);
+  // Media position at the last durability checkpoint, in seconds. null until
+  // the first progress event of a track.
+  const lastCheckpointRef = useRef(null);
 
   const [isAudio, setIsAudio] = useState(false);
   const {height: SCREEN_HEIGHT} = Dimensions.get('window');
@@ -141,6 +167,38 @@ const BacePlayer = () => {
     })),
   );
 
+  // PiP keeps the activity visible in a small window instead of backgrounding
+  // it, so playback continues for both players — including YouTube, whose embed
+  // pauses itself only when its page is actually hidden.
+  const {isInPip, armPip} = usePipMode();
+  // Shadow ref so reconcileKeepAlive can read PiP state without becoming a
+  // dependency of the callbacks handed to the memoized players.
+  const isInPipRef = useRef(false);
+
+  /**
+   * Hold the foreground service whenever something is genuinely playing with
+   * no guarantee of a full-screen activity behind it.
+   *
+   * PiP is why this includes YouTube. Normally YouTube gets no service — the
+   * embed pauses itself when backgrounded, so the notification would lie. In
+   * PiP it really is playing, and more importantly closing the PiP window
+   * finishes the activity: with no service the process goes straight from
+   * "visible activity" to empty (oom_adj ~999) and is killed while the final
+   * saveWatchProgress transaction is still in flight, losing the whole PiP
+   * session's progress.
+   */
+  const reconcileKeepAlive = useCallback(() => {
+    const shouldHold =
+      !isPausedRef.current &&
+      (canPlayInBackgroundRef.current || isInPipRef.current);
+
+    if (shouldHold) {
+      startPlaybackKeepAlive(currentItemTitleRef.current);
+    } else {
+      stopPlaybackKeepAlive();
+    }
+  }, []);
+
   const {setActiveItem} = useSelectionStore(
     useShallow(state => ({
       setActiveItem: state.setActiveItem,
@@ -166,6 +224,8 @@ const BacePlayer = () => {
   useEffect(() => {
     if (currentItem) {
       console.log('bace player ', currentItem);
+      currentItemTitleRef.current = currentItem.title;
+      canPlayInBackgroundRef.current = currentItem.type !== 'youtube_video';
       setNotesList([]);
       setActiveItem({
         sourceId: currentItem.source_id,
@@ -175,6 +235,7 @@ const BacePlayer = () => {
       const tempIsAudio =
         source_type !== 'youtube_video' && isAudioFile(currentItem?.mimeType);
       setIsAudio(tempIsAudio);
+      isVideoRef.current = !tempIsAudio;
 
       if (tempIsAudio) {
         // For audio items
@@ -272,6 +333,7 @@ const BacePlayer = () => {
       console.log('Saving progress.', durationRef.current);
       currentItem.duration = durationRef.current;
       tracker.current.saveProgressinDB();
+      lastCheckpointRef.current = currentTimeRef.current / TIME_FACTOR;
       // Fire-and-forget: this is a network upload that can take several
       // seconds, and callers (handleNext/handlePrevious) await cleanupPlayer()
       // before switching videos — awaiting it here made every playlist
@@ -285,11 +347,50 @@ const BacePlayer = () => {
   }, [currentItem, TIME_FACTOR]);
 
   useEffect(() => {
+    return () => {
+      stopPlaybackKeepAlive();
+      armPip(false);
+    };
+  }, [armPip]);
+
+  // Always call the current cleanupPlayer, never the one captured when the
+  // listener was registered — that stale closure held the *first* currentItem,
+  // so backgrounding after a track switch saved progress against the wrong item.
+  const cleanupPlayerRef = useRef(cleanupPlayer);
+  useEffect(() => {
+    cleanupPlayerRef.current = cleanupPlayer;
+  }, [cleanupPlayer]);
+
+  // Entering PiP must acquire the service (see reconcileKeepAlive); leaving it
+  // must flush progress *before* the activity goes away. onPictureInPictureMode
+  // Changed(false) is delivered ahead of the teardown when the window is
+  // closed with the X, so this is the last moment the PiP session's watch time
+  // can still be written.
+  const wasInPipRef = useRef(false);
+  useEffect(() => {
+    isInPipRef.current = isInPip;
+    reconcileKeepAlive();
+
+    if (wasInPipRef.current && !isInPip) {
+      cleanupPlayerRef.current?.();
+    }
+    wasInPipRef.current = isInPip;
+  }, [isInPip, reconcileKeepAlive]);
+
+  useEffect(() => {
     const handleAppStateChange = async nextAppState => {
       if (nextAppState !== 'active' && appState.current === 'active') {
         // App is moving from foreground to background/inactive
         console.log('App is no longer active. Running function...');
-        await cleanupPlayer();
+        await cleanupPlayerRef.current();
+      }
+
+      // Re-arm the playback foreground service if something else took it over
+      // while we were away (a restore shares the same native service). This is
+      // a no-op when we still hold it, and it has to happen on the foreground
+      // transition — Android 12+ won't let a backgrounded process start one.
+      if (nextAppState === 'active') {
+        reconcileKeepAlive();
       }
 
       appState.current = nextAppState; // Update current app state
@@ -331,6 +432,36 @@ const BacePlayer = () => {
           tracker.current?.onPause(lastTime / TIME_FACTOR);
           console.log('Intervals', tracker.current?.getIntervals());
           tracker.current?.onPlay(time / TIME_FACTOR);
+          // A seek already closed the interval — restart the checkpoint clock
+          // from here rather than measuring across the jump.
+          lastCheckpointRef.current = time / TIME_FACTOR;
+        }
+
+        // Periodic durability checkpoint: close the open interval, save, and
+        // immediately reopen a new one at the same position — the same
+        // close/save/reopen cleanupPlayer does, just on a cadence. Caps what a
+        // process death can cost at PROGRESS_CHECKPOINT_SECONDS.
+        //
+        // Driven off progress events rather than a timer on purpose: Android
+        // freezes JS timers the moment the activity pauses, which is exactly
+        // when this needs to keep working.
+        const seconds = time / TIME_FACTOR;
+        if (!isPausedRef.current) {
+          if (lastCheckpointRef.current === null) {
+            lastCheckpointRef.current = seconds;
+          } else if (
+            Math.abs(seconds - lastCheckpointRef.current) >=
+            PROGRESS_CHECKPOINT_SECONDS
+          ) {
+            lastCheckpointRef.current = seconds;
+            tracker.current.onPause(seconds);
+            tracker.current.onPlay(seconds);
+            // Local write only. saveDatatoBackend is a network round trip and
+            // has no business running every two minutes; the existing cleanup
+            // paths still push to the backend.
+            tracker.current.saveProgressinDB();
+            console.log('progress checkpointed at', seconds);
+          }
         }
       }
 
@@ -351,6 +482,17 @@ const BacePlayer = () => {
         activateKeepAwake();
       }
 
+      // Hold a foreground service for as long as something is actually
+      // playing. It has to be started here, from the foreground, and not when
+      // the app backgrounds: Android 12+ rejects a foreground-service start
+      // that comes from an already-backgrounded process, and by the time the
+      // AppState 'change' handler runs we are past that window.
+      reconcileKeepAlive();
+
+      // Arm PiP only while a video is actually playing, so pressing Home from
+      // anywhere else backgrounds the app normally.
+      armPip(!paused && isVideoRef.current);
+
       // Handle play/pause tracking
       if (tracker.current) {
         console.log(
@@ -367,7 +509,7 @@ const BacePlayer = () => {
         }
       }
     },
-    [tracker, TIME_FACTOR],
+    [tracker, TIME_FACTOR, armPip, reconcileKeepAlive],
   );
 
   const handlePlaybackRateChange = useCallback(speed => {
@@ -412,6 +554,7 @@ const BacePlayer = () => {
       setIsDataLoaded(false);
       currentTimeRef.current = 0;
       lastTimeRef.current = 0;
+      lastCheckpointRef.current = null;
       setShowNotes(false);
       setIsMinimized(true);
     },
@@ -628,11 +771,17 @@ const BacePlayer = () => {
               styles.playerContainer,
               {height: playerHeight},
               isAudio && styles.audioPlayerContainer,
+              // In PiP the window *is* the player — the animated height and the
+              // audio sizing are both meaningless there.
+              isInPip && styles.pipPlayerContainer,
             ]}>
             <ViewShot
               ref={captureRef}
               options={{format: 'jpg', quality: 0.9, result: 'base64'}}
-              style={[styles.viewShot, isHidden && {opacity: 0, height: 0}]}>
+              style={[
+                styles.viewShot,
+                isHidden && !isInPip && {opacity: 0, height: 0},
+              ]}>
               {!isDataLoaded && (
                 <View style={styles.loadingContainer}>
                   <ActivityIndicator size="large" color="#fff" />
@@ -674,7 +823,7 @@ const BacePlayer = () => {
               )}
             </ViewShot>
 
-            {autoAdvanceSecondsLeft !== null && (
+            {autoAdvanceSecondsLeft !== null && !isInPip && (
               <View style={styles.autoAdvanceOverlay}>
                 <Text style={styles.autoAdvanceText}>
                   Next video in {autoAdvanceSecondsLeft}s
@@ -687,7 +836,7 @@ const BacePlayer = () => {
               </View>
             )}
 
-            <View style={styles.btnContainer}>
+            <View style={[styles.btnContainer, isInPip && styles.hidden]}>
               <TouchableOpacity
                 style={styles.addButton}
                 disabled={isCreatingNote}
@@ -727,9 +876,9 @@ const BacePlayer = () => {
             </View>
           </Animated.View>
 
-          {renderPersistentBackButton()}
-          {renderDragHandle()}
-          {!showNotes && autoplay && (
+          {!isInPip && renderPersistentBackButton()}
+          {!isInPip && renderDragHandle()}
+          {!showNotes && autoplay && !isInPip && (
             <PlayerQueue
               playlist={playlist}
               currentIndex={currentIndex}
@@ -740,7 +889,7 @@ const BacePlayer = () => {
             />
           )}
 
-          {showNotes && (
+          {showNotes && !isInPip && (
             <NoteSection
               editorRef={notesSectionRef}
               source_type={source_type}
@@ -759,6 +908,8 @@ const BacePlayer = () => {
 };
 
 const styles = StyleSheet.create({
+  pipPlayerContainer: {flex: 1, height: '100%'},
+  hidden: {display: 'none'},
   container: {
     flex: 1,
     backgroundColor: '#fff',

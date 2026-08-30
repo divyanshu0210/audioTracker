@@ -18,6 +18,7 @@ import RNFS from 'react-native-fs';
 import {updateItemFields} from '../../database/U.js';
 import {getFullDOMHTML, startTrackingTime} from '../progressTrackingUtils.js';
 import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
+import {usePipMode} from '../usePipMode';
 // const {PipModule} = NativeModules;
 
 const YouTubePlayerComponent = forwardRef(
@@ -38,7 +39,9 @@ const YouTubePlayerComponent = forwardRef(
   ) => {
       console.log('🔄🔄🔄🔄 YouTubePlayerComponent RENDERING', new Date().toISOString());
     const [isLoading, setIsLoading] = useState(true);
-    const [isInPipMode, setIsInPipMode] = useState(false);
+    // Was local state that nothing ever set, so the back arrow stayed drawn
+    // inside the PiP window. Comes from the real PiP mode now.
+    const {isInPip: isInPipMode} = usePipMode();
 
     const webViewRef = useRef(null);
     const durationRef = useRef(0);

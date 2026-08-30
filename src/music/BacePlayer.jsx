@@ -52,8 +52,13 @@ const isAudioFile = mimeType => {
 // mid-session loses the *entire* session rather than a trailing few seconds.
 const PROGRESS_CHECKPOINT_SECONDS = 120;
 
+// How long typing must be idle before playback resumes. Long enough not to
+// stutter between words and while thinking mid-sentence, short enough that
+// finishing a note doesn't feel like the video forgot to come back.
+const TYPING_RESUME_DELAY_MS = 1300;
+
 const NoteSection = React.memo(
-  ({editorRef, source_type, playerRef, captureVLCScreenshot, showPlayerMinimized, isHidden}) => {
+  ({editorRef, source_type, playerRef, captureVLCScreenshot, showPlayerMinimized, isHidden, onTypingActivity}) => {
     const activeNoteId = useNotesStore(state => state.activeNoteId);
     console.log('🔄 NoteSection RENDERING', new Date().toISOString());
     return (
@@ -72,6 +77,7 @@ const NoteSection = React.memo(
           source_type={source_type}
           webViewRef={source_type === 'youtube_video' ? playerRef.current?.webViewRef : null}
           isHidden={isHidden}
+          onTypingActivity={onTypingActivity}
         />
       </View>
     );
@@ -90,6 +96,7 @@ const BacePlayer = () => {
   } = route.params || {};
   const {settings} = useSettingsStore();
   const autoplay = settings?.autoplay ?? true;
+  const autoPauseOnTyping = settings?.autoPauseOnTyping ?? true;
 
   const [isDataLoaded, setIsDataLoaded] = useState(false);
 
@@ -138,6 +145,15 @@ const BacePlayer = () => {
   // Media position at the last durability checkpoint, in seconds. null until
   // the first progress event of a track.
   const lastCheckpointRef = useRef(null);
+  // Auto-pause-while-typing state. The setting lives in a ref because
+  // handleTypingActivity is passed through a memoized NoteSection into a
+  // RichTextEditor memoized on noteId alone — a rebuilt callback would never
+  // reach it, so the callback has to be stable and read the current value here.
+  const autoPauseOnTypingRef = useRef(autoPauseOnTyping);
+  // True only while playback is paused *by typing*, so we never resume
+  // something the user paused themselves.
+  const pausedByTypingRef = useRef(false);
+  const typingResumeTimerRef = useRef(null);
 
   const [isAudio, setIsAudio] = useState(false);
   const {height: SCREEN_HEIGHT} = Dimensions.get('window');
@@ -475,6 +491,15 @@ const BacePlayer = () => {
     paused => {
       isPausedRef.current = paused;
 
+      // Playback resumed while we were holding a typing-pause — since our own
+      // resume clears the flag *before* toggling, this can only be the user
+      // pressing play. Hand control back and stop tracking that pause as ours.
+      if (!paused && pausedByTypingRef.current) {
+        pausedByTypingRef.current = false;
+        clearTimeout(typingResumeTimerRef.current);
+        typingResumeTimerRef.current = null;
+      }
+
       // Keep the screen on only while media is actively playing.
       if (paused) {
         deactivateKeepAwake();
@@ -511,6 +536,55 @@ const BacePlayer = () => {
     },
     [tracker, TIME_FACTOR, armPip, reconcileKeepAlive],
   );
+
+  useEffect(() => {
+    autoPauseOnTypingRef.current = autoPauseOnTyping;
+    // Turning the setting off mid-note shouldn't strand the media paused.
+    if (!autoPauseOnTyping && pausedByTypingRef.current) {
+      pausedByTypingRef.current = false;
+      clearTimeout(typingResumeTimerRef.current);
+      typingResumeTimerRef.current = null;
+      if (isPausedRef.current) playerRef.current?.togglePlayPause();
+    }
+  }, [autoPauseOnTyping]);
+
+  useEffect(() => {
+    return () => clearTimeout(typingResumeTimerRef.current);
+  }, []);
+
+  /**
+   * Called on every keystroke in the note editor (content or title).
+   *
+   * Pauses on the first keystroke and resumes once typing has been idle for
+   * TYPING_RESUME_DELAY_MS. Both directions go through togglePlayPause guarded
+   * by isPausedRef rather than blind toggling, so a state we didn't expect
+   * never flips playback the wrong way.
+   *
+   * Stable by design — see autoPauseOnTypingRef.
+   */
+  const handleTypingActivity = useCallback(() => {
+    if (!autoPauseOnTypingRef.current) return;
+    if (!playerRef.current) return;
+
+    // First keystroke of this burst: pause, and remember the pause is ours.
+    // If it is already paused, leave it alone — that pause belongs to the user.
+    if (!pausedByTypingRef.current) {
+      if (isPausedRef.current) return;
+      playerRef.current.togglePlayPause();
+      pausedByTypingRef.current = true;
+    }
+
+    // Every keystroke pushes the resume back out.
+    clearTimeout(typingResumeTimerRef.current);
+    typingResumeTimerRef.current = setTimeout(() => {
+      typingResumeTimerRef.current = null;
+      if (!pausedByTypingRef.current) return;
+      // Clear before toggling so handleIsPausedChange doesn't read our own
+      // resume as the user taking over.
+      pausedByTypingRef.current = false;
+      if (isPausedRef.current) playerRef.current?.togglePlayPause();
+    }, TYPING_RESUME_DELAY_MS);
+  }, []);
 
   const handlePlaybackRateChange = useCallback(speed => {
     playbackSpeedRef.current = speed;
@@ -897,6 +971,7 @@ const BacePlayer = () => {
               captureVLCScreenshot={captureVLCScreenshot}
               showPlayerMinimized={showPlayerMinimized}
               isHidden={isHidden}
+              onTypingActivity={handleTypingActivity}
             />
           )}
         </>

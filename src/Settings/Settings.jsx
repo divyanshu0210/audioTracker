@@ -82,6 +82,10 @@ const SettingsScreen = () => {
     updateSettings(updated);
   };
 
+  const handleAutoPauseOnTypingToggle = value => {
+    updateSettings({autoPauseOnTyping: value});
+  };
+
   return (
     <ScrollView style={styles.container}>
       {/* Notification Banner */}
@@ -189,6 +193,19 @@ const SettingsScreen = () => {
             thumbColor={settings.autoplay ? '#00796b' : '#eeeeee'}
             value={settings.autoplay ?? true} // Default to true if not set
             onValueChange={handleAutoplayToggle}
+          />
+        </View>
+
+        {/* Auto-pause while taking notes */}
+        <View style={styles.switchRow}>
+          <Text style={[styles.switchLabel, {color: '#000'}]}>
+            Pause While Typing Notes
+          </Text>
+          <Switch
+            trackColor={{false: '#bdbdbd', true: '#b2dfdb'}}
+            thumbColor={settings.autoPauseOnTyping ? '#00796b' : '#eeeeee'}
+            value={settings.autoPauseOnTyping ?? true} // Default to true if not set
+            onValueChange={handleAutoPauseOnTypingToggle}
           />
         </View>
       </View>

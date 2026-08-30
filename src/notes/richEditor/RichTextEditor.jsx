@@ -152,6 +152,13 @@ function processHtmlContent(html) {
   return {processedHtml, imageIdsInContent: Array.from(imageIdsInContent)};
 }
 
+// How long after a programmatic insert (timestamp, screenshot, image) to keep
+// treating editor onChange events as echoes of that insert rather than typing.
+// A window rather than a one-shot flag because a single insert can produce
+// several onChange events — handleImagePickerResult alone calls insertHTML
+// twice — and because a window self-heals if an expected echo never arrives.
+const PROGRAMMATIC_EDIT_WINDOW_MS = 500;
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 const RichTextEditor = forwardRef(
@@ -165,6 +172,7 @@ const RichTextEditor = forwardRef(
       isHidden,
       showPlayerMinimized,
       playerRef,
+      onTypingActivity,
     },
     ref,
   ) => {
@@ -183,6 +191,9 @@ const RichTextEditor = forwardRef(
     const pendingContentRef = useRef(null);
     const saveTimeout = useRef(null);
     const titleTimeout = useRef(null);
+    // Timestamp until which editor changes are attributed to a programmatic
+    // insert rather than the keyboard — see PROGRAMMATIC_EDIT_WINDOW_MS.
+    const suppressTypingUntilRef = useRef(0);
     // True between handing content to the editor and the editor actually
     // rendering it (its first onChange) — keeps the loader up across that gap.
     const awaitingContentRef = useRef(false);
@@ -404,11 +415,14 @@ const RichTextEditor = forwardRef(
     const handleTitleChange = useCallback(text => {
       setTitle(text);
       latestTitleRef.current = text;
+      // Always a real keystroke — the title is a plain TextInput, so unlike the
+      // editor's onChange there is no programmatic path into here.
+      onTypingActivity?.();
       if (titleTimeout.current) clearTimeout(titleTimeout.current);
       titleTimeout.current = setTimeout(() => {
         saveTitle(noteIdRef.current, text);
       }, 500);
-    }, [saveTitle]);
+    }, [saveTitle, onTypingActivity]);
 
     // ── Close ─────────────────────────────────────────────────────────────────
 
@@ -464,6 +478,14 @@ const RichTextEditor = forwardRef(
     }, []);
 
     // ── Images ────────────────────────────────────────────────────────────────
+
+    // Call immediately before any insertHTML so the resulting onChange isn't
+    // read as typing. Inserting a timestamp or a screenshot is a capture of the
+    // current moment — pausing the media there is the opposite of what's wanted,
+    // and for a screenshot it would change the very frame being captured.
+    const suppressTypingSignal = useCallback(() => {
+      suppressTypingUntilRef.current = Date.now() + PROGRAMMATIC_EDIT_WINDOW_MS;
+    }, []);
 
     const handleImagePickerResult = useCallback(async result => {
       if (!result || !result.data) {
@@ -529,7 +551,9 @@ const RichTextEditor = forwardRef(
         }
         html += `\n      </div>\n      <div><br></div>\n    `;
 
+        suppressTypingSignal();
         await richText.current?.insertHTML(html);
+        suppressTypingSignal();
         richText.current?.insertHTML(
           `<button contenteditable="false" style="background:transparent;border:none;padding:0;font-size:1px;color:transparent;">.</button><div><br></div>`,
         );
@@ -538,7 +562,7 @@ const RichTextEditor = forwardRef(
         console.error('🔴 handleImagePickerResult error:', error);
         Alert.alert('Error', 'Something went wrong while handling the image.');
       }
-    }, [saveImageInBackground, webViewRef, playerRef]);
+    }, [saveImageInBackground, webViewRef, playerRef, suppressTypingSignal]);
 
     // ── Timestamps ────────────────────────────────────────────────────────────
 
@@ -557,9 +581,10 @@ const RichTextEditor = forwardRef(
         </button>
         <div><br></div>
       `;
+      suppressTypingSignal();
       richText.current?.insertHTML(timestampHtml);
       richText.current?.focusContentEditor();
-    }, []);
+    }, [suppressTypingSignal]);
 
     const addTimestampCb = useCallback(() => {
       const time = playerRef?.current?.getCurrentTime();
@@ -606,6 +631,9 @@ const RichTextEditor = forwardRef(
     // ── RichEditor onChange ───────────────────────────────────────────────────
 
     const handleEditorChange = useCallback(descriptionText => {
+      // Whether this is the post-load onChange, before the block below consumes
+      // the flag — that one is the editor rendering stored content, not typing.
+      const isLoadEcho = awaitingContentRef.current;
       // VERIFY bridge cost: payload size per keystroke. Should stay small
       // (file:// URIs) and NOT scale with image count (no base64 leaking in).
       // console.log(
@@ -624,9 +652,19 @@ const RichTextEditor = forwardRef(
       latestHtmlContentRef.current = descriptionText;
       if (noteIdRef.current && !isLoadingRef.current) {
         debouncedSaveNote(descriptionText);
+        // Real editing, so hold the media (auto-pause-while-typing). Excludes
+        // the load echo, read-only mode, and the echo of a programmatic insert
+        // — all cases where onChange fires without anyone touching the keyboard.
+        if (
+          !isLoadEcho &&
+          isEditableRef.current &&
+          Date.now() >= suppressTypingUntilRef.current
+        ) {
+          onTypingActivity?.();
+        }
       }
       onContentChange?.(descriptionText);
-    }, [debouncedSaveNote, onContentChange]);
+    }, [debouncedSaveNote, onContentChange, onTypingActivity]);
 
     // ── Title input callbacks ─────────────────────────────────────────────────
 

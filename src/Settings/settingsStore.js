@@ -16,6 +16,8 @@ const useSettingsStore = create((set, get) => ({
     SPECIAL_BACKUP_ALLOWED: true,
     LAST_SPECIAL_BACKUP_KEY: null,
     autoplay: true,
+    // Pause the media while a note is being typed, resume once typing stops.
+    autoPauseOnTyping: true,
   },
 
   // Initialize the store by loading settings from database
@@ -47,6 +49,7 @@ const useSettingsStore = create((set, get) => ({
       SPECIAL_BACKUP_ALLOWED: true,
       LAST_SPECIAL_BACKUP_KEY: null,
       autoplay: true,
+      autoPauseOnTyping: true,
     };
   },
 
@@ -72,6 +75,7 @@ const useSettingsStore = create((set, get) => ({
           key === 'BACKUP_TASK_SCHEDULED' ||
           key === 'SPECIAL_BACKUP_ALLOWED' ||
           key === 'autoplay' ||
+          key === 'autoPauseOnTyping' ||
           typeof value === 'boolean'
         ) {
           storedValue = value ? '1' : '0';

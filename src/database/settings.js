@@ -6,7 +6,7 @@ export const getSetting = async key => {
   const db = getUserDatabase().getDb();
   const fastdb = db || getDb();
   // Define known special key types
-  const BOOLEAN_KEYS = ['BACKUP_ENABLED', 'BACKUP_TASK_SCHEDULED', 'SPECIAL_BACKUP_ALLOWED', 'autoplay'];
+  const BOOLEAN_KEYS = ['BACKUP_ENABLED', 'BACKUP_TASK_SCHEDULED', 'SPECIAL_BACKUP_ALLOWED', 'autoplay', 'autoPauseOnTyping'];
   const ARRAY_KEYS = [];
   // const ARRAY_KEYS = ['Mentor Mobile Numbers'];
 
@@ -56,7 +56,7 @@ export const getAllSettings = async callback => {
   const fastdb = getDb();
 
   // Define known special key types
-  const BOOLEAN_KEYS = ['BACKUP_ENABLED', 'BACKUP_TASK_SCHEDULED', 'SPECIAL_BACKUP_ALLOWED', 'autoplay'];
+  const BOOLEAN_KEYS = ['BACKUP_ENABLED', 'BACKUP_TASK_SCHEDULED', 'SPECIAL_BACKUP_ALLOWED', 'autoplay', 'autoPauseOnTyping'];
   const ARRAY_KEYS = [];
 
   fastdb.transaction(tx => {

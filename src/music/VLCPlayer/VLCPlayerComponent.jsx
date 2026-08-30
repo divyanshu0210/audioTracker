@@ -64,19 +64,6 @@ const VLCPlayerComponent = forwardRef(
       })),
     );
 
-    // ─── Imperative API ───────────────────────────────────────────────────────
-    useImperativeHandle(
-      ref,
-      () => ({
-        handleSeek,
-        getCurrentTime: () => currentTimeRef.current,
-        getIsPaused: () => isPaused,
-        togglePlayPause,
-        getDuration: () => durationRef.current,
-      }),
-      [handleSeek, togglePlayPause],
-    );
-
     // In PiP the window is only big enough for the video itself, and Android
     // doesn't deliver touches to it anyway — every control here is dead weight.
     const {isInPip} = usePipMode();
@@ -238,6 +225,28 @@ const VLCPlayerComponent = forwardRef(
     const changePlaybackRate = useCallback(() => {
       setPlaybackRateIndex(prev => (prev + 1) % playbackRates.length);
     }, []);
+
+    // ─── Imperative API ───────────────────────────────────────────────────────
+    // Must come *after* everything it closes over. It used to sit at the top of
+    // the component, where `handleSeek`/`togglePlayPause` were still undefined:
+    // babel lowers `const` to `var`, so instead of a TDZ error the dep array
+    // silently evaluated to [undefined, undefined] on every render, never
+    // changed, and the handle stayed frozen at the first render's closures.
+    // togglePlayPause then captured isPaused === false forever, so calling it
+    // through the ref always ran setIsPaused(true) — it could pause but never
+    // resume. The in-app buttons were unaffected: they take togglePlayPause as
+    // a prop, which is rebuilt every render.
+    useImperativeHandle(
+      ref,
+      () => ({
+        handleSeek,
+        getCurrentTime: () => currentTimeRef.current,
+        getIsPaused: () => isPaused,
+        togglePlayPause,
+        getDuration: () => durationRef.current,
+      }),
+      [handleSeek, togglePlayPause, isPaused],
+    );
 
     // ─── Render ───────────────────────────────────────────────────────────────
     return (

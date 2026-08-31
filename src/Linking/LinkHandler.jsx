@@ -8,6 +8,10 @@ import { useMediaStore } from '../stores/useMediaStore';
 import { useShallow } from 'zustand/react/shallow';
 import { navigationRef } from '../handlers/navigationRef';
 import { setPendingRoute } from '../handlers/navigationIntent';
+import {
+  handleIncomingNoteFile,
+  looksLikeNoteFile,
+} from '../notes/share/handleIncomingNoteFile';
 
 // The download foreground-service notification opens this URL.
 const DOWNLOADS_URL = 'audiotracker://downloads';
@@ -51,6 +55,9 @@ const {userInfo} = useAppState();
       const url = await Linking.getInitialURL();
       if (url === DOWNLOADS_URL) return routeToDownloads({cold: true});
       if (!url || url.startsWith('audiotracker://')) return;
+      // A .atnote bundle is ours to import, not a media link — intercept
+      // before handleLinkSubmit tries to make a library item out of it.
+      if (looksLikeNoteFile(url)) return handleIncomingNoteFile(url);
       if (userInfo && !hasHandledInitialUrl.current) {
         console.log('Initial URL got user:', url);
         handleLinkSubmit(url, { setDriveLinksList, setItems, setDeviceFiles });
@@ -63,6 +70,7 @@ const {userInfo} = useAppState();
     const handleURL = ({ url }) => {
       if (url === DOWNLOADS_URL) return routeToDownloads({cold: false});
       if (url.startsWith('audiotracker://')) return;
+      if (looksLikeNoteFile(url)) return handleIncomingNoteFile(url);
       console.log('URL opened while running:', url, userInfo);
       if (userInfo && !hasHandledInitialUrl.current) {
         handleLinkSubmit(url, { setDriveLinksList, setItems, setDeviceFiles });

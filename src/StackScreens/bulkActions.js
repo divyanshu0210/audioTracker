@@ -15,6 +15,7 @@ import {moveNotesToDefaultNotebook} from '../database/C';
 import {moveNoteToNotebook, updateItemFields} from '../database/U';
 import {addItemToCategory} from '../categories/catDB';
 import {convertToPdf} from '../notes/utils/convertToPDF';
+import {shareNotesAsFile} from '../notes/share/shareNoteFile';
 import Share from 'react-native-share';
 import {useNotesStore} from '../stores/useNotesStore';
 import {useMediaStore} from '../stores/useMediaStore';
@@ -366,3 +367,10 @@ export const bulkShareNotesAsPdf = async items => {
 
   return {succeeded: filePaths.length, failed};
 };
+
+// Shares the selection as a single .atnote bundle another audioTracker can
+// import. No per-note limit like MAX_PDF_SHARE_COUNT: there is no native
+// rendering step here, just reading rows and serialising them, and the result
+// is one attachment however many notes go in — the two things that made a
+// large PDF batch slow and unwieldy.
+export const bulkShareNotesAsFile = async items => shareNotesAsFile(items);

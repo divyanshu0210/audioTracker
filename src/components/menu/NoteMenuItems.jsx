@@ -9,6 +9,7 @@ import {deleteNoteById} from '../../notes/richDB.js';
 import {convertToPdf} from '../../notes/utils/convertToPDF.js';
 import {convertToDocx} from '../../notes/utils/covertToDOCX.js';
 import CommonMenuItems from './CommonMenuItems.jsx';
+import {shareNotesAsFile} from '../../notes/share/shareNoteFile.js';
 import { useNotesStore } from '../../stores/useNotesStore.js';
 import { useShallow } from 'zustand/react/shallow';
 
@@ -85,6 +86,18 @@ const {bottomSheetRef} = useAppState();
     bottomSheetRef.current?.snapToIndex(0);
   }, [bottomSheetRef]);
 
+  // Shares the note as a .atnote bundle — a copy another audioTracker can
+  // import with its images intact, unlike the PDF export which is a flat
+  // read-only rendering.
+  const handleShareAsNoteFile = async () => {
+    try {
+      await shareNotesAsFile([{id: item.rowid, title: item.noteTitle || item.title}]);
+    } catch (error) {
+      // Cancelling the share sheet rejects here too — same as handleExport.
+      console.log('Share as note file cancelled or failed:', error);
+    }
+  };
+
   return (
     <View>
       <MenuItem
@@ -93,6 +106,14 @@ const {bottomSheetRef} = useAppState();
           handleExport(item.rowid, 'pdf');
         }}>
         <Text style={styles.menuItemText}>Share as PDF</Text>
+      </MenuItem>
+
+      <MenuItem
+        onPress={() => {
+          hideMenu();
+          handleShareAsNoteFile();
+        }}>
+        <Text style={styles.menuItemText}>Share as Note File</Text>
       </MenuItem>
 
       {/* <MenuItem onPress={hideMenu}>

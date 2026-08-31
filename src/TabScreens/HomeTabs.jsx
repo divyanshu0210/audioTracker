@@ -183,6 +183,21 @@ const HomeTabs = ({categoryId}) => {
               marginHorizontal: -15,
             },
           }}>
+            
+          <Tab.Screen
+            name="IDT"
+            component={IskconAudioView}
+            // options={{
+            //   tabBarLabel: () => null,
+            //   tabBarIcon: () => (
+            //     <Image
+            //       source={require('../assets/idt_logo.jpg')}
+            //       style={styles.iskconTabIcon}
+            //       resizeMode="contain"
+            //     />
+            //   ),
+            // }}
+          />
           <Tab.Screen name="YouTube">
             {() =>
               renderTabContent(MainYouTubeView, {
@@ -207,20 +222,6 @@ const HomeTabs = ({categoryId}) => {
             }
           </Tab.Screen>
 
-          <Tab.Screen
-            name="IDT"
-            component={IskconAudioView}
-            options={{
-              tabBarLabel: () => null,
-              tabBarIcon: () => (
-                <Image
-                  source={require('../assets/idt_logo.jpg')}
-                  style={styles.iskconTabIcon}
-                  resizeMode="contain"
-                />
-              ),
-            }}
-          />
 
           <Tab.Screen name="Notebooks">
             {() =>
@@ -230,7 +231,7 @@ const HomeTabs = ({categoryId}) => {
             }
           </Tab.Screen>
 
-          <Tab.Screen name={categoryId ? `Notes` : 'All Notes'}>
+          <Tab.Screen name={categoryId ? `Notes` : 'Notes'}>
             {
               () => renderTabContent(AllNotesScreen, {categoryId})
               // renderTabContent(AllNotesScreen, {categoryId, key: homeReloadKey+categoryId})
@@ -246,7 +247,6 @@ export default track(HomeTabs);
 
 const styles = StyleSheet.create({
   iskconTabIcon: {
-    width: 100,
     width: 100,
     height: 26,
   },

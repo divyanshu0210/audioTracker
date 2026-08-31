@@ -5,6 +5,10 @@ import { handleLinkSubmit } from './utils/handleLinkSubmit'; // The logic for ha
 import { useAppState } from '../contexts/AppStateContext'; // Access app state, e.g., userInfo
 import { useMediaStore } from '../stores/useMediaStore';
 import { useShallow } from 'zustand/react/shallow';
+import {
+  handleIncomingNoteFile,
+  looksLikeNoteFile,
+} from '../notes/share/handleIncomingNoteFile';
 
 const useSharedContentHandler = () => {
 const {
@@ -28,6 +32,15 @@ const {userInfo} = useAppState();
       if (!item) return;
 console.log(item)
       const { data, mimeType } = item;
+
+      // Note bundles are handled here rather than by handleLinkSubmit, and
+      // without waiting for userInfo — importing into the local DB needs no
+      // account, and holding it back would silently drop the file when the
+      // share arrives on a cold start.
+      if (looksLikeNoteFile(data, mimeType)) {
+        handleIncomingNoteFile(data);
+        return;
+      }
 
       if (userInfo && !hasHandledInitialUrl.current) {
         console.log('Shared data received for user:', data, mimeType);

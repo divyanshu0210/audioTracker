@@ -80,6 +80,42 @@
             <category android:name="android.intent.category.BROWSABLE"/>
             <data android:scheme="audiotracker"/>
         </intent-filter>
+
+        <!-- Shared note bundles (.atnote). Two filters because the two ways
+             one arrives carry different information:
+
+             1. Our own share sets the custom MIME type, which survives a
+                content:// URI even though such URIs usually have no filename.
+             2. Mail and chat apps generally drop the type (sending
+                application/octet-stream) and leave only the extension, which
+                is what pathPattern matches. That only works when the URI
+                actually has a path — a limitation of Android, not of this
+                filter; the SEND route in ShareHandler is the fallback. -->
+        <intent-filter>
+            <action android:name="android.intent.action.VIEW"/>
+            <category android:name="android.intent.category.DEFAULT"/>
+            <category android:name="android.intent.category.BROWSABLE"/>
+            <data android:mimeType="application/vnd.audiotracker.note"/>
+        </intent-filter>
+
+        <intent-filter>
+            <action android:name="android.intent.action.VIEW"/>
+            <category android:name="android.intent.category.DEFAULT"/>
+            <category android:name="android.intent.category.BROWSABLE"/>
+            <data android:scheme="file"/>
+            <data android:scheme="content"/>
+            <data android:host="*"/>
+            <data android:mimeType="*/*"/>
+            <data android:pathPattern=".*\.atnote"/>
+            <data android:pathPattern=".*\..*\.atnote"/>
+            <data android:pathPattern=".*\..*\..*\.atnote"/>
+        </intent-filter>
+
+        <intent-filter>
+            <action android:name="android.intent.action.SEND"/>
+            <category android:name="android.intent.category.DEFAULT"/>
+            <data android:mimeType="application/vnd.audiotracker.note"/>
+        </intent-filter>
       </activity>
 
   <service

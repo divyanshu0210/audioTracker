@@ -307,6 +307,90 @@ export const getOrCreateDefaultNotebook = async () => {
 export const getOrCreateDefaultNotebookId = async () =>
   (await getOrCreateDefaultNotebook()).id;
 
+// General-purpose sibling of getOrCreateDefaultNotebook, used by note-file
+// import to land shared notes in their own notebook.
+//
+// Deliberately a separate function rather than a refactor of the default-
+// notebook path: that one carries specific revival behaviour (a soft-deleted
+// Default Notebook must be restored, not duplicated, or every later
+// "delete notebook, keep notes" strands its notes) which has been got wrong
+// before, and import has no need to be entangled with it. Same revive-rather-
+// than-duplicate rule applies here for the same reason — a user who deleted
+// "Shared Notes" and then opens another bundle should get it back, not a
+// second one alongside it.
+export const getOrCreateNotebookByTitle = async (title, color) => {
+  const fastdb = getDb();
+
+  return new Promise((resolve, reject) => {
+    fastdb.transaction(tx => {
+      tx.executeSql(
+        `SELECT id, title, color, created_at, deleted_at FROM notebooks
+           WHERE title = ? LIMIT 1;`,
+        [title],
+        (_, result) => {
+          if (result.rows.length > 0) {
+            const notebook = result.rows.item(0);
+            if (!notebook.deleted_at) {
+              resolve(notebook);
+              return;
+            }
+            tx.executeSql(
+              `UPDATE notebooks SET deleted_at = NULL WHERE id = ?;`,
+              [notebook.id],
+              () => {
+                const restored = {...notebook, deleted_at: null};
+                useNotesStore.getState().upsertNotebook(restored);
+                resolve(restored);
+              },
+              (__, error) => {
+                console.error(`Error restoring notebook "${title}":`, error);
+                reject(error);
+                return false;
+              },
+            );
+            return;
+          }
+
+          tx.executeSql(
+            `INSERT INTO notebooks (title, color) VALUES (?, ?);`,
+            [title, color || DEFAULT_NOTEBOOK_COLOR],
+            (__, insertResult) => {
+              // Read back rather than assembling the row here — SQLite's
+              // created_at format differs from toISOString() and the notebook
+              // sorts to the wrong place until the next refetch otherwise.
+              tx.executeSql(
+                `SELECT id, title, color, created_at, deleted_at FROM notebooks
+                   WHERE id = ?;`,
+                [insertResult.insertId],
+                (___, inserted) => {
+                  const created = inserted.rows.item(0);
+                  useNotesStore.getState().upsertNotebook(created);
+                  resolve(created);
+                },
+                (___, error) => {
+                  console.error(`Error reading back notebook "${title}":`, error);
+                  reject(error);
+                  return false;
+                },
+              );
+            },
+            (__, error) => {
+              console.error(`Error inserting notebook "${title}":`, error);
+              reject(error);
+              return false;
+            },
+          );
+        },
+        (_, error) => {
+          console.error(`Error checking notebook "${title}":`, error);
+          reject(error);
+          return false;
+        },
+      );
+    });
+  });
+};
+
 // Resolves the notebook the notes landed in, so the caller can repoint them in
 // the store as well — without it All Notes goes on showing the deleted
 // notebook's name and colour under each note until the next refetch.

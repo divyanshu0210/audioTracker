@@ -18,6 +18,7 @@ import {navigationRef} from '../handlers/navigationRef';
 import {ItemTypes} from '../contexts/constants';
 import {
   bulkMoveNotesToNotebook,
+  bulkShareNotesAsFile,
   bulkShareNotesAsPdf,
   describeFailures,
   getMovableNotes,
@@ -25,10 +26,12 @@ import {
 } from './bulkActions';
 import BulkDeleteConfirmModal from './BulkDeleteConfirmModal';
 import SelectNotebookModal from '../components/modals/SelectNotebookModal';
+import ShareNotesSheet from '../components/modals/ShareNotesSheet';
 
 const SelectionHeader = ({type, screen, allItemsInThisList}) => {
   const [confirmVisible, setConfirmVisible] = useState(false);
   const [moveVisible, setMoveVisible] = useState(false);
+  const [shareVisible, setShareVisible] = useState(false);
   const [busy, setBusy] = useState(false);
 
   const {
@@ -47,6 +50,11 @@ const SelectionHeader = ({type, screen, allItemsInThisList}) => {
       setCategoryModalBulkItems: state.setCategoryModalBulkItems,
       setAddToCategoryModalVisible: state.setAddToCategoryModalVisible,
     })),
+  );
+
+  const selectedNotes = useMemo(
+    () => selectedItems.filter(i => i.type === ItemTypes.NOTE),
+    [selectedItems],
   );
 
   const selectedItemsOfThisType = useMemo(
@@ -149,15 +157,9 @@ const SelectionHeader = ({type, screen, allItemsInThisList}) => {
   );
 
   const handleShareAsPdf = useCallback(async () => {
-    const notes = selectedItems.filter(i => i.type === ItemTypes.NOTE);
+    const notes = selectedNotes;
     if (!notes.length) return;
-    if (notes.length > MAX_PDF_SHARE_COUNT) {
-      Alert.alert(
-        'Too Many Notes Selected',
-        `You can share up to ${MAX_PDF_SHARE_COUNT} notes as PDF at once. Please select fewer notes and try again.`,
-      );
-      return;
-    }
+    setShareVisible(false);
     setBusy(true);
     try {
       const {succeeded, failed} = await bulkShareNotesAsPdf(notes);
@@ -174,7 +176,33 @@ const SelectionHeader = ({type, screen, allItemsInThisList}) => {
     } finally {
       setBusy(false);
     }
-  }, [selectedItems]);
+  }, [selectedNotes]);
+
+  // Shares the whole selection as one .atnote bundle another audioTracker can
+  // import. Unlike the PDF path there's no count limit — see
+  // bulkShareNotesAsFile.
+  const handleShareAsNoteFile = useCallback(async () => {
+    const notes = selectedNotes;
+    if (!notes.length) return;
+    setShareVisible(false);
+    setBusy(true);
+    try {
+      const {succeeded, failed} = await bulkShareNotesAsFile(notes);
+      if (failed.length) {
+        Alert.alert(
+          'Some notes failed',
+          `Shared ${succeeded} of ${notes.length} notes.
+
+${describeFailures(failed)}`,
+        );
+      }
+    } catch (error) {
+      // Cancelling the share sheet rejects here — same as handleShareAsPdf.
+      console.log('Share as note file cancelled or failed:', error);
+    } finally {
+      setBusy(false);
+    }
+  }, [selectedNotes]);
 
   if (!selectionMode) return null;
 
@@ -192,12 +220,17 @@ const SelectionHeader = ({type, screen, allItemsInThisList}) => {
         </View>
 
         <View style={styles.rightSection}>
+          {/* One entry point for both export formats — the sheet picks
+              between them. Distinct from the Fontisto share-a below, which
+              forwards the selection to a mentor rather than exporting it. */}
           {type === ItemTypes.NOTE && (
-            <TouchableOpacity onPress={handleShareAsPdf} disabled={busy}>
+            <TouchableOpacity
+              onPress={() => setShareVisible(true)}
+              disabled={busy}>
               {busy ? (
                 <ActivityIndicator size="small" color="#007AFF" />
               ) : (
-                <MaterialIcons name="picture-as-pdf" size={22} color="#007AFF" />
+                <MaterialIcons name="ios-share" size={22} color="#007AFF" />
               )}
             </TouchableOpacity>
           )}
@@ -227,6 +260,23 @@ const SelectionHeader = ({type, screen, allItemsInThisList}) => {
           </TouchableOpacity>
         </View>
       </View>
+
+      <ShareNotesSheet
+        visible={shareVisible}
+        onClose={() => setShareVisible(false)}
+        noteCount={selectedNotes.length}
+        onShareAsPdf={handleShareAsPdf}
+        onShareAsCopy={handleShareAsNoteFile}
+        // PDF generation is sequential and native, so a large batch is slow
+        // and can choke the receiving app — the limit lives here now instead
+        // of in an Alert fired after the user already chose PDF.
+        pdfDisabled={selectedNotes.length > MAX_PDF_SHARE_COUNT}
+        pdfDescription={
+          selectedNotes.length > MAX_PDF_SHARE_COUNT
+            ? `Up to ${MAX_PDF_SHARE_COUNT} notes at a time`
+            : undefined
+        }
+      />
 
       <SelectNotebookModal
         visible={moveVisible}

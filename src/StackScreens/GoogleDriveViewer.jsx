@@ -1,4 +1,3 @@
-import {DRIVE_API_KEY} from '@env';
 import {
   useFocusEffect,
   useNavigation,
@@ -14,6 +13,7 @@ import BaseMediaListComponent from './BaseMediaListComponent';
 import {ItemTypes, ScreenTypes} from '../contexts/constants';
 import AppHeader from '../components/headers/AppHeader';
 import useLoadingStore from '../stores/useLoadingStore';
+import {getGoogleAccessToken} from '../auth/tokenManager';
 
 export const fetchDriveItems = async (
   source_id,
@@ -58,8 +58,19 @@ export const fetchDriveItems = async (
 
     // ── 3. Not in DB → fetch from Google Drive API ────────────────────────────
     console.log('Not found in DB, fetching via API...');
+    // Ask as the signed-in user, not with the bare API key. An API key only
+    // sees "anyone with the link" content, so a folder from the user's own
+    // Drive listed as empty: the query matched nothing visible to an
+    // anonymous caller and came back 200 with files: [] — no error to show,
+    // just a folder that looked empty. handleDriveLink already reads the
+    // folder's own metadata with this token, which is why adding it worked
+    // while opening it did not.
+    const accessToken = await getGoogleAccessToken();
     const response = await axios.get(
-      `https://www.googleapis.com/drive/v3/files?q='${source_id}'+in+parents&key=${DRIVE_API_KEY}&fields=files(id,name,mimeType)`,
+      `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(
+        `'${source_id}' in parents and trashed = false`,
+      )}&fields=files(id,name,mimeType)&pageSize=1000`,
+      {headers: {Authorization: `Bearer ${accessToken}`}},
     );
 
     const driveFiles = response.data.files;

@@ -2,7 +2,6 @@ import React, {useEffect} from 'react';
 import {ToastAndroid, TouchableOpacity} from 'react-native';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import RNFS from 'react-native-fs';
-import {DRIVE_API_KEY} from '@env';
 import {useMediaStore} from '../../stores/useMediaStore';
 import {useShallow} from 'zustand/react/shallow';
 import useDownloadStore from '../../stores/useDownloadStore';
@@ -61,7 +60,7 @@ export const DownloadButton = ({file}) => {
       return;
     }
 
-    const url = `https://www.googleapis.com/drive/v3/files/${file.source_id}?alt=media&key=${DRIVE_API_KEY}`;
+    const url = `https://www.googleapis.com/drive/v3/files/${file.source_id}?alt=media`;
     await enqueueDownload({
       id: file.id,
       sourceId: file.source_id,
@@ -70,6 +69,7 @@ export const DownloadButton = ({file}) => {
       localPath,
       type: file.type,
       mimeType: file.mimeType,
+      googleAuth: true,
     });
     ToastAndroid.show(
       'Preparing download. See notification for details',

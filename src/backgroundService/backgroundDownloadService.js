@@ -5,6 +5,7 @@ import {updateItemFields} from '../database/U';
 import useDownloadStore from '../stores/useDownloadStore';
 import {requestPermissions} from './newBackgroundService';
 import {onDisplayNotification} from '../notification/notificationService';
+import {getGoogleAccessToken} from '../auth/tokenManager';
 
 const QUEUE_KEY = '@download_queue';
 
@@ -88,9 +89,22 @@ const downloadSingleFile = async file => {
   fileProgress.set(file.sourceId, {total: 0, written: 0});
 
   try {
+    // Drive downloads have to go out as the signed-in user: an API key is an
+    // anonymous caller and can only fetch "anyone with the link" files, so
+    // anything private 403'd. The token is resolved here rather than baked
+    // into the queued item because the queue is persisted and survives an app
+    // kill, while an access token expires in about an hour — a restored
+    // download would carry a dead one. Gated on an explicit flag rather than
+    // sniffing the URL so third-party downloads (iskcon_file) never get the
+    // user's Google token attached.
+    const headers = file.googleAuth
+      ? {Authorization: `Bearer ${await getGoogleAccessToken()}`}
+      : {};
+
     const {promise} = RNFS.downloadFile({
       fromUrl: file.url,
       toFile: file.localPath,
+      headers,
       progressDivider: 2,
       begin: res => {
         activeJobIds.set(file.sourceId, res.jobId);
@@ -221,13 +235,14 @@ export const enqueueDownload = async ({
   localPath,
   type,
   mimeType,
+  googleAuth = false,
 }) => {
   const {setDownload} = useDownloadStore.getState();
 
   const queue = await getQueue();
   if (queue.some(f => f.sourceId === sourceId)) return;
 
-  const file = {id, sourceId, title, url, localPath, type, mimeType};
+  const file = {id, sourceId, title, url, localPath, type, mimeType, googleAuth};
   await saveQueue([...queue, file]);
   // Stash title/type/mimeType in the store too so the Downloads screen can
   // render an in-progress card (status updates merge over this).

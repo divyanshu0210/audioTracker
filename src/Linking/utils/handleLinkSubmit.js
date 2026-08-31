@@ -1,6 +1,6 @@
 import axios from 'axios';
 import {Alert, Linking, ToastAndroid} from 'react-native';
-import {YOUTUBE_API_KEY, DRIVE_API_KEY} from '@env';
+import {YOUTUBE_API_KEY} from '@env';
 import {
   getItemBySourceId,
   upsertItem,

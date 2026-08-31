@@ -1,4 +1,3 @@
-import {DRIVE_API_KEY} from '@env';
 import React, {useEffect, useState} from 'react';
 import {
   View,
@@ -11,6 +10,7 @@ import {
   SafeAreaView,
 } from 'react-native';
 import axios from 'axios';
+import {getGoogleAccessToken} from '../auth/tokenManager';
 
 const GDriveFolderOverview = ({route}) => {
   const [driveLink, setDriveLink] = useState('');
@@ -49,10 +49,13 @@ const GDriveFolderOverview = ({route}) => {
     return tree;
   };
 
-  const fetchFolderContents = async (folderId, apiKey, path = '') => {
+  const fetchFolderContents = async (folderId, accessToken, path = '') => {
     try {
       const response = await axios.get(
-        `https://www.googleapis.com/drive/v3/files?q='${folderId}'+in+parents&fields=files(id,name,mimeType)&key=${apiKey}`,
+        `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(
+          `'${folderId}' in parents and trashed = false`,
+        )}&fields=files(id,name,mimeType)&pageSize=1000`,
+        {headers: {Authorization: `Bearer ${accessToken}`}},
       );
 
       let files = [];
@@ -93,22 +96,26 @@ const GDriveFolderOverview = ({route}) => {
     }
 
     try {
+      const accessToken = await getGoogleAccessToken();
       const metadataResponse = await axios.get(
-        `https://www.googleapis.com/drive/v3/files/${fileId}?fields=name,mimeType&key=${DRIVE_API_KEY}`,
+        `https://www.googleapis.com/drive/v3/files/${fileId}?fields=name,mimeType`,
+        {headers: {Authorization: `Bearer ${accessToken}`}},
       );
 
       const {name, mimeType} = metadataResponse.data;
 
       if (mimeType === 'application/vnd.google-apps.folder') {
         setFolderName(name);
-        const files = await fetchFolderContents(fileId, DRIVE_API_KEY);
+        const files = await fetchFolderContents(fileId, accessToken);
         setFileTree(buildTree(files));
       } else {
         setFolderName(null);
         setFileTree({[name]: {}});
       }
     } catch (err) {
-      setError('Failed to fetch information. Check API key or link.');
+      setError(
+        'Failed to fetch information. Check the link, or whether this account has access to it.',
+      );
     }
 
     setLoading(false);

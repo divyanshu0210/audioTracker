@@ -1,6 +1,5 @@
-import {StyleSheet, View, Pressable, Alert} from 'react-native';
+import {StyleSheet, View, Pressable, Alert, ToastAndroid} from 'react-native';
 import React, {useCallback, useMemo, useRef} from 'react';
-import RNFS from 'react-native-fs';
 import {isAudioOrVideo} from '../Linking/utils/handleLinkSubmit';
 import YouTubeItem from './YouTubeItem';
 import DeviceItem from './DeviceItem';
@@ -13,13 +12,21 @@ import {playFile as playIskconFile} from '../scrap/iskconActions';
 import NoteItem from '../notes/notesListing/NoteItem';
 import {CategoryItem} from '../categories/CategoryItem';
 import {useMediaStore} from '../stores/useMediaStore';
+import RNFS from 'react-native-fs';
 import {useSelectionStore} from '../stores/useSelectionStore';
 import {useNotesStore} from '../stores/useNotesStore';
 import {navigationRef} from '../handlers/navigationRef';
 import {useShallow} from 'zustand/react/shallow';
 import {StackActions, useRoute} from '@react-navigation/core';
 
-const BaseItem = ({type, item, subtype, screen, onFolderPress}) => {
+const BaseItem = ({
+  type,
+  item,
+  subtype,
+  screen,
+  onFolderPress,
+  itemComponent,
+}) => {
    const route = useRoute();
   const currentRoute = route.name;
   const {setFolderStack} = useMediaStore(
@@ -191,8 +198,15 @@ const BaseItem = ({type, item, subtype, screen, onFolderPress}) => {
     const filePath = storeFile?.file_path ?? item.file_path ?? null;
 
     if (filePath && isAudioOrVideo(item.mimeType)) {
-      const exists = await RNFS.exists(filePath);
-      if (!exists) return;
+      // Checked, not repaired. Clearing file_path here would make the next tap
+      // fall through both of these branches — they're gated on filePath — and go
+      // back to doing nothing silently. DriveItem already renders a Download
+      // button off its own existence check, so the row is not misleading; the
+      // only thing missing was saying why the tap did nothing.
+      if (!(await RNFS.exists(filePath))) {
+        ToastAndroid.show('Download is no longer on this device', ToastAndroid.SHORT);
+        return;
+      }
       const dataSource =
         screen === ScreenTypes.IN ? nonFolderFilesInside : nonFolderFiles;
       if (screen === 'search' || !dataSource || dataSource.length === 0) {
@@ -207,8 +221,10 @@ const BaseItem = ({type, item, subtype, screen, onFolderPress}) => {
         currentIndex: startingIndex,
       });
     } else if (filePath) {
-      const exists = await RNFS.exists(filePath);
-      if (!exists) return;
+      if (!(await RNFS.exists(filePath))) {
+        ToastAndroid.show('Download is no longer on this device', ToastAndroid.SHORT);
+        return;
+      }
       FileViewer.open(filePath, {showOpenWithDialog: true}).catch(() => {
         Alert.alert(
           'Could not open file.',
@@ -299,11 +315,20 @@ const BaseItem = ({type, item, subtype, screen, onFolderPress}) => {
   }, [item, toggleSelection]);
 
   const renderItem = () => {
-    const Component = typeConfigMap[type]?.Component;
+    // itemComponent wins when a list supplies its own row visual — the rest
+    // of this component (press dispatch, selection, menu) is unchanged, so
+    // such a row behaves exactly like every other item in the app.
+    const Component = itemComponent ?? typeConfigMap[type]?.Component;
     return Component ? <Component item={item} screen={screen} /> : null;
   };
 
   const renderBaseMenu = () => {
+    // A caller-supplied visual can't be carrying its own menu, so the
+    // per-type answer must not suppress one here — drive says false only
+    // because DriveItem renders BaseMenu itself, and DriveItem is exactly
+    // what an override replaces. Without this, swapping the visual silently
+    // takes the menu away from every drive row in that list.
+    if (itemComponent) return true;
     const showMenuFn = typeConfigMap[type]?.showMenu;
     return showMenuFn ? showMenuFn(item, screen) : true;
   };

@@ -1,6 +1,6 @@
 import React, {useState} from 'react';
-import {StyleSheet, TouchableOpacity, View} from 'react-native';
-import {Menu} from 'react-native-material-menu';
+import {StyleSheet, Text, TouchableOpacity, View} from 'react-native';
+import {Menu, MenuItem} from 'react-native-material-menu';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
 import {useAppState} from '../../contexts/AppStateContext';
 import CommonMenuItems from './CommonMenuItems';
@@ -13,6 +13,7 @@ import {ItemTypes} from '../../contexts/constants';
 import { useSelectionStore } from '../../stores/useSelectionStore';
 import { useNotesStore } from '../../stores/useNotesStore';
 import { useShallow } from 'zustand/react/shallow';
+import {copyLink, getShareLink} from '../../Linking/utils/shareLink';
 
 const BaseMenu = ({item, type, screen}) => {
   const [visible, setVisible] = useState(false);
@@ -32,6 +33,12 @@ const {setSelectedNote} = useNotesStore(
     item?.rowid ||
     item?.source_id ||
     (type === 'notebook' && item?.id);
+
+  // Rebuilt from the item rather than stored on it — see getShareLink. Null
+  // for notes, notebooks, device files, and iskcon files whose remote url was
+  // overwritten by a download, so the entry just doesn't render for those
+  // rather than offering a copy that would hand over nothing.
+  const shareLink = getShareLink(item);
 
   const hideMenu = () => setVisible(false);
   const showMenu = () => setVisible(true);
@@ -108,6 +115,15 @@ const {setSelectedNote} = useNotesStore(
           screen={screen}
           showAddNote={showAddNote()}
         />
+        {shareLink && (
+          <MenuItem
+            onPress={() => {
+              hideMenu();
+              copyLink(shareLink);
+            }}>
+            <Text style={styles.menuItemText}>Copy Link</Text>
+          </MenuItem>
+        )}
         {renderMenuItems()}
       </Menu>
     </View>
@@ -120,6 +136,11 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
     alignItems: 'center',
+  },
+  menuItemText: {
+    fontSize: 16,
+    color: '#333',
+    paddingVertical: 8,
   },
   menuContainer: {
     borderRadius: 8,

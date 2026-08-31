@@ -90,11 +90,18 @@ export const getChildrenByParent = async (parentId = null, types = null) => {
 };
 // ------------------------------ downloads
 
-// "Downloaded" = a real local copy exists on disk. device_file's file_path is
-// always local; drive_file / iskcon_file only get a local file_path once
-// downloaded (iskcon_file's file_path is the remote URL — http(s) — until
-// then, so those are excluded by the NOT LIKE 'http%' guard). youtube_video
-// has no file_path/download concept, so it's naturally excluded too.
+// "Downloaded" = fetched from somewhere else and now held on disk. That means
+// drive_file and iskcon_file, which only get a local file_path once downloaded
+// (iskcon_file's is the remote URL — http(s) — until then, hence the NOT LIKE
+// 'http%' guard). youtube_video has no file_path at all, so it never matches.
+//
+// device_file is excluded explicitly, though its file_path is always local and
+// it would otherwise qualify. A device file was never downloaded:
+// handleFileProcessing copies a picked file into the app's directory and stores
+// that path at import, so one has a local path from the moment it exists and
+// there is no "not yet downloaded" state to tell it apart from. Matching them
+// filled the Downloads screen with every local import, which the Device tab
+// already lists.
 export const getDownloadedItems = () => {
   const fastdb = getDb();
   return new Promise((resolve, reject) => {
@@ -105,6 +112,7 @@ export const getDownloadedItems = () => {
          WHERE items.deleted_at IS NULL
            AND items.file_path IS NOT NULL
            AND items.file_path NOT LIKE 'http%'
+           AND items.type != 'device_file'
          ORDER BY datetime(items.created_at) DESC;`,
         [],
         (_, results) => {

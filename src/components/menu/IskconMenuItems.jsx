@@ -8,7 +8,7 @@
 // queued/downloading — so the "download finished" store sync can't live
 // here; it's handled in IskconItem instead, which stays mounted throughout.
 
-import React from 'react';
+import React, {useEffect, useState} from 'react';
 import {Alert, StyleSheet, Text, ToastAndroid} from 'react-native';
 import RNFS from 'react-native-fs';
 import {MenuItem} from 'react-native-material-menu';
@@ -17,13 +17,43 @@ import {updateItemFields} from '../../database/U';
 import {useMediaStore} from '../../stores/useMediaStore';
 import {enqueueDownload} from '../../backgroundService/backgroundDownloadService';
 import {ensureDbItem, getLocalFilePath} from '../../scrap/iskconActions';
+import useDownloadStore from '../../stores/useDownloadStore';
 
 const IskconMenuItems = ({item, hideMenu}) => {
   const {setIskconEntries} = useMediaStore(
     useShallow(state => ({setIskconEntries: state.setIskconEntries})),
   );
 
-  const downloaded = !!item.file_path;
+  // Two things were wrong with reading `!!item.file_path` here.
+  //
+  // An iskcon file's file_path holds the remote url until a copy is actually
+  // downloaded — ensureDbItem parks it there so the file is streamable — so a
+  // file that had only ever been played looked downloaded, and the menu offered
+  // to remove a download that was never made. A local copy means a non-http
+  // path.
+  //
+  // And the path outlives the file: Android can reclaim the app's files
+  // directory, and a file manager can delete out of it. Every other place
+  // showing a download state asks the filesystem — IskconItem's badge a few
+  // lines away does exactly this — so this asks too. It costs one check per
+  // menu open rather than per row, because react-native-material-menu keeps its
+  // children in a Modal, which renders nothing while closed.
+  const claimsLocalCopy =
+    !!item.file_path && !item.file_path.startsWith('http');
+  const [downloaded, setDownloaded] = useState(claimsLocalCopy);
+
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      const exists = claimsLocalCopy
+        ? await RNFS.exists(item.file_path).catch(() => false)
+        : false;
+      if (mounted) setDownloaded(exists);
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, [claimsLocalCopy, item.file_path]);
 
   const handleDownload = async () => {
     const localPath = getLocalFilePath(item.source_id, item.title);
@@ -68,6 +98,7 @@ const IskconMenuItems = ({item, hideMenu}) => {
       setIskconEntries(prev =>
         prev.map(f => (f.source_id === item.source_id ? {...f, file_path: null} : f)),
       );
+      useDownloadStore.getState().notifyDownloadsChanged();
       ToastAndroid.show('Download removed', ToastAndroid.SHORT);
     } catch (error) {
       Alert.alert('Delete failed');

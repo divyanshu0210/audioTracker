@@ -19,6 +19,8 @@ import {shareNotesAsFile} from '../notes/share/shareNoteFile';
 import Share from 'react-native-share';
 import {useNotesStore} from '../stores/useNotesStore';
 import {useMediaStore} from '../stores/useMediaStore';
+import {getLocalFilePath} from '../scrap/iskconActions';
+import useDownloadStore from '../stores/useDownloadStore';
 
 const DEFAULT_NOTEBOOK_TITLE = 'Default Notebook';
 
@@ -75,6 +77,29 @@ const deleteDeviceItem = async item => {
     }
   }
   await softDeleteItem(item.subtype, item.id);
+};
+
+// Mirrors IskconMenuItems.handleRemove. An iskcon file has no library entry of
+// ours to remove — the browse list is the remote site's — so deleting one only
+// ever clears the local copy, whatever screen it was invoked from. Both paths
+// are unlinked for the same reason handleRemove does it: they're normally the
+// same file, but if they ever drift, deleting only file_path leaves the real
+// one on disk and the next download reports "already downloaded".
+const deleteIskconItem = async item => {
+  const paths = new Set(
+    [
+      item.file_path,
+      item.title ? getLocalFilePath(item.id, item.title) : null,
+    ].filter(Boolean),
+  );
+  for (const path of paths) {
+    if (await RNFS.exists(path)) {
+      await RNFS.unlink(path);
+    }
+  }
+  if (item.dbId != null) {
+    await updateItemFields(item.dbId, {file_path: null});
+  }
 };
 
 // Mirrors YTMenuItems.handleDeleteYTItem.
@@ -165,6 +190,17 @@ const applyStoreUpdates = (
     setDeviceFiles(prev => prev.filter(i => !isRemoved(i.source_id, ItemTypes.DEVICE)));
   }
 
+  if (downloadCleared.some(r => r.type === ItemTypes.ISKCON)) {
+    const {setIskconEntries} = useMediaStore.getState();
+    setIskconEntries(prev =>
+      prev.map(i =>
+        isDownloadCleared(i.source_id, ItemTypes.ISKCON)
+          ? {...i, file_path: null}
+          : i,
+      ),
+    );
+  }
+
   if (
     removed.some(r => r.type === ItemTypes.DRIVE) ||
     downloadCleared.some(r => r.type === ItemTypes.DRIVE)
@@ -219,6 +255,14 @@ export const bulkDeleteItems = async (items, {deleteNotebookNotes, screen}) => {
           await deleteDeviceItem(item);
           removed.push(item);
           break;
+        case ItemTypes.ISKCON:
+          // Only ever un-downloads, so it's a cleared download rather than a
+          // removal — nothing leaves the browse list, the file just stops
+          // being local. Reachable since the Downloads screen started using
+          // this list, where a selection mixes iskcon files with the rest.
+          await deleteIskconItem(item);
+          downloadCleared.push(item);
+          break;
         case ItemTypes.YOUTUBE:
           await deleteYoutubeItem(item);
           removed.push(item);
@@ -236,6 +280,14 @@ export const bulkDeleteItems = async (items, {deleteNotebookNotes, screen}) => {
     notesKeptFrom,
     notesMovedTo,
   );
+
+  // Anything removed or un-downloaded here may have had a local copy, and the
+  // Downloads screen can't see that through the stores above — it queries the
+  // db for file_path. One bump for the batch is enough; it only asks the
+  // screen to re-read.
+  if (removed.length || downloadCleared.length) {
+    useDownloadStore.getState().notifyDownloadsChanged();
+  }
 
   const failed = results
     .map((r, i) => (r.status === 'rejected' ? {item: items[i], error: r.reason} : null))

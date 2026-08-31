@@ -13,23 +13,37 @@ import {
   Alert,
   StyleSheet,
   Text,
+  ToastAndroid,
   TouchableOpacity,
   View,
 } from 'react-native';
 import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
-import RNFS from 'react-native-fs';
 import FileViewer from 'react-native-file-viewer';
 
 import {getFileIcon} from '../contexts/fileIconHelper';
 import {navigationRef} from '../handlers/navigationRef';
 import {cancelDownload} from '../backgroundService/backgroundDownloadService';
+import RNFS from 'react-native-fs';
 import {isAudioOrVideo} from '../Linking/utils/handleLinkSubmit';
+import useDownloadStore from '../stores/useDownloadStore';
 import MediaThumbnail, {
   iconInput,
   sourceLabelFor,
 } from '../components/MediaThumbnail';
 
-export const DownloadCard = ({item, variant = 'card', style, download}) => {
+// `embedded` renders the card without its own touchable or cancel button,
+// for when it sits inside something that already handles pressing — BaseItem
+// on the Downloads screen, which needs the press and long-press for its own
+// open/selection handling and would be swallowed by a nested TouchableOpacity.
+// Only completed downloads are ever embedded, so the cancel affordance and
+// the progress overlay have nothing to do there anyway.
+export const DownloadCard = ({
+  item,
+  variant = 'card',
+  style,
+  download,
+  embedded = false,
+}) => {
   const isList = variant === 'list';
   const isActive = !!download;
 
@@ -51,8 +65,14 @@ export const DownloadCard = ({item, variant = 'card', style, download}) => {
       return;
     }
     if (!item.file_path) return;
-    const exists = await RNFS.exists(item.file_path);
-    if (!exists) return;
+    if (!(await RNFS.exists(item.file_path))) {
+      ToastAndroid.show('Download is no longer on this device', ToastAndroid.SHORT);
+      // The file went missing while this screen was open, so the list is now
+      // showing a row it would not have loaded. Nudge it to re-read, which
+      // drops the row.
+      useDownloadStore.getState().notifyDownloadsChanged();
+      return;
+    }
     FileViewer.open(item.file_path, {showOpenWithDialog: true}).catch(() => {
       Alert.alert(
         'Could not open file.',
@@ -63,11 +83,17 @@ export const DownloadCard = ({item, variant = 'card', style, download}) => {
 
   const cancel = () => cancelDownload(item.source_id);
 
+  const Container = embedded ? View : TouchableOpacity;
+  const containerProps = embedded ? {} : {onPress, disabled: isActive};
+
   return (
-    <TouchableOpacity
-      onPress={onPress}
-      disabled={isActive}
-      style={[isList ? styles.listContainer : styles.cardContainer, style]}>
+    <Container
+      {...containerProps}
+      style={[
+        isList ? styles.listContainer : styles.cardContainer,
+        embedded && styles.embedded,
+        style,
+      ]}>
       <MediaThumbnail item={item} isList={isList}>
         {isActive && (
           <View style={styles.progressOverlay}>
@@ -90,7 +116,7 @@ export const DownloadCard = ({item, variant = 'card', style, download}) => {
         </View>
       </View>
 
-      {isActive && (
+      {isActive && !embedded && (
         <TouchableOpacity
           onPress={cancel}
           hitSlop={{top: 10, bottom: 10, left: 10, right: 10}}
@@ -98,7 +124,7 @@ export const DownloadCard = ({item, variant = 'card', style, download}) => {
           <MaterialIcons name="close" size={18} color="#fff" />
         </TouchableOpacity>
       )}
-    </TouchableOpacity>
+    </Container>
   );
 };
 
@@ -111,6 +137,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 2,
   },
 
+  // BaseItem lays its row out as [content][menu]; the card has to take the
+  // free space so the menu sits at the right edge rather than beside the text.
+  embedded: {
+    flex: 1,
+    marginVertical: 0,
+  },
   listContainer: {
     flexDirection: 'row',
     alignItems: 'center',

@@ -16,17 +16,27 @@ import { navigationRef } from '../../handlers/navigationRef';
 
 const {FileMeta} = NativeModules;
 const {setInserting} = useDbStore.getState();
+// YouTube hangs the playlist context off `list=` even when the user shared a
+// single video, so a shared watch URL carries both ids. `list=` used to be
+// matched first and win outright, which threw the video away: sharing from
+// Watch Later hands over `watch?v=<id>&list=WL`, WL is a per-account list the
+// Data API never resolves, and the paste then saved nothing at all without
+// saying so. Mixes (`list=RD…`) failed the same way.
+//
+// The video wins whenever the URL names one — a `watch?v=` link is a video link
+// and the list is only the context it happened to be playing in. Sharing from a
+// playlist *page* gives `playlist?list=…` with no `v=`, and that still adds the
+// playlist; that's the way to add one.
 export const extractLinkType = url => {
-  const playlistMatch = url.match(/[?&]list=([0-9A-Za-z_-]+)/);
-  if (playlistMatch) return {type: 'youtube_playlist', id: playlistMatch[1]};
-
   const videoMatch = url.match(
     /(?:\?v=|&v=|\/embed\/|\/vi\/|\/watch\?v=|youtu\.be\/)([0-9A-Za-z_-]{11})/,
   );
-  if (videoMatch) return {type: 'youtube_video', id: videoMatch[1]};
-
   const liveMatch = url.match(/youtube\.com\/live\/([0-9A-Za-z_-]{11})/);
-  if (liveMatch) return {type: 'youtube_video', id: liveMatch[1]};
+  const videoId = videoMatch?.[1] ?? liveMatch?.[1] ?? null;
+  if (videoId) return {type: 'youtube_video', id: videoId};
+
+  const playlistMatch = url.match(/[?&]list=([0-9A-Za-z_-]+)/);
+  if (playlistMatch) return {type: 'youtube_playlist', id: playlistMatch[1]};
 
   const driveMatch = url.match(
     /(?:drive\.google\.com\/(?:file\/d\/|open\?id=|uc\?id=|drive\/folders\/))([-_0-9A-Za-z]{20,})(?:[/?]|$)/,
@@ -109,7 +119,13 @@ export const fetchYTData = async (
       );
 
       const video = response.data.items[0]?.snippet;
-      if (!video) return;
+      if (!video) {
+        Alert.alert(
+          'Nothing to add',
+          'This video is private or unavailable, so it could not be added.',
+        );
+        return;
+      }
 
       const savedItem = await upsertItem({
         source_id: id,
@@ -141,7 +157,16 @@ export const fetchYTData = async (
       );
 
       const playlist = response.data.items[0]?.snippet;
-      if (!playlist) return;
+      if (!playlist) {
+        // A deleted playlist, or one that isn't public. Used to return in
+        // silence while the finally block still bounced to the YouTube tab,
+        // so a failed paste looked exactly like a successful one.
+        Alert.alert(
+          'Nothing to add',
+          'This playlist is private or unavailable, so it could not be added.',
+        );
+        return;
+      }
 
       const savedItem = await upsertItem({
         source_id: id,

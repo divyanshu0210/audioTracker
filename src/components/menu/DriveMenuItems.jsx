@@ -9,6 +9,7 @@ import {updateItemFields} from '../../database/U';
 import { useMediaStore } from '../../stores/useMediaStore';
 import { useShallow } from 'zustand/react/shallow';
 import { navigationRef } from '../../handlers/navigationRef';
+import useDownloadStore from '../../stores/useDownloadStore';
 
 const DriveMenuItems = ({item, screen, hideMenu}) => {
 const {
@@ -86,6 +87,7 @@ const {
         await softDeleteItem(item.type, item.source_id);
       }
       handleLocalDelete(item);
+      useDownloadStore.getState().notifyDownloadsChanged();
       ToastAndroid.show(
         screen === 'in' ? 'Download removed' : 'File deleted',
         ToastAndroid.SHORT,

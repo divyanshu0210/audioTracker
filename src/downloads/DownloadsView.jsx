@@ -1,15 +1,15 @@
 // DownloadsView.jsx
 //
-// Lists every item with a real local copy on disk (downloaded device / drive /
-// iskcon files), across all sources. Used both as a preview strip on the
+// Lists everything downloaded from elsewhere and kept on disk (drive and
+// iskcon files — not device files, which are local imports; see
+// getDownloadedItems). Used both as a preview strip on the
 // Profile tab (mode='preview' — a horizontal card scroll like the
 // Recently-Watched section, capped + "View All") and as the full screen the
 // "View All" button opens (mode='full' — a 2-column card grid).
 
-import React, {useCallback, useEffect, useState} from 'react';
+import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
   BackHandler,
-  FlatList,
   ScrollView,
   StyleSheet,
   Text,
@@ -19,17 +19,32 @@ import {
 import {useFocusEffect, useRoute} from '@react-navigation/native';
 import RNFS from 'react-native-fs';
 import ShimmerPlaceholder from 'react-native-shimmer-placeholder';
-import {useShallow} from 'zustand/react/shallow';
 
 import {getDownloadedItems} from '../database/R';
 import AppHeader from '../components/headers/AppHeader';
 import DownloadCard from './DownloadCard';
-import {getItemId} from '../StackScreens/BaseMediaListComponent';
+import BaseMediaListComponent, {
+  getItemId,
+} from '../StackScreens/BaseMediaListComponent';
+import {ScreenTypes} from '../contexts/constants';
 import {navigationRef} from '../handlers/navigationRef';
 import useDownloadStore from '../stores/useDownloadStore';
 
 const PREVIEW_LIMIT = 6;
 const SHIMMER_COUNT = 6;
+
+// The list's row visual, so a download keeps looking like a download while
+// BaseItem supplies the press handling, selection and menu around it. Defined
+// at module scope so the reference is stable across renders.
+const DownloadRow = props => <DownloadCard {...props} variant="list" embedded />;
+
+// Group by when the file actually reached the disk, matching the sort in
+// fetch(). created_at is the day the item was added, which for something
+// downloaded later is a different day; updated_at is no better, since the
+// trigger bumps it on any write — the player's duration update alone would
+// move a months-old download into Today the first time it was played. Rows
+// whose file could not be stat-ed fall back rather than landing in 1970.
+const downloadDate = item => item?._mtime || item?.created_at;
 
 // Loading placeholder shaped like DownloadCard (card or list variant).
 const DownloadCardShimmer = ({variant = 'card'}) => {
@@ -83,20 +98,35 @@ export default function DownloadsView({mode = 'full'}) {
       // Sort by the local file's modification time (≈ when it was downloaded),
       // most recent first. created_at on the row reflects when it was first
       // seen, not downloaded, so it can't be trusted for download order.
+      //
+      // A row whose file is gone is dropped rather than listed as something
+      // that cannot be opened. It used to be kept and sorted to the bottom on
+      // mtime 0, which stopped working once rows were grouped by date.
+      //
+      // stat throwing is not proof of that on its own — it fails for anything
+      // that goes wrong reading the file, and dropping on every failure would
+      // hide a download that is really there. So absence is confirmed with
+      // exists() before dropping, which costs an extra call only for rows that
+      // already looked wrong; a file that is present but unreadable is kept,
+      // with mtime 0 sending it to its created_at group.
+      //
+      // The stale file_path is left in the db either way: every screen showing a
+      // download state asks the filesystem rather than trusting the column, and
+      // the next download of that item overwrites it.
       const withMtime = await Promise.all(
         items.map(async item => {
-          let mtime = 0;
           try {
             const stat = await RNFS.stat(item.file_path);
-            mtime = new Date(stat.mtime).getTime() || 0;
+            return {...item, _mtime: new Date(stat.mtime).getTime() || 0};
           } catch {
-            // File missing/unreadable — sort it to the bottom.
+            const there = await RNFS.exists(item.file_path).catch(() => false);
+            return there ? {...item, _mtime: 0} : null;
           }
-          return {...item, _mtime: mtime};
         }),
       );
-      withMtime.sort((a, b) => b._mtime - a._mtime);
-      setDownloads(withMtime);
+      const present = withMtime.filter(Boolean);
+      present.sort((a, b) => b._mtime - a._mtime);
+      setDownloads(present);
     } catch (err) {
       console.error('Failed to load downloads:', err);
     } finally {
@@ -114,9 +144,20 @@ export default function DownloadsView({mode = 'full'}) {
   // they show (with progress) above the already-completed files. Re-fetch the
   // completed list whenever one finishes so it moves from "active" to the DB
   // list without a manual refresh.
-  const active = useDownloadStore(
-    useShallow(state =>
-      Object.entries(state.downloads)
+  //
+  // The store object is subscribed to directly and the shaping happens below,
+  // rather than mapping inside the selector. Zustand 5 reads a selector through
+  // useSyncExternalStore, which requires the snapshot to be stable between
+  // calls; a selector building fresh objects returns a new array every time and
+  // useShallow can't cache that, since shallow equality compares an array's
+  // elements by reference and every element is new. The snapshot never settled
+  // and React bailed out with "Maximum update depth exceeded". It only showed
+  // while something was actually downloading — with an empty queue the selector
+  // returned [], and [] is shallow-equal to [], so it cached fine.
+  const downloadMap = useDownloadStore(state => state.downloads);
+  const active = useMemo(
+    () =>
+      Object.entries(downloadMap)
         .filter(([, d]) => d.status === 'downloading' || d.status === 'queued')
         .map(([sourceId, d]) => ({
           _download: d,
@@ -125,15 +166,24 @@ export default function DownloadsView({mode = 'full'}) {
           type: d.type,
           mimeType: d.mimeType,
         })),
-    ),
+    [downloadMap],
   );
 
-  const doneCount = useDownloadStore(
-    state => Object.values(state.downloads).filter(d => d.status === 'done').length,
-  );
+  // This list is local state read straight from the db, so nothing that changes
+  // an item's file_path reaches it on its own — not a finished download, not a
+  // "Remove Download" from the menu, not a bulk delete. Each of those bumps
+  // downloadsVersion instead, and this re-reads.
+  //
+  // The version is only compared against what this screen last saw, never
+  // against zero: the counter is session-wide, so mounting after any earlier
+  // download would otherwise fire a second query on top of the focus effect.
+  const downloadsVersion = useDownloadStore(state => state.downloadsVersion);
+  const seenVersion = useRef(downloadsVersion);
   useEffect(() => {
-    if (doneCount > 0) fetch();
-  }, [doneCount, fetch]);
+    if (seenVersion.current === downloadsVersion) return;
+    seenVersion.current = downloadsVersion;
+    fetch();
+  }, [downloadsVersion, fetch]);
 
   const emptyText = 'No downloads yet. Download a file to access it offline.';
 
@@ -189,7 +239,38 @@ export default function DownloadsView({mode = 'full'}) {
     );
   }
 
-  // ── Full screen: single-column list (mirrors FullHistoryScreen) ──
+  // ── Full screen ──
+  //
+  // Rendered through BaseMediaListComponent, so a download gets everything an
+  // item gets anywhere else in the app: long-press selection, the bulk-action
+  // header, and the full per-item menu. A downloads list you can only look at
+  // means hunting the same file down in its own tab to act on it. The rows
+  // still draw as DownloadCards (itemComponent) — only the behaviour around
+  // them is shared.
+  //
+  // Only completed downloads go through it. An active one has no db row and no
+  // local file yet, so it can't be selected, deleted, noted or categorised —
+  // the only thing to do with it is cancel it. Those stay as DownloadCards in
+  // the list header, keeping their progress overlay and cancel button.
+  const activeHeader =
+    active.length > 0 ? (
+      <View style={styles.activeSection}>
+        <Text style={styles.activeTitle}>
+          {active.length === 1
+            ? 'Downloading'
+            : `Downloading (${active.length})`}
+        </Text>
+        {active.map(item => (
+          <DownloadCard
+            key={getItemId(item)}
+            item={item}
+            variant="list"
+            download={item._download}
+          />
+        ))}
+      </View>
+    ) : null;
+
   return (
     <View style={styles.container}>
       <AppHeader
@@ -203,20 +284,20 @@ export default function DownloadsView({mode = 'full'}) {
           ))}
         </View>
       ) : (
-        <FlatList
-          data={combined}
-          keyExtractor={getItemId}
-          renderItem={({item}) => (
-            <DownloadCard
-              item={item}
-              variant="list"
-              download={item._download}
-            />
-          )}
-          contentContainerStyle={styles.listContent}
+        <BaseMediaListComponent
+          mediaList={downloads}
+          emptyText={emptyText}
           onRefresh={fetch}
-          refreshing={loading}
-          ListEmptyComponent={<Text style={styles.emptyText}>{emptyText}</Text>}
+          loading={loading}
+          listHeaderComponent={activeHeader}
+          itemComponent={DownloadRow}
+          groupDate={downloadDate}
+          // No single type: the list mixes drive and iskcon rows, so
+          // BaseItem resolves each row's type from the row itself.
+          type={null}
+          // 'in' is what makes a delete here un-download rather than remove the
+          // library item, matching what DriveMenuItems does inside a folder.
+          screen={ScreenTypes.IN}
         />
       )}
     </View>
@@ -263,6 +344,16 @@ const styles = StyleSheet.create({
   },
 
   /* ---------- Full list ---------- */
+  activeSection: {
+    paddingHorizontal: 12,
+    paddingTop: 8,
+  },
+  activeTitle: {
+    fontSize: 13,
+    fontWeight: 'bold',
+    color: '#777',
+    paddingVertical: 5,
+  },
   listContent: {
     paddingHorizontal: 12,
     paddingVertical: 8,

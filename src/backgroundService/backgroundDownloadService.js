@@ -140,6 +140,7 @@ const downloadSingleFile = async file => {
 
     if (result.statusCode === 200) {
       await updateItemFields(file.id, {file_path: file.localPath});
+      useDownloadStore.getState().notifyDownloadsChanged();
       setDownload(file.sourceId, {
         status: 'done',
         progress: 100,

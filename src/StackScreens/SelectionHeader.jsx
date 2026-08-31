@@ -57,9 +57,25 @@ const SelectionHeader = ({type, screen, allItemsInThisList}) => {
     [selectedItems],
   );
 
+  // Every list but one holds a single type, and "the items this header is
+  // responsible for" was simply everything of that type. The Downloads screen
+  // mixes drive, device and iskcon rows and so passes no type at all, which
+  // made that filter match nothing: Select All could never look selected, and
+  // Unselect All (filtering on type !== null) cleared the whole selection
+  // including other screens' items. Fall back to membership of this list.
+  const listKeys = useMemo(
+    () => new Set(allItemsInThisList.map(i => `${i.type}:${i.id}`)),
+    [allItemsInThisList],
+  );
+
+  const belongsToThisList = useCallback(
+    i => (type ? i.type === type : listKeys.has(`${i.type}:${i.id}`)),
+    [type, listKeys],
+  );
+
   const selectedItemsOfThisType = useMemo(
-    () => selectedItems.filter(i => i.type === type),
-    [selectedItems, type],
+    () => selectedItems.filter(belongsToThisList),
+    [selectedItems, belongsToThisList],
   );
 
   // Only notebook notes can change notebook — see isMovableNote. A selection
@@ -99,8 +115,8 @@ const SelectionHeader = ({type, screen, allItemsInThisList}) => {
 
   const handleSelectAll = useCallback(() => {
     if (isAllSelected) {
-      // Unselect only items belonging to this list type
-      setSelectedItems(prev => prev.filter(i => i.type !== type));
+      // Unselect only items belonging to this list
+      setSelectedItems(prev => prev.filter(i => !belongsToThisList(i)));
     } else {
       // Add missing items of this list type
       const newItems = allItemsInThisList.filter(
@@ -112,7 +128,7 @@ const SelectionHeader = ({type, screen, allItemsInThisList}) => {
   }, [
     isAllSelected,
     setSelectedItems,
-    type,
+    belongsToThisList,
     allItemsInThisList,
     selectedItems,
   ]);

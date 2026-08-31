@@ -22,6 +22,7 @@ const BaseMediaListComponent = ({
   mediaList,
   emptyText,
   listFooterComponent,
+  listHeaderComponent,
   onRefresh,
   onEndReached,
   loading,
@@ -29,6 +30,17 @@ const BaseMediaListComponent = ({
   type = null,
   screen = ScreenTypes.MAIN,
   useSections = true,
+  // Which date a row is grouped under. Defaults to created_at inside
+  // groupItemsByDate; the Downloads screen overrides it because the day an
+  // item was added and the day its file was downloaded are different days.
+  // Must agree with how the caller sorted mediaList, or the sections come
+  // out interleaved.
+  groupDate,
+  // Swaps the per-type visual (BaseItem.typeConfigMap) for one the caller
+  // supplies, while BaseItem keeps providing selection, long-press and the
+  // menu. Lets a screen with its own card design join this list without
+  // giving up any of that.
+  itemComponent,
   onFolderPress,  
 }) => {
   const renderCount = useRef(0);
@@ -49,20 +61,29 @@ const BaseMediaListComponent = ({
           item={item}
           subtype={subtype}
           screen={screen}
+          itemComponent={itemComponent}
           onFolderPress={screen===ScreenTypes.IN && type===ItemTypes.DRIVE? onFolderPress : undefined}
         />
       );
     },
-    [type, screen],
+    [type, screen, itemComponent],
   );
 
-  const sections = useMemo(() => groupItemsByDate(mediaList), [mediaList]);
+  const sections = useMemo(
+    () => groupItemsByDate(mediaList, groupDate),
+    [mediaList, groupDate],
+  );
 
   const allItemsInThisList = useMemo(
     () =>
       mediaList.map(item => ({
         id: getItemId(item),
-        type,
+        // Resolved per item exactly as renderItem does, so Select All
+        // produces the same entries tapping the rows does. A mixed list
+        // (Downloads) passes no type at all, and stamping null here left
+        // every entry unmatchable — Select All then fed bulkDeleteItems
+        // rows whose type nothing dispatches on.
+        type: type ?? convertTypetoItemType(item.type),
         subtype: item.type,
         // Carried along so "Select All" produces the same shape BaseItem's
         // per-item selectionEntry does — bulk delete needs dbId/file_path,
@@ -100,6 +121,7 @@ const BaseMediaListComponent = ({
             ? () => <ActivityIndicator size="small" color="#007AFF" />
             : listFooterComponent || null
         }
+        ListHeaderComponent={listHeaderComponent || null}
         onRefresh={onRefresh}
         refreshing={loading}
         onEndReached={() => onEndReached?.()}

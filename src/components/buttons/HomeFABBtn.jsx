@@ -1,7 +1,6 @@
 import {useFocusEffect} from '@react-navigation/native';
 import React, {useCallback, useEffect, useState} from 'react';
 import {
-  Alert,
   AppState,
   Keyboard,
   Pressable,
@@ -10,13 +9,12 @@ import {
   ToastAndroid,
   View,
 } from 'react-native';
-import {pick, types} from 'react-native-document-picker';
 import {FAB, Portal} from 'react-native-paper';
 
 import {useAppState} from '../../contexts/AppStateContext';
 import {
-  handleFileProcessing,
   handleLinkSubmit,
+  pickAndImportDeviceFiles,
 } from '../../Linking/utils/handleLinkSubmit';
 import DriveLinkModal from '../modules/DriveLink';
 import MyModal from '../MyModal';
@@ -94,19 +92,7 @@ const HomeFABBtn = () => {
 
   const handleDeviceFilePick = async () => {
     try {
-      const results = await pick({
-        allowMultiSelection: true,
-        type: [types.audio, types.video],
-      });
-
-      for (const file of results) {
-        await handleFileProcessing(file, setDeviceFiles);
-      }
-    } catch (err) {
-      if (err?.code !== 'DOCUMENT_PICKER_CANCELED') {
-        console.error('❌ DocumentPicker error:', err);
-        Alert.alert('Error', 'Could not pick files');
-      }
+      await pickAndImportDeviceFiles(setDeviceFiles, selectedCategory);
     } finally {
       setModalVisible(false);
     }

@@ -7,6 +7,7 @@ import {
   upsertYoutubeMeta,
 } from '../../database/C';
 import RNFS from 'react-native-fs';
+import {pick, types} from 'react-native-document-picker';
 import {NativeModules} from 'react-native';
 import {addItemToCategory} from '../../categories/catDB';
 import useDbStore from '../../database/dbStore';
@@ -374,11 +375,38 @@ const handleDeviceFileFromUri = async (
   }
 };
 
-// Where a device file's bytes live locally. Exported because a Drive copy
-// pulled back down after a restore has to land in the same place under the
-// same name, or the app ends up with two paths for one file.
-export const deviceFilePath = fileName =>
-  `${RNFS.ExternalDirectoryPath}/${fileName}`;
+// Names come straight from the picker's DISPLAY_NAME and end up in a path that
+// RNFS hands to Uri.parse('file://' + path), where '#', '?' and '%' are read as
+// URI syntax rather than as part of the name.
+const sanitizeFileName = name => name.replace(/[\\/:*?"<>|#%\r\n]/g, '_');
+
+// Exported because a Drive copy pulled back down after a restore has to land
+// where an import would have put it, sanitised and de-duplicated the same way.
+export const resolveDestPath = async (fileName, uuid) => {
+  if (!RNFS.ExternalDirectoryPath) {
+    throw new Error('External storage is unavailable');
+  }
+
+  const safeName = sanitizeFileName(fileName);
+  const dot = safeName.lastIndexOf('.');
+  const base = dot > 0 ? safeName.slice(0, dot) : safeName;
+  const ext = dot > 0 ? safeName.slice(dot) : '';
+  const destPath = `${RNFS.ExternalDirectoryPath}/${base}${ext}`;
+
+  // A taken name used to mean "already imported, skip the copy". Display names
+  // collide constantly on a real device (recording.mp3, VID_20240101.mp4), so
+  // the second file got a row pointing at the first one's bytes and played the
+  // wrong thing, with no error anywhere. Give it a path of its own instead.
+  if (await RNFS.exists(destPath)) {
+    return `${RNFS.ExternalDirectoryPath}/${base}_${uuid}${ext}`;
+  }
+  return destPath;
+};
+
+// Throws if the file can't be copied or recorded. It used to swallow DB errors
+// and let copy errors escape to whoever called it, which is how a copy failing
+// on its own terms (a cloud provider's file that isn't on the device, a full
+// disk) reached the user as "Could not pick files".
 
 export const handleFileProcessing = async (
   file,
@@ -387,43 +415,89 @@ export const handleFileProcessing = async (
   navigateToPlayer = false,
 ) => {
   const fileName = file.name || `file_${Date.now()}`;
-  const destPath = deviceFilePath(fileName);
-  const fileExists = await RNFS.exists(destPath);
   const mimeType = file.type || 'unknown';
-
-  if (!fileExists) {
-    await RNFS.copyFile(file.uri, destPath);
-    console.log(`📁 Copied ${fileName} to local path`);
-  } else {
-    console.log(`⚠️ ${fileName} already exists locally`);
-  }
-
   const uuid = generateUUID();
 
+  const destPath = await resolveDestPath(fileName, uuid);
+  await RNFS.copyFile(file.uri, destPath);
+  console.log(`📁 Copied ${fileName} to ${destPath}`);
+
+  const fullItem = await upsertItem({
+    source_id: uuid,
+    type: 'device_file',
+    title: fileName,
+    mimeType: mimeType,
+    file_path: destPath,
+    out_show: 1,
+    in_show: 0,
+  });
+
+  if (selectedCategory != null) {
+    await addItemToCategory(selectedCategory, fullItem.source_id, fullItem.type);
+  }
+  setDeviceFiles(prev => [fullItem, ...prev]);
+
+  if (navigateToPlayer) {
+    navigationRef.navigate('BacePlayer', {item: fullItem});
+  } else {
+    navigationRef.navigate('HomeScreen', {screen: 'Device'});
+  }
+  console.log(`✅ Inserted ${fileName} into device_files table`);
+};
+
+// The picker and the import that follows it, in one place. Both callers used to
+// carry their own copy of this, and both wrapped the whole thing in a single
+// try whose catch blamed every failure on the picker.
+export const pickAndImportDeviceFiles = async (
+  setDeviceFiles,
+  selectedCategory = null,
+) => {
+  let results;
   try {
-    // await insertDeviceFile(uuid, fileName, destPath, mimeType);
-    const fullItem = await upsertItem({
-      source_id: uuid,
-      type: 'device_file',
-      title: fileName,
-      mimeType: mimeType,
-      file_path: destPath,
-      out_show: 1,
-      in_show: 0,
+    results = await pick({
+      allowMultiSelection: true,
+      type: [types.audio, types.video],
     });
-
-    if (selectedCategory != null) {
-      await addItemToCategory(selectedCategory, fullItem.source_id, fullItem.type);
+  } catch (err) {
+    // Cancelling isn't a failure, and neither is a second tap while the picker
+    // is still opening — that one rejects with ASYNC_OP_IN_PROGRESS, and only
+    // the cancel code was let through, so it raised an alert.
+    if (
+      err?.code === 'DOCUMENT_PICKER_CANCELED' ||
+      err?.code === 'ASYNC_OP_IN_PROGRESS'
+    ) {
+      console.log('🚫 File picker dismissed:', err.code);
+      return;
     }
-    setDeviceFiles(prev => [fullItem, ...prev]);
+    console.error('❌ Document picker failed:', err);
+    Alert.alert(
+      'Error',
+      `Could not open the file picker${err?.code ? ` (${err.code})` : ''}.`,
+    );
+    return;
+  }
 
-    if (navigateToPlayer) {
-      navigationRef.navigate('BacePlayer', {item: fullItem});
-    } else {
-      navigationRef.navigate('HomeScreen', {screen: 'Device'});
+  // One unreadable file used to abort the loop, dropping every file after it
+  // without a word. Import them independently and name the ones that failed.
+  const failed = [];
+  for (const file of results) {
+    try {
+      // Passed on like the link path does: both callers had the selected
+      // category in hand and neither forwarded it, so a file picked from the
+      // device while a category was open landed outside it.
+      await handleFileProcessing(file, setDeviceFiles, selectedCategory);
+    } catch (err) {
+      console.error(`❌ Import failed for ${file?.name}:`, err);
+      failed.push(file?.name || 'Unnamed file');
     }
-    console.log(`✅ Inserted ${fileName} into device_files table`);
-  } catch (dbError) {
-    console.error(`❌ DB insert failed for ${fileName}:`, dbError);
+  }
+
+  if (failed.length > 0) {
+    Alert.alert(
+      failed.length === results.length
+        ? 'Could not add these files'
+        : 'Some files were not added',
+      `${failed.join('\n')}\n\nFiles kept in the cloud may need to be downloaded to this device first.`,
+    );
   }
 };

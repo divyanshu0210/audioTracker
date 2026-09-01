@@ -23,7 +23,7 @@ import {
   enqueueDownload,
   enqueueUpload,
 } from '../backgroundService/backgroundDownloadService';
-import {deviceFilePath} from '../Linking/utils/handleLinkSubmit';
+import {resolveDestPath} from '../Linking/utils/handleLinkSubmit';
 import {trashDriveFile} from './driveUpload';
 
 // Said in full before anything is uploaded. Sharing a private file off the
@@ -152,8 +152,12 @@ export const downloadSharedCopy = async item => {
   }
 
   // Rebuilt rather than reusing the restored file_path: that path came from
-  // whichever device made the backup and may not be writable here.
-  const localPath = deviceFilePath(item.title);
+  // whichever device made the backup and may not be writable here. Built by
+  // the same function an import uses, so the name is sanitised — a title
+  // carrying '#' or '%' would otherwise produce a path RNFS mis-parses — and
+  // a collision with an unrelated file of the same name gets its own path
+  // rather than silently pointing at the other one.
+  const localPath = await resolveDestPath(item.title, item.source_id);
 
   await enqueueDownload({
     id: item.id,

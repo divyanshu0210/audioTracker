@@ -55,7 +55,7 @@ const PROGRESS_CHECKPOINT_SECONDS = 120;
 // How long typing must be idle before playback resumes. Long enough not to
 // stutter between words and while thinking mid-sentence, short enough that
 // finishing a note doesn't feel like the video forgot to come back.
-const TYPING_RESUME_DELAY_MS = 1300;
+const TYPING_RESUME_DELAY_MS = 700;
 
 const NoteSection = React.memo(
   ({editorRef, source_type, playerRef, captureVLCScreenshot, showPlayerMinimized, isHidden, onTypingActivity}) => {

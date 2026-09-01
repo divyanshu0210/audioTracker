@@ -215,114 +215,24 @@ const DEFAULT_NOTEBOOK_COLOR = '#3B82F6';
 // have to repaint those notes in the store, and the name/colour has to come
 // from somewhere that's correct even when the notebook was created a moment
 // ago by this very call (so it isn't in useNotesStore.notebooks yet).
-export const getOrCreateDefaultNotebook = async () => {
-  const fastdb = getDb();
-
-  return new Promise((resolve, reject) => {
-    fastdb.transaction(tx => {
-      // Step 1: find the Default Notebook, deleted or not. It can itself be
-      // deleted (NBMenuItems offers that, taking its notes with it), and a
-      // soft-deleted row used to be returned as-is: every later "delete
-      // notebook, keep notes" then parked its notes in a notebook the
-      // Notebooks tab doesn't show, leaving them stranded.
-      tx.executeSql(
-        `SELECT id, title, color, created_at, deleted_at FROM notebooks
-           WHERE title = ? LIMIT 1;`,
-        ['Default Notebook'],
-        (_, result) => {
-          if (result.rows.length > 0) {
-            const notebook = result.rows.item(0);
-            if (!notebook.deleted_at) {
-              resolve(notebook);
-              return;
-            }
-            // Step 1b: restore it rather than inserting a second one. Safe
-            // because deleting it stamped deleted_at on its notes too, and
-            // that's what hides them (fetchNotes filters n.deleted_at) — so
-            // they stay gone. Anything parked here while it was deleted
-            // becomes reachable again, which is exactly what's wanted.
-            tx.executeSql(
-              `UPDATE notebooks SET deleted_at = NULL WHERE id = ?;`,
-              [notebook.id],
-              () => {
-                console.log(`Restored deleted Default Notebook (ID: ${notebook.id})`);
-                const restored = {...notebook, deleted_at: null};
-                // Reviving is a change this function makes on its own, so it
-                // owns putting the notebook back on screen. Callers used to
-                // each do it and each one that forgot left the notebook
-                // missing from the Notebooks tab while holding notes.
-                useNotesStore.getState().upsertNotebook(restored);
-                resolve(restored);
-              },
-              (_, error) => {
-                console.error('Error restoring default notebook:', error);
-                reject(error);
-                return false;
-              },
-            );
-          } else {
-            // Step 2: Create it and return the new row
-            tx.executeSql(
-              `INSERT INTO notebooks (title, color) VALUES (?, ?);`,
-              ['Default Notebook', DEFAULT_NOTEBOOK_COLOR],
-              (_, insertResult) => {
-                // Read the row back rather than assembling it here: SQLite
-                // writes created_at as "YYYY-MM-DD HH:MM:SS" and a JS
-                // toISOString() differs from that, which sorts the notebook to
-                // the wrong place in the list until the next refetch moves it.
-                tx.executeSql(
-                  `SELECT id, title, color, created_at, deleted_at FROM notebooks
-                     WHERE id = ?;`,
-                  [insertResult.insertId],
-                  (__, inserted) => {
-                    const created = inserted.rows.item(0);
-                    useNotesStore.getState().upsertNotebook(created);
-                    resolve(created);
-                  },
-                  (__, error) => {
-                    console.error('Error reading back default notebook:', error);
-                    reject(error);
-                    return false;
-                  },
-                );
-              },
-              (_, error) => {
-                console.error('Error inserting default notebook:', error);
-                reject(error);
-                return false;
-              },
-            );
-          }
-        },
-        (_, error) => {
-          console.error('Error checking default notebook:', error);
-          reject(error);
-          return false;
-        },
-      );
-    });
-  });
-};
-
-export const getOrCreateDefaultNotebookId = async () =>
-  (await getOrCreateDefaultNotebook()).id;
-
-// General-purpose sibling of getOrCreateDefaultNotebook, used by note-file
-// import to land shared notes in their own notebook.
 //
-// Deliberately a separate function rather than a refactor of the default-
-// notebook path: that one carries specific revival behaviour (a soft-deleted
-// Default Notebook must be restored, not duplicated, or every later
-// "delete notebook, keep notes" strands its notes) which has been got wrong
-// before, and import has no need to be entangled with it. Same revive-rather-
-// than-duplicate rule applies here for the same reason — a user who deleted
-// "Shared Notes" and then opens another bundle should get it back, not a
-// second one alongside it.
+// The title is the identity, so a soft-deleted match is revived rather than
+// duplicated. That matters most for the Default Notebook: it can itself be
+// deleted (NBMenuItems offers that, taking its notes with it), and returning
+// the soft-deleted row as-is used to make every later "delete notebook, keep
+// notes" park its notes in a notebook the Notebooks tab doesn't show, leaving
+// them stranded. Reviving is safe because deleting a notebook stamped
+// deleted_at on its notes too, and that's what hides them (fetchNotes filters
+// n.deleted_at) — so they stay gone; only notes parked here while it was
+// deleted become reachable again, which is exactly what's wanted. The same
+// rule is what note-file import wants: a user who deleted "Shared Notes" and
+// then opens another bundle should get it back, not a second one beside it.
 export const getOrCreateNotebookByTitle = async (title, color) => {
   const fastdb = getDb();
 
   return new Promise((resolve, reject) => {
     fastdb.transaction(tx => {
+      // Step 1: find the notebook, deleted or not.
       tx.executeSql(
         `SELECT id, title, color, created_at, deleted_at FROM notebooks
            WHERE title = ? LIMIT 1;`,
@@ -334,11 +244,17 @@ export const getOrCreateNotebookByTitle = async (title, color) => {
               resolve(notebook);
               return;
             }
+            // Step 1b: restore it rather than inserting a second one.
             tx.executeSql(
               `UPDATE notebooks SET deleted_at = NULL WHERE id = ?;`,
               [notebook.id],
               () => {
+                console.log(`Restored deleted notebook "${title}" (ID: ${notebook.id})`);
                 const restored = {...notebook, deleted_at: null};
+                // Reviving is a change this function makes on its own, so it
+                // owns putting the notebook back on screen. Callers used to
+                // each do it and each one that forgot left the notebook
+                // missing from the Notebooks tab while holding notes.
                 useNotesStore.getState().upsertNotebook(restored);
                 resolve(restored);
               },
@@ -351,13 +267,15 @@ export const getOrCreateNotebookByTitle = async (title, color) => {
             return;
           }
 
+          // Step 2: create it and return the new row
           tx.executeSql(
             `INSERT INTO notebooks (title, color) VALUES (?, ?);`,
             [title, color || DEFAULT_NOTEBOOK_COLOR],
             (__, insertResult) => {
-              // Read back rather than assembling the row here — SQLite's
-              // created_at format differs from toISOString() and the notebook
-              // sorts to the wrong place until the next refetch otherwise.
+              // Read the row back rather than assembling it here: SQLite
+              // writes created_at as "YYYY-MM-DD HH:MM:SS" and a JS
+              // toISOString() differs from that, which sorts the notebook to
+              // the wrong place in the list until the next refetch moves it.
               tx.executeSql(
                 `SELECT id, title, color, created_at, deleted_at FROM notebooks
                    WHERE id = ?;`,
@@ -390,6 +308,14 @@ export const getOrCreateNotebookByTitle = async (title, color) => {
     });
   });
 };
+
+// The Default Notebook is just a well-known title, so it rides the general
+// path — including the revive-rather-than-duplicate rule it needs most.
+export const getOrCreateDefaultNotebook = async () =>
+  getOrCreateNotebookByTitle('Default Notebook', DEFAULT_NOTEBOOK_COLOR);
+
+export const getOrCreateDefaultNotebookId = async () =>
+  (await getOrCreateDefaultNotebook()).id;
 
 // Resolves the notebook the notes landed in, so the caller can repoint them in
 // the store as well — without it All Notes goes on showing the deleted

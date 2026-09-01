@@ -1,6 +1,5 @@
 import React, {useCallback, useEffect, useState} from 'react';
 import {
-  Alert,
   AppState,
   Keyboard,
   Pressable,
@@ -12,11 +11,10 @@ import DriveLinkModal from '../modules/DriveLink';
 import MyModal from '../MyModal';
 
 import {useFocusEffect} from '@react-navigation/native';
-import {pick, types} from 'react-native-document-picker';
 import {useAppState} from '../../contexts/AppStateContext';
 import {
-  handleFileProcessing,
   handleLinkSubmit,
+  pickAndImportDeviceFiles,
 } from '../../Linking/utils/handleLinkSubmit';
 import PlusButton from './PlusButton';
 import {useMediaStore} from '../../stores/useMediaStore';
@@ -83,24 +81,7 @@ const AddDriveBtn = () => {
   };
 
   const handleDeviceFilePick = async () => {
-    try {
-      const results = await pick({
-        allowMultiSelection: true,
-        type: [types.audio, types.video],
-      });
-
-      for (const file of results) {
-        console.log(file);
-        await handleFileProcessing(file, setDeviceFiles);
-      }
-    } catch (err) {
-      if (err?.code === 'DOCUMENT_PICKER_CANCELED') {
-        console.log('🚫 User cancelled file picker');
-      } else {
-        console.error('❌ DocumentPicker error:', err);
-        Alert.alert('Error', 'Could not pick files');
-      }
-    }
+    await pickAndImportDeviceFiles(setDeviceFiles, selectedCategory);
   };
 
   return (

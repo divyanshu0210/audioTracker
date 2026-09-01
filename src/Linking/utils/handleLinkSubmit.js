@@ -374,6 +374,12 @@ const handleDeviceFileFromUri = async (
   }
 };
 
+// Where a device file's bytes live locally. Exported because a Drive copy
+// pulled back down after a restore has to land in the same place under the
+// same name, or the app ends up with two paths for one file.
+export const deviceFilePath = fileName =>
+  `${RNFS.ExternalDirectoryPath}/${fileName}`;
+
 export const handleFileProcessing = async (
   file,
   setDeviceFiles,
@@ -381,7 +387,7 @@ export const handleFileProcessing = async (
   navigateToPlayer = false,
 ) => {
   const fileName = file.name || `file_${Date.now()}`;
-  const destPath = `${RNFS.ExternalDirectoryPath}/${fileName}`;
+  const destPath = deviceFilePath(fileName);
   const fileExists = await RNFS.exists(destPath);
   const mimeType = file.type || 'unknown';
 

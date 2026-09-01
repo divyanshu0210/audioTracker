@@ -26,7 +26,8 @@ public class BackupUtils {
             "youtube_meta",
             "category_items",
             "notes",
-            "video_watch_history"
+            "video_watch_history",
+            "shared_drive_copies"
     };
 
     private static final String PREF_NAME = "backup";

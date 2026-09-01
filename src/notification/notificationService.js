@@ -27,3 +27,51 @@ export async function onDisplayNotification(title, body) {
     console.error('Notification error:', error);
   }
 }
+
+// A notification that stays on screen and is rewritten in place, for work that
+// takes a while. Passing the same id is what makes notifee replace the existing
+// one instead of stacking a new one per update.
+//
+// Its own channel, at LOW importance: the default channel is HIGH, which would
+// buzz the phone on every progress update. onlyAlertOnce covers the same ground
+// for anyone whose channel settings differ, and ongoing stops it being swiped
+// away while the work is still running.
+export async function showProgressNotification({id, title, body, percent}) {
+  try {
+    await notifee.requestPermission();
+
+    const channelId = await notifee.createChannel({
+      id: 'progress',
+      name: 'In progress',
+      importance: AndroidImportance.LOW,
+    });
+
+    await notifee.displayNotification({
+      id,
+      title,
+      body,
+      android: {
+        channelId,
+        onlyAlertOnce: true,
+        ongoing: true,
+        progress:
+          percent == null
+            ? {indeterminate: true}
+            : {max: 100, current: percent},
+        pressAction: {id: 'default', launchActivity: 'default'},
+      },
+    });
+  } catch (error) {
+    console.error('Progress notification error:', error);
+  }
+}
+
+// Ongoing notifications cannot be dismissed by the user, so whatever posted one
+// has to take it down — including on the failure path.
+export async function dismissNotification(id) {
+  try {
+    await notifee.cancelNotification(id);
+  } catch (error) {
+    console.error('Could not dismiss notification:', error);
+  }
+}

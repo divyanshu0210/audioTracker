@@ -186,6 +186,22 @@ export const DownloadedBadge = () => (
   </View>
 );
 
+export const MissingFileChip = () => (
+  <View style={[styles.sharedLinkChip, styles.missingChip]}>
+    <MaterialCommunityIcons
+      name="alert-circle-outline"
+      size={18}
+      color="#C62828"
+    />
+  </View>
+);
+
+export const SharedLinkChip = () => (
+  <View style={styles.sharedLinkChip}>
+    <MaterialCommunityIcons name="link" size={12} color="#6b7280" />
+  </View>
+);
+
 const styles = StyleSheet.create({
   container: {
     borderRadius: 12,
@@ -205,5 +221,19 @@ const styles = StyleSheet.create({
     right: -2,
     backgroundColor: '#fff',
     borderRadius: 8,
+  },
+  sharedLinkChip: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 4,
+    paddingVertical: 2,
+    marginLeft: 6,
+    borderRadius: 4,
+    backgroundColor: '#EFEFF1',
+  },
+  missingChip: {
+    backgroundColor: 'transparent',
+    paddingHorizontal: 0,
+    paddingVertical: 0,
   },
 });

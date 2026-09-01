@@ -10,7 +10,15 @@ import useLoadingStore from '../stores/useLoadingStore';
 
 const DeviceFilesView = ({onRefresh}) => {
   const emptyText = 'Press + to Add Media from device';
-  const data = useMediaStore(state => state.validDeviceFiles);
+  // Every device file, not just the ones whose bytes are still on disk.
+  // A restore brings back rows without their files, and hiding those made
+  // them look deleted when they are recoverable — the shared Drive copy is
+  // still there. They are listed with a warning badge instead, and the row
+  // says what to do about it.
+  //
+  // validDeviceFiles stays as it is and still feeds the player queue: a file
+  // that cannot be played has no business being queued.
+  const data = useMediaStore(state => state.deviceFiles);
   const loading = useLoadingStore(state => state.loadingStates.device);
   
 

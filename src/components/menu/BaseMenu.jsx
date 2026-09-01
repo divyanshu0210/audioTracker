@@ -14,6 +14,9 @@ import { useSelectionStore } from '../../stores/useSelectionStore';
 import { useNotesStore } from '../../stores/useNotesStore';
 import { useShallow } from 'zustand/react/shallow';
 import {copyLink, getShareLink} from '../../Linking/utils/shareLink';
+import useShareStore from '../../stores/useShareStore';
+import {useMediaStore} from '../../stores/useMediaStore';
+import {confirmAndShareDeviceFile} from '../../share/shareDeviceFile';
 
 const BaseMenu = ({item, type, screen}) => {
   const [visible, setVisible] = useState(false);
@@ -34,11 +37,40 @@ const {setSelectedNote} = useNotesStore(
     item?.source_id ||
     (type === 'notebook' && item?.id);
 
-  // Rebuilt from the item rather than stored on it — see getShareLink. Null
-  // for notes, notebooks, device files, and iskcon files whose remote url was
-  // overwritten by a download, so the entry just doesn't render for those
-  // rather than offering a copy that would hand over nothing.
-  const shareLink = getShareLink(item);
+  // A device file has no link until a copy has been uploaded, so its id is
+  // looked up here and handed to getShareLink; every other type builds its own
+  // from source_id. Null means no link exists, and the entry simply does not
+  // render — for notes and notebooks, and for an iskcon file whose remote url
+  // was overwritten by a download.
+  // Joined onto the item by getChildrenByParent, so it is as fresh as the
+  // row itself.
+  const driveCopyId = item?.drive_file_id ?? null;
+  // A percentage while an upload runs, undefined otherwise. Compared against
+  // null rather than tested for truth so that 0% is still "uploading".
+  const uploadPercent = useShareStore(s =>
+    item?.id != null ? s.uploading[item.id] : undefined,
+  );
+  const uploadingCopy = uploadPercent != null;
+  const shareLink = getShareLink(item, driveCopyId);
+
+  // file_path alone is not enough to know the bytes are there: a restored row
+  // carries the path it had on whatever device made the backup. validDeviceFiles
+  // is the list setDeviceFiles built by actually asking the filesystem.
+  const isMissingDeviceFile = useMediaStore(
+    s =>
+      item?.type === 'device_file' &&
+      s.deviceFilesChecked &&
+      !s.validDeviceIds[item.source_id],
+  );
+
+  // Offered instead of Copy Link, and only for a device file that has no copy
+  // yet: it uploads the file rather than just reading an id, so it asks first.
+  // Never for a file whose bytes are gone — there would be nothing to upload.
+  const canCreateLink =
+    item?.type === 'device_file' &&
+    !driveCopyId &&
+    !!item?.file_path &&
+    !isMissingDeviceFile;
 
   const hideMenu = () => setVisible(false);
   const showMenu = () => setVisible(true);
@@ -124,6 +156,24 @@ const {setSelectedNote} = useNotesStore(
             <Text style={styles.menuItemText}>Copy Link</Text>
           </MenuItem>
         )}
+        {canCreateLink && (
+          <MenuItem
+            disabled={uploadingCopy}
+            onPress={() => {
+              hideMenu();
+              confirmAndShareDeviceFile(item);
+            }}>
+            <Text
+              style={[
+                styles.menuItemText,
+                uploadingCopy && styles.menuItemTextDisabled,
+              ]}>
+              {uploadingCopy
+                ? `Uploading… ${uploadPercent}%`
+                : 'Create shareable link'}
+            </Text>
+          </MenuItem>
+        )}
         {renderMenuItems()}
       </Menu>
     </View>
@@ -141,6 +191,9 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#333',
     paddingVertical: 8,
+  },
+  menuItemTextDisabled: {
+    color: '#aaa',
   },
   menuContainer: {
     borderRadius: 8,

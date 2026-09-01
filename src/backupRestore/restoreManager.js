@@ -20,6 +20,7 @@ const TABLE_ORDER = [
   'notebooks',
   'items',
   'youtube_meta',
+  'shared_drive_copies',
   'category_items',
   'notes',
   'video_watch_history',
@@ -126,6 +127,7 @@ const TABLES_WITH_UPDATED_AT = new Set([
   'category_items',
   'notes',
   'images',
+  'shared_drive_copies',
 ]);
 
 // A backup written before updated_at existed has no such column, so the insert

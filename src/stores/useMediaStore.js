@@ -7,6 +7,8 @@ export const useMediaStore = create((set, get) => ({
   items: [],
   deviceFiles: [],
   validDeviceFiles: [],
+  validDeviceIds: {},
+  deviceFilesChecked: false,
   nonFolderFiles: [],
   nonFolderFilesInside: [],
   videos: [],
@@ -49,13 +51,34 @@ export const useMediaStore = create((set, get) => ({
       typeof val === 'function' ? val(get().deviceFiles) : val;
     set({deviceFiles: files});
 
-    const valid = [];
-    for (const file of files) {
-      if (file.file_path && (await RNFS.exists(file.file_path))) {
-        valid.push(file);
-      }
+    // Checked in parallel rather than one await at a time: this used to be a
+    // sequential round trip per file, and the whole list waited on it.
+    const results = await Promise.all(
+      files.map(async file =>
+        file.file_path && (await RNFS.exists(file.file_path)) ? file : null,
+      ),
+    );
+
+    // A concurrent call can finish after a later one; applying its answer
+    // would describe a list that is no longer on screen. Same guard setData
+    // already uses.
+    if (get().deviceFiles !== files) return;
+
+    const valid = results.filter(Boolean);
+
+    // An id set beside the list, so a row can ask "am I still on disk?" in
+    // one lookup. Scanning validDeviceFiles instead meant every row walked
+    // the whole list, on every store change — quadratic in the number of
+    // device files, and re-run for unrelated updates like a drive refresh.
+    const validDeviceIds = {};
+    for (const file of valid) {
+      validDeviceIds[file.source_id] = true;
     }
-    set({validDeviceFiles: valid});
+
+    // Until this runs at least once there is no answer yet, only an empty
+    // list — and treating that as "missing" flashed a warning chip on every
+    // row for as long as the checks took.
+    set({validDeviceFiles: valid, validDeviceIds, deviceFilesChecked: true});
   },
 
   setData: async val => {

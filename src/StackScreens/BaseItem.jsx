@@ -12,6 +12,7 @@ import {playFile as playIskconFile} from '../scrap/iskconActions';
 import NoteItem from '../notes/notesListing/NoteItem';
 import {CategoryItem} from '../categories/CategoryItem';
 import {useMediaStore} from '../stores/useMediaStore';
+import {offerSharedCopyDownload} from '../share/shareDeviceFile';
 import RNFS from 'react-native-fs';
 import {useSelectionStore} from '../stores/useSelectionStore';
 import {useNotesStore} from '../stores/useNotesStore';
@@ -144,6 +145,20 @@ const BaseItem = ({
 
   const handleDevicePress = useCallback(() => {
     const {validDeviceFiles} = useMediaStore.getState();
+
+    // Files whose bytes are gone are listed now instead of hidden, so a tap
+    // on one has to say why nothing plays — and offer the way back when
+    // there is a copy on Drive to fetch.
+    const present = validDeviceFiles.some(
+      f => f.source_id === item.source_id,
+    );
+    if (!present) {
+      // One alert for both cases — it decides for itself whether there is a
+      // Drive copy to offer, and either way it can clear the row from the list.
+      offerSharedCopyDownload(item);
+      return;
+    }
+
     if (item.file_path && isAudioOrVideo(item.mimeType)) {
       const startingIndex = validDeviceFiles.findIndex(
         f => f.source_id === item.source_id,

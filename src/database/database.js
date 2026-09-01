@@ -95,6 +95,7 @@ export const initDatabase = async () => {
       'trg_notebooks_updated_at',
       'trg_categories_updated_at',
       'trg_category_items_updated_at',
+      'trg_shared_drive_copies_updated_at',
     ].forEach(trigger => {
       tx.executeSql(`DROP TRIGGER IF EXISTS ${trigger};`);
     });
@@ -141,6 +142,49 @@ export const initDatabase = async () => {
           'Error creating items table:',
           error?.message || 'Unknown error',
         ),
+    );
+
+    // A device file has no link of its own to share — it came off the phone,
+    // not from anywhere a recipient could reach. Sharing one uploads a copy to
+    // the user's Drive; this remembers which Drive file that copy is, so the
+    // link can be rebuilt later and the copy is never uploaded twice.
+    //
+    // A side table rather than a column on items: only the handful of files
+    // actually shared get a row, instead of every item carrying a column for
+    // something almost none of them use. Shaped exactly like youtube_meta —
+    // surrogate id, UNIQUE item_id, cascade — because restore upserts on
+    // ON CONFLICT(id) and a table keyed only on item_id would silently fall
+    // through to DO NOTHING and never take an update.
+    //
+    // It also outlives the local file on purpose: a device file whose copy is
+    // gone after a restore still has a Drive id here to fetch it back from.
+    tx.executeSql(
+      `CREATE TABLE IF NOT EXISTS shared_drive_copies (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      item_id INTEGER NOT NULL,
+      drive_file_id TEXT NOT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE (item_id),
+      FOREIGN KEY (item_id) REFERENCES items(id) ON DELETE CASCADE
+    );`,
+      [],
+      () => console.log('shared_drive_copies table created successfully'),
+      (_, error) =>
+        console.error('Error creating shared_drive_copies table:', error),
+    );
+
+    tx.executeSql(
+      `CREATE TRIGGER IF NOT EXISTS trg_shared_drive_copies_updated_at
+       AFTER UPDATE ON shared_drive_copies
+       WHEN NEW.updated_at IS OLD.updated_at
+       BEGIN
+         UPDATE shared_drive_copies SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
+       END;`,
+      [],
+      () => {},
+      (_, error) =>
+        console.error('Error creating shared_drive_copies trigger:', error),
     );
 
     tx.executeSql(

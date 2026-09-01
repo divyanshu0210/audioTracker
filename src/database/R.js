@@ -1,6 +1,11 @@
 import {ITEM_TYPES_THAT_USE_ITEMS_TABLE} from '../contexts/constants';
 import {getDb} from './database';
 
+// drive_file_id rides along the same way channel_title and thumbnail do: the
+// id of a device file's shared copy on Drive, or null. Joining it here rather
+// than holding a separate map in a store means it arrives with the item and
+// is refetched with it — no second source of truth to hydrate, and nothing
+// that can be stale because a restore wrote rows after the map was built.
 export const getChildrenByParent = async (parentId = null, types = null) => {
   const fastdb = getDb();
 
@@ -25,10 +30,13 @@ export const getChildrenByParent = async (parentId = null, types = null) => {
         SELECT
           items.*,
           youtube_meta.channel_title,
-          youtube_meta.thumbnail
+          youtube_meta.thumbnail,
+          shared_drive_copies.drive_file_id
         FROM items
         LEFT JOIN youtube_meta
           ON youtube_meta.item_id = items.id
+        LEFT JOIN shared_drive_copies
+          ON shared_drive_copies.item_id = items.id
         WHERE
           ${isRoot ? 'items.out_show = 1' : 'items.parent_id = ?'}
           ${typeCondition}

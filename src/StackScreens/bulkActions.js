@@ -20,6 +20,7 @@ import Share from 'react-native-share';
 import {useNotesStore} from '../stores/useNotesStore';
 import {useMediaStore} from '../stores/useMediaStore';
 import {getLocalFilePath} from '../scrap/iskconActions';
+import {removeSharedCopy} from '../share/shareDeviceFile';
 import useDownloadStore from '../stores/useDownloadStore';
 
 const DEFAULT_NOTEBOOK_TITLE = 'Default Notebook';
@@ -76,6 +77,9 @@ const deleteDeviceItem = async item => {
       await updateItemFields(item.dbId, {file_path: null});
     }
   }
+  // Same reasoning as the single delete in DriveMenuItems: a shared copy is
+  // readable by anyone holding the link and must not outlive the file.
+  await removeSharedCopy(item.dbId);
   await softDeleteItem(item.subtype, item.id);
 };
 

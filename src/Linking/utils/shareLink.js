@@ -16,8 +16,11 @@
 // still has one, and the rebuild only covers a downloaded file, whose
 // file_path the download service replaced with the local path.
 //
-// Device files return null: nothing is hosted anywhere a recipient could reach
-// until they're uploaded to Drive first, which is its own flow.
+// Device files are the one type with no id of their own to build from — the
+// file came off the phone and exists nowhere a recipient could reach. They
+// resolve only once a copy has been uploaded (see share/shareDeviceFile), and
+// then through that copy's Drive id, which the caller passes in because it
+// lives in a table rather than on the item.
 
 import Clipboard from '@react-native-clipboard/clipboard';
 import {ToastAndroid} from 'react-native';
@@ -45,7 +48,12 @@ const iskconUrlFromSourceId = sourceId => {
   return `${ISKCON_BASE}${encodeIskconPath(sourceId)}`;
 };
 
-export const getShareLink = item => {
+export const driveFileLink = fileId =>
+  `https://drive.google.com/file/d/${fileId}/view`;
+
+// driveCopyId is the Drive id of an uploaded copy, for device files. Every
+// other type ignores it.
+export const getShareLink = (item, driveCopyId) => {
   if (!item?.source_id) return null;
 
   switch (item.type) {
@@ -54,7 +62,7 @@ export const getShareLink = item => {
     case 'youtube_playlist':
       return `https://www.youtube.com/playlist?list=${item.source_id}`;
     case 'drive_file':
-      return `https://drive.google.com/file/d/${item.source_id}/view`;
+      return driveFileLink(item.source_id);
     case 'drive_folder':
       return `https://drive.google.com/drive/folders/${item.source_id}`;
     case 'iskcon_file': {
@@ -64,6 +72,8 @@ export const getShareLink = item => {
       if (url?.startsWith('http')) return url;
       return iskconUrlFromSourceId(item.source_id);
     }
+    case 'device_file':
+      return driveCopyId ? driveFileLink(driveCopyId) : null;
     default:
       return null;
   }

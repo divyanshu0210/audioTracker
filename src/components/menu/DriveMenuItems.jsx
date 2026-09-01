@@ -10,6 +10,10 @@ import { useMediaStore } from '../../stores/useMediaStore';
 import { useShallow } from 'zustand/react/shallow';
 import { navigationRef } from '../../handlers/navigationRef';
 import useDownloadStore from '../../stores/useDownloadStore';
+import {
+  offerSharedCopyDownload,
+  removeSharedCopy,
+} from '../../share/shareDeviceFile';
 
 const DriveMenuItems = ({item, screen, hideMenu}) => {
 const {
@@ -28,7 +32,58 @@ const {
   const isFolder = item.type === 'drive_folder';
   const isDevice = item?.type === 'device_file';
 
+  // A device file that was shared has a copy on Drive that goes with it, and
+  // any link already handed out stops working — worth saying before the tap,
+  // not after.
+  const hasSharedCopy = !!item?.drive_file_id;
+
+  // Read off validDeviceFiles, which setDeviceFiles already built by asking
+  // the filesystem — no second stat per menu.
+  const isMissing = useMediaStore(
+    s =>
+      isDevice && s.deviceFilesChecked && !s.validDeviceIds[item.source_id],
+  );
+
+  // Only while the file is missing and a copy exists to fetch. Once it lands,
+  // the download service writes file_path back, the row rejoins
+  // validDeviceFiles, and this gives way to the ordinary Delete entry.
+  const canRestoreFromDrive = isDevice && isMissing && hasSharedCopy;
+
+  // Un-shares without deleting anything else: trashes the Drive copy, drops
+  // the mapping, leaves the file and its row alone. Until this existed there
+  // was no way to take back a shared link short of deleting the file itself.
+  const handleDeleteFromDriveOnly = async () => {
+    await removeSharedCopy(item.id);
+    ToastAndroid.show('Shared copy removed from Drive', ToastAndroid.SHORT);
+  };
+
   const handleDeleteConfirm = () => {
+    // A device file with a copy on Drive has two things that can be deleted,
+    // and they are not the same decision — one takes back the link, the other
+    // gets rid of the file. Collapsing them into a single "Delete" meant the
+    // only way to un-share was to delete the file as well.
+    if (isDevice && hasSharedCopy) {
+      Alert.alert(
+        'Confirm Deletion',
+        isMissing
+          ? 'This file is not on this device, so the copy in your Drive is the only one left. Deleting it cannot be undone, and any link you shared will stop working.'
+          : 'This file has a copy in your Drive. Deleting that copy stops any link you shared from working; the file stays on this device.',
+        [
+          {text: 'Cancel', style: 'cancel'},
+          {
+            text: 'Delete from Drive',
+            onPress: handleDeleteFromDriveOnly,
+          },
+          {
+            text: 'Delete everywhere',
+            style: 'destructive',
+            onPress: handleDeleteDeviceFile,
+          },
+        ],
+      );
+      return;
+    }
+
     const message = isFolder
       ? 'This will also delete all related contents.'
       : isDevice
@@ -67,6 +122,9 @@ const {
       if (await RNFS.exists(item.file_path)) {
         await RNFS.unlink(item.file_path);
       }
+      // Before the row goes: the shared copy is readable by anyone with the
+      // link, so it cannot outlive the file it is a copy of.
+      await removeSharedCopy(item.id);
       await updateItemFields(item.id, {file_path: null});
       await softDeleteItem(item.type, item.source_id);
       ToastAndroid.show('File deleted', ToastAndroid.SHORT);
@@ -136,6 +194,16 @@ const {
   return (
     <View>
       {isFolder && renderFolderSpecificItems()}
+
+      {canRestoreFromDrive && (
+        <MenuItem
+          onPress={() => {
+            hideMenu();
+            offerSharedCopyDownload(item);
+          }}>
+          <Text style={styles.menuItemText}>Download</Text>
+        </MenuItem>
+      )}
 
       <MenuItem
         onPress={() => {

@@ -128,6 +128,22 @@ export const makeLinkReadable = async fileId => {
 // is recoverable from the user's own Drive for 30 days, and this runs as a side
 // effect of deleting something in the app rather than as a deliberate "destroy
 // this file" action. DELETE on the files endpoint would bypass the bin.
+// Drive answers a failed call with {error: {message, errors: [{reason}]}}.
+// Both halves matter — the reason is what distinguishes one 403 from another,
+// the message is what a human reads — and neither is worth an exception of its
+// own if the body turns out not to be JSON.
+const describeDriveError = response => {
+  try {
+    const body = JSON.parse(response.text());
+    const reason = body?.error?.errors?.[0]?.reason;
+    const message = body?.error?.message;
+    if (!reason && !message) return '';
+    return `: ${[reason, message].filter(Boolean).join(' — ')}`;
+  } catch {
+    return '';
+  }
+};
+
 export const trashDriveFile = async fileId => {
   const accessToken = await getGoogleAccessToken();
 
@@ -145,6 +161,21 @@ export const trashDriveFile = async fileId => {
   // Already gone is the outcome we wanted, not a failure.
   if (status === 404) return;
   if (status < 200 || status >= 300) {
-    throw new Error(`Could not trash the Drive copy (HTTP ${status})`);
+    // The status on its own cannot tell the two 403s apart, and they need
+    // opposite responses:
+    //
+    //   insufficientFilePermissions — the file is not ours. A copy that
+    //     arrived with someone else's shared note belongs to the sender and is
+    //     granted read-only, so it can never be trashed from here. Expected.
+    //
+    //   insufficientPermissions — the signed-in session predates the current
+    //     scope list, so the token carries no Drive write scope. GoogleSignin
+    //     hands back whatever was consented to at sign-in, so adding a scope in
+    //     code does nothing for an existing session; it takes a re-consent.
+    //
+    // Drive names which in the body, so carry it rather than throwing it away.
+    throw new Error(
+      `Could not trash the Drive copy (HTTP ${status}${describeDriveError(response)})`,
+    );
   }
 };

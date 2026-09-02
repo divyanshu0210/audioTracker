@@ -8,6 +8,7 @@ import {onDisplayNotification} from '../notification/notificationService';
 import {getGoogleAccessToken} from '../auth/tokenManager';
 import {performUpload} from '../share/uploadTask';
 import useShareStore from '../stores/useShareStore';
+import {useMediaStore} from '../stores/useMediaStore';
 
 const QUEUE_KEY = '@download_queue';
 
@@ -154,6 +155,23 @@ const downloadSingleFile = async file => {
     if (result.statusCode === 200) {
       await updateItemFields(file.id, {file_path: file.localPath});
       useDownloadStore.getState().notifyDownloadsChanged();
+      // The row on the Device tab is still the one loaded at startup, carrying
+      // the file_path that wasn't there — so it stayed out of validDeviceFiles
+      // and a tap kept raising "File not on this device" over a file that had
+      // just finished downloading. A drive_file gets this from the Download
+      // button's own effect, but a device file's download is started from an
+      // alert or the player, with no row component mounted to react to it, so
+      // it has to happen here. setDeviceFiles re-runs the existence check and
+      // rebuilds validDeviceFiles, which is what makes the row playable again.
+      if (file.type === 'device_file') {
+        useMediaStore
+          .getState()
+          .setDeviceFiles(prev =>
+            prev.map(f =>
+              f.id === file.id ? {...f, file_path: file.localPath} : f,
+            ),
+          );
+      }
       setDownload(file.sourceId, {
         status: 'done',
         progress: 100,

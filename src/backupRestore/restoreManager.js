@@ -146,6 +146,49 @@ const withPreservedUpdatedAt = (table, row) => {
   return {...row, updated_at: row.created_at};
 };
 
+// Tables whose surrogate id is not the only key a replayed row can collide on.
+// Both declare UNIQUE(item_id) alongside an AUTOINCREMENT primary key, and the
+// upsert below can only name one conflict target — it names id, so a row
+// arriving with a fresh id but an item_id that is already taken raises
+// SQLITE_CONSTRAINT_UNIQUE instead of updating.
+//
+// That is not exotic: deleteDriveCopy is a hard DELETE and ids are never
+// reused, so un-sharing a file and sharing it again leaves two rows for the
+// same item in the backup history, under different ids. Replaying both is
+// guaranteed to hit this.
+//
+// Files are applied oldest level first, so the later row is the newer truth —
+// clearing whatever holds the key under a different id, then inserting, is
+// last-writer-wins, which is the semantics these 1:1 mappings want anyway.
+const NATURAL_KEYS = {
+  shared_drive_copies: ['item_id'],
+  youtube_meta: ['item_id'],
+};
+
+const clearConflictingNaturalKey = (table, row, label, tx) => {
+  const key = NATURAL_KEYS[table];
+  if (!key || row.id == null) return;
+  if (!key.every(col => row[col] != null)) return;
+
+  const where = key.map(col => `${col} = ?`).join(' AND ');
+  tx.executeSql(
+    `DELETE FROM ${table} WHERE ${where} AND id <> ?`,
+    [...key.map(col => row[col]), row.id],
+    (_, result) => {
+      if (result?.rowsAffected) {
+        console.warn(
+          `[Restore] Superseded row cleared: ${label} → ${table} ` +
+            `${key.map(col => `${col}=${row[col]}`).join(' ')} (kept id=${row.id})`,
+        );
+      }
+    },
+    (_, error) => {
+      console.error(`[Restore ERROR] ${label} → ${table} (clear)`, error);
+      return false;
+    },
+  );
+};
+
 // Every table here is upserted rather than INSERT OR REPLACE'd. REPLACE
 // resolves a key conflict by DELETING the existing row first, and that delete
 // fires ON DELETE CASCADE — items.parent_id, youtube_meta.item_id and
@@ -183,11 +226,13 @@ const insertData = (data, label, tx) => {
           () => {},
           (_, error) => {
             console.error(`[Restore ERROR] ${label} → notes`, error);
-            return true;
+            return false;
           },
         );
         continue;
       }
+
+      clearConflictingNaturalKey(table, row, label, tx);
 
       const cols = Object.keys(row);
       const vals = Object.values(row);
@@ -220,9 +265,18 @@ const insertData = (data, label, tx) => {
         `INSERT INTO ${table} (${cols.join(',')}) VALUES (${qs}) ${conflictAction}`,
         vals,
         () => {},
+        // Returning false marks the error handled, which is what keeps the
+        // transaction alive. Returning true means "not handled" in WebSQL, and
+        // the whole transaction is rolled back — so one row the schema refuses
+        // used to abort the entire restore and every file after it, which is
+        // how a single duplicate mapping left a restore stuck at 6% forever.
+        //
+        // A dropped row is recoverable; an abandoned restore is not. Same
+        // trade reconcileForeignKeys already makes for orphans, and every
+        // casualty is named in the log.
         (_, error) => {
           console.error(`[Restore ERROR] ${label} → ${table}`, error);
-          return true;
+          return false;
         },
       );
     }

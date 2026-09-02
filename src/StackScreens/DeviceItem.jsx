@@ -5,6 +5,7 @@ import {
   getFileIcon,
   MissingFileChip,
   SharedLinkChip,
+  SharedLinkLocalChip,
 } from '../contexts/fileIconHelper';
 import {useMediaStore} from '../stores/useMediaStore';
 
@@ -29,23 +30,25 @@ const DeviceItem = ({item}) => {
       s.deviceFilesChecked &&
       !s.validDeviceIds[item.source_id],
   );
+  const isUnplayable = isMissing && !hasSharedLink;
 
   return (
     <View style={styles.audioItem}>
-      {getFileIcon(item.mimeType)}
+              {getFileIcon(item.mimeType)}
 
       <View style={styles.itemDetails}>
         <View style={styles.titleRow}>
-          <Text style={styles.title} numberOfLines={2}>
+          <Text
+            style={[styles.title, isUnplayable && styles.dimmed]}
+            numberOfLines={2}>
             {item.title}
           </Text>
-          {/* The link wins when there is one, even for a file whose bytes are
-              gone: a Drive copy means the file is recoverable and shareable,
-              which is the useful thing to say about it. Tapping the row
-              prompts to download it back. The exclamation is kept for the
-              case with nothing behind it — missing and no copy to fetch. */}
           {hasSharedLink ? (
-            <SharedLinkChip />
+            isMissing ? (
+              <SharedLinkChip />
+            ) : (
+              <SharedLinkLocalChip />
+            )
           ) : (
             isMissing && <MissingFileChip />
           )}
@@ -77,6 +80,9 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     fontSize: 14,
     color: '#222',
+  },
+  dimmed: {
+    opacity: 0.45,
   },
 
 });

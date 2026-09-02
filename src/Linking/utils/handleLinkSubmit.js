@@ -499,16 +499,21 @@ export const pickAndImportDeviceFiles = async (
   // One unreadable file used to abort the loop, dropping every file after it
   // without a word. Import them independently and name the ones that failed.
   const failed = [];
-  for (const file of results) {
-    try {
-      // Passed on like the link path does: both callers had the selected
-      // category in hand and neither forwarded it, so a file picked from the
-      // device while a category was open landed outside it.
-      await handleFileProcessing(file, setDeviceFiles, selectedCategory);
-    } catch (err) {
-      console.error(`❌ Import failed for ${file?.name}:`, err);
-      failed.push(file?.name || 'Unnamed file');
+  setInserting(true);
+  try {
+    for (const file of results) {
+      try {
+        // Passed on like the link path does: both callers had the selected
+        // category in hand and neither forwarded it, so a file picked from the
+        // device while a category was open landed outside it.
+        await handleFileProcessing(file, setDeviceFiles, selectedCategory);
+      } catch (err) {
+        console.error(`❌ Import failed for ${file?.name}:`, err);
+        failed.push(file?.name || 'Unnamed file');
+      }
     }
+  } finally {
+    setInserting(false);
   }
 
   if (failed.length > 0) {

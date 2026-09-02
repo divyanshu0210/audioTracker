@@ -178,6 +178,15 @@ public class MediaPickerModule extends ReactContextBaseJavaModule {
   }
 
   private static void deliver(Context context, List<Uri> uris, Promise promise) {
+    // Taken for every pick, not just the stashed ones. The grant that comes
+    // with the result is transient and belongs to the picker's task: on ROMs
+    // that tear that task down promptly, a multi-file import can lose access
+    // partway through the copies. Persisting it is free and the copies read
+    // through it either way; JS releases them when the bytes are in.
+    for (Uri uri : uris) {
+      takePersistablePermission(context, uri);
+    }
+
     if (promise != null) {
       try {
         promise.resolve(describe(context, uris));
@@ -194,9 +203,6 @@ public class MediaPickerModule extends ReactContextBaseJavaModule {
         TAG,
         "Picked " + uris.size() + " file(s) with no JS waiting -- the app was"
             + " restarted while the picker was open. Stashing for the next launch.");
-    for (Uri uri : uris) {
-      takePersistablePermission(context, uri);
-    }
     stashPending(context, uris);
     // If JS is already back up, it can take them right now.
     ReactEmitter.emit(context, EVENT_PENDING, Arguments.createMap());

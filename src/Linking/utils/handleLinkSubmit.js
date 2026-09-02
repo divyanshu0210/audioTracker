@@ -557,6 +557,22 @@ const clearPickInFlight = async () => {
   }
 };
 
+// What the copy or the insert actually threw. RNFS puts the useful part in
+// message ("ENOENT: ...", "EACCES: ..."); a rejected native promise may carry
+// only a code.
+const describeImportError = err =>
+  err?.message || err?.code || String(err ?? 'Unknown error');
+
+// Names alone say which files failed, never why, and the standing line about
+// cloud downloads was a guess that sent the first real report from a failing
+// device down the wrong path. The thrown message goes in instead, deduplicated:
+// thirteen files that failed for one reason should read as one reason.
+const formatImportFailures = failed => {
+  const names = failed.map(entry => entry.name).join('\n');
+  const reasons = [...new Set(failed.map(entry => entry.error))];
+  return `${names}\n\n${reasons.join('\n\n')}`;
+};
+
 // The picker and the import that follows it, in one place. Both callers used to
 // carry their own copy of this, and both wrapped the whole thing in a single
 // try whose catch blamed every failure on the picker.
@@ -633,7 +649,20 @@ export const pickAndImportDeviceFiles = async (
       await handleFileProcessing(file, setDeviceFiles, selectedCategory);
     } catch (err) {
       console.error(`❌ Import failed for ${file?.name}:`, err);
-      failed.push(file?.name || 'Unnamed file');
+      failed.push({
+        name: file?.name || 'Unnamed file',
+        error: describeImportError(err),
+      });
+    }
+  }
+
+  // The bytes are ours now, so give the read grants back: Android caps how many
+  // an app may hold persisted, and these were taken for every pick.
+  if (MediaPicker?.releaseUris) {
+    try {
+      await MediaPicker.releaseUris(results.map(file => file.uri));
+    } catch (err) {
+      console.warn('⚠️ Could not release the picked file grants:', err);
     }
   }
 
@@ -642,7 +671,7 @@ export const pickAndImportDeviceFiles = async (
       failed.length === results.length
         ? 'Could not add these files'
         : 'Some files were not added',
-      `${failed.join('\n')}\n\nFiles kept in the cloud may need to be downloaded to this device first.`,
+      formatImportFailures(failed),
     );
   } else if (unsupported.length > 0) {
     Alert.alert(
@@ -721,7 +750,10 @@ export const importPendingPickedFiles = async setDeviceFiles => {
       await handleFileProcessing(file, setDeviceFiles, null, false, false);
     } catch (err) {
       console.error(`❌ Recovered import failed for ${file?.name}:`, err);
-      failed.push(file?.name || 'Unnamed file');
+      failed.push({
+        name: file?.name || 'Unnamed file',
+        error: describeImportError(err),
+      });
     }
   }
 
@@ -743,8 +775,8 @@ export const importPendingPickedFiles = async setDeviceFiles => {
   if (failed.length > 0) {
     Alert.alert(
       'Could not add these files',
-      `${failed.join(
-        '\n',
+      `${formatImportFailures(
+        failed,
       )}\n\naudioTracker was closed while the file picker was open, and Android may have withdrawn access to them. Please pick them again.`,
     );
   }

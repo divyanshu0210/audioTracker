@@ -29,6 +29,7 @@ class MainApplication : Application(), ReactApplication {
               add(BackupModulePackage())
               add(PlaybackServicePackage())
               add(PipPackage())
+              add(MediaPickerPackage())
              //  add(RNBackgroundFetchPackage())
             }
  

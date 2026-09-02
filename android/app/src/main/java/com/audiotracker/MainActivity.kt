@@ -1,6 +1,7 @@
 package com.audiotracker
 
 import android.app.PictureInPictureParams
+import android.content.Intent
 import android.content.res.Configuration
 import android.os.Build
 import android.util.Log
@@ -27,6 +28,20 @@ class MainActivity : ReactActivity() {
    */
   override fun createReactActivityDelegate(): ReactActivityDelegate =
       DefaultReactActivityDelegate(this, mainComponentName, fabricEnabled)
+
+  // The media picker's result is taken here rather than through a React
+  // ActivityEventListener. When Android kills the app while the picker is in
+  // front - routine on aggressively memory-managed ROMs, and the reason a
+  // selection could come back to nothing at all - this result arrives at the
+  // recreated activity before the React context exists, so a listener owned by
+  // a module that has not been created yet would never see it. MediaPickerModule
+  // stashes the selection in that case and hands it over once JS is up.
+  override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+    super.onActivityResult(requestCode, resultCode, data)
+    if (requestCode == MediaPickerModule.REQUEST_CODE) {
+      MediaPickerModule.handleActivityResult(this, resultCode, data)
+    }
+  }
 
   // ── Picture-in-Picture ──────────────────────────────────────────────────────
   //

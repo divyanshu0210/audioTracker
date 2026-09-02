@@ -3,12 +3,14 @@ import MentorshipRequestBottomSheet from '../../appMentor/MentorshipRequestBotto
 import {useAppState} from '../../contexts/AppStateContext';
 import AddNotebookBottomSheet from './AddNotebookBottomSheet';
 import NoteInfoBottomMenu from './NoteInfoBottomMenu';
+import ContinueWatchingSheet from '../../history/ContinueWatchingSheet';
 
 export function GlobalBottomSheets() {
   const {
     bottomSheetRef,
     addNBbottomSheetRef,
     mentorMenteeRequestBottomSheetRef,
+    continueWatchingSheetRef,
   } = useAppState();
 
   return (
@@ -17,6 +19,7 @@ export function GlobalBottomSheets() {
         <NoteInfoBottomMenu ref={bottomSheetRef} />
         <AddNotebookBottomSheet ref={addNBbottomSheetRef} />
         <MentorshipRequestBottomSheet ref={mentorMenteeRequestBottomSheetRef} />
+        <ContinueWatchingSheet ref={continueWatchingSheetRef} />
       </BottomSheetModalProvider>
     </>
   );

@@ -7,6 +7,7 @@ export const AppStateProvider = ({children}) => {
   const bottomSheetRef = useRef(null);
   const addNBbottomSheetRef = useRef(null);
   const mentorMenteeRequestBottomSheetRef = useRef(null);
+  const continueWatchingSheetRef = useRef(null);
 
   return (
     <AppStateContext.Provider
@@ -16,6 +17,7 @@ export const AppStateProvider = ({children}) => {
         bottomSheetRef,
         addNBbottomSheetRef,
         mentorMenteeRequestBottomSheetRef,
+        continueWatchingSheetRef,
       }}>
       {children}
     </AppStateContext.Provider>

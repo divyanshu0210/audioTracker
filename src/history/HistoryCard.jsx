@@ -50,6 +50,14 @@ const formatDate = dateString => {
 export const HistoryItem = ({
   item,
   variant = 'card', // "card" | "list"
+  // Run just before the row navigates, for callers that have something to
+  // clean up first — the launch sheet closes itself here. Optional: the row
+  // still navigates on its own without it.
+  onNavigate,
+  // The 8pt type icon in the thumbnail's corner. On by default, since it is
+  // the only thing saying where a card came from; the launch strip turns it
+  // off, where at that size it reads as decoration rather than information.
+  showTypeBadge = true,
 }) => {
   const totalWatched = item.watchedIntervals.reduce(
     (sum, [start, end]) => sum + (end - start),
@@ -60,14 +68,19 @@ export const HistoryItem = ({
 
   return (
     <TouchableOpacity
-      onPress={() => navigationRef.navigate('BacePlayer', {item: item})}
+      onPress={() => {
+        onNavigate?.(item);
+        navigationRef.navigate('BacePlayer', {item: item});
+      }}
       style={[isList ? styles.listContainer : styles.cardContainer]}>
       {/* Thumbnail */}
       <MediaThumbnail item={item} isList={isList}>
         {/* Type icon superimposed on the thumbnail in both card and list. */}
-        <View style={styles.typeBadge}>
-          {getFileIcon(iconInput(item), 8, 16)}
-        </View>
+        {showTypeBadge && (
+          <View style={styles.typeBadge}>
+            {getFileIcon(iconInput(item), 8, 16)}
+          </View>
+        )}
         <SegmentedProgressBar
           intervals={item.watchedIntervals}
           duration={item.duration}

@@ -16,6 +16,7 @@ import {
   handleLinkSubmit,
   pickAndImportDeviceFiles,
 } from '../../Linking/utils/handleLinkSubmit';
+import {addItemToCategory} from '../../categories/catDB';
 import DriveLinkModal from '../modules/DriveLink';
 import MyModal from '../MyModal';
 import {createNewNote} from '../../notes/richDB';
@@ -117,6 +118,24 @@ const HomeFABBtn = () => {
         defaultNotebook,
         noteId,
       );
+
+      // The note still lives in the Default Notebook — that is its source —
+      // but a note made while a category is open also belongs to that
+      // category. Without this it only looked filed: createNoteInstant
+      // prepends it to the list, and the next load read membership back from
+      // category_items and dropped it.
+      //
+      // Safe to run before the note row is committed: category_items has no
+      // foreign key to notes, which is an FTS5 table and cannot be referenced
+      // by one.
+      if (selectedCategory != null) {
+        try {
+          await addItemToCategory(selectedCategory, noteId, 'note');
+        } catch (error) {
+          console.error('Could not file the new note under the category:', error);
+        }
+      }
+
       navigationRef.navigate('NotesSectionWithBack');
     } catch (error) {
       console.error('Note creation failed:', error);

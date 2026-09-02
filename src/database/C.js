@@ -202,7 +202,11 @@ export const addNotebook = (title, color, callback) => {
       [title, color],
       (_, result) => {
         console.log('Notebook saved! ID:', result.insertId);
-        if (callback) callback(); // Call fetchNotebooks after adding
+        // The new id goes to the callback: a notebook created while a category
+        // is open has to be linked to it, and there was no other way to learn
+        // which row was just written. Existing callers take no arguments and
+        // are unaffected.
+        if (callback) callback(result.insertId);
       },
       error => console.error('Error saving notebook:', error),
     );

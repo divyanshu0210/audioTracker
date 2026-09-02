@@ -47,6 +47,29 @@ export const extractLinkType = url => {
   return null;
 };
 
+// Awaited, and with its own catch.
+//
+// The YouTube paths used to fire this and walk away. A rejection then became an
+// unhandled promise that nothing reported, so the item was added, prepended to
+// the list by setItems — which is why it looked like it worked — and had no
+// row in category_items at all. The next refresh reads the list back through
+// getCategoryData and the item is simply gone.
+//
+// Logged rather than rethrown: the item itself was added successfully, and
+// turning a category miss into "Failed to fetch YouTube data" would report the
+// wrong failure.
+const addToSelectedCategory = async (selectedCategory, item) => {
+  if (selectedCategory == null || !item) return;
+  try {
+    await addItemToCategory(selectedCategory, item.source_id, item.type);
+  } catch (error) {
+    console.error(
+      `Could not add ${item.type} ${item.source_id} to category ${selectedCategory}:`,
+      error,
+    );
+  }
+};
+
 export const handleLinkSubmit = async (
   inputLink,
   {
@@ -101,9 +124,7 @@ export const fetchYTData = async (
         return [updatedItem, ...filtered];
       });
 
-      if (selectedCategory != null) {
-        addItemToCategory(selectedCategory, updatedItem.source_id, updatedItem.type);
-      }
+      await addToSelectedCategory(selectedCategory, updatedItem);
 
       if (type === 'youtube_video') {
         navigationRef.navigate('BacePlayer', {item: updatedItem});
@@ -147,9 +168,7 @@ export const fetchYTData = async (
         return [fullItem, ...filtered];
       });
 
-      if (selectedCategory != null) {
-        addItemToCategory(selectedCategory, fullItem.source_id, fullItem.type);
-      }
+      await addToSelectedCategory(selectedCategory, fullItem);
 
       navigationRef.navigate('BacePlayer', {item: fullItem});
     } else if (type === 'youtube_playlist') {
@@ -188,9 +207,7 @@ export const fetchYTData = async (
         return [fullItem, ...filtered];
       });
 
-      if (selectedCategory != null) {
-        addItemToCategory(selectedCategory, fullItem.source_id, fullItem.type);
-      }
+      await addToSelectedCategory(selectedCategory, fullItem);
     }
   } catch (error) {
     console.error('YT Fetch Error:', error);

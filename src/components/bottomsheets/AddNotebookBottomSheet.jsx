@@ -14,7 +14,9 @@ import BottomSheet, {
 } from '@gorhom/bottom-sheet';
 import ColorPallete from '../ColorPallete';
 import {addNotebook} from '../../database/C';
+import {addItemToCategory, getCategoryData} from '../../categories/catDB';
 import {fetchNotebooks} from '../../database/R';
+import {useSelectionStore} from '../../stores/useSelectionStore';
 import {updateNotebook} from '../../database/U';
 import useDbStore from '../../database/dbStore';
 import { useNotesStore } from '../../stores/useNotesStore';
@@ -37,6 +39,9 @@ const AddNotebookBottomSheet = forwardRef(({}, ref) => {
     setEditingNotebook: state.setEditingNotebook,
   })),
 );
+  // Which category the Notebooks tab is currently filtered to, if any — the
+  // same value HomeScreen hands HomeTabs as categoryId.
+  const selectedCategory = useSelectionStore(state => state.selectedCategory);
   const {inserting, setInserting} = useDbStore();
 
   const snapPoints = ['30%'];
@@ -78,9 +83,29 @@ const AddNotebookBottomSheet = forwardRef(({}, ref) => {
       ? selectedColor
       : colors[Math.floor(Math.random() * colors.length)];
 
-    addNotebook(notebookName, finalColor, () => {
-      fetchNotebooks(setNotebooks);
-      setInserting(false);
+    // A notebook created while a category is open belongs to that category.
+    // Without the link it still appeared, because the refetch below ignored the
+    // filter and replaced the list with every notebook — then the next real
+    // load read membership back from category_items and it was gone.
+    addNotebook(notebookName, finalColor, async newId => {
+      try {
+        if (selectedCategory != null && newId != null) {
+          await addItemToCategory(selectedCategory, newId, 'notebook');
+        }
+        // Refetched through the same filter the tab is showing, so the list
+        // does not briefly fill with notebooks from outside the category.
+        const list =
+          selectedCategory != null
+            ? await getCategoryData(selectedCategory, ['notebook'])
+            : null;
+        if (list) setNotebooks(list);
+        else fetchNotebooks(setNotebooks);
+      } catch (error) {
+        console.error('Could not file the new notebook under the category:', error);
+        fetchNotebooks(setNotebooks);
+      } finally {
+        setInserting(false);
+      }
     });
    navigationRef.navigate('MainApp', {
         screen: 'Home',

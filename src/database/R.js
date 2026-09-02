@@ -1,4 +1,5 @@
 import {ITEM_TYPES_THAT_USE_ITEMS_TABLE} from '../contexts/constants';
+import {SHARED_NOTES_CATEGORY} from '../categories/catDB';
 import {getDb} from './database';
 
 // drive_file_id rides along the same way channel_title and thumbnail do: the
@@ -194,8 +195,13 @@ export const fetchNotes = ({
           n.text_content,
           n.created_at,
           'note' AS type,
+          -- Notes that came from someone else's bundle. Since a shared note
+          -- with media now attaches to that media rather than collecting in
+          -- the Shared Notes notebook, this is the only thing left that says
+          -- where it came from.
+          (si.id IS NOT NULL) AS is_shared_import,
 
-          CASE 
+          CASE
             WHEN n.source_type IN (${itemsTypesList})
               THEN json_object(
                 'id', i.id,
@@ -210,7 +216,11 @@ export const fetchNotes = ({
                 'out_show', i.out_show,
                 'in_show', i.in_show,
                 'created_at', i.created_at,
-                'deleted_at', i.deleted_at
+                'deleted_at', i.deleted_at,
+                -- The player needs this to offer a download for a device
+                -- file whose bytes are elsewhere: its copy lives in Drive
+                -- under this id, and the item row has no column for it.
+                'drive_file_id', sdc.drive_file_id
               )
 
             WHEN n.source_type = 'notebook'
@@ -233,10 +243,12 @@ export const fetchNotes = ({
       // JOIN items (youtube / drive / device)
       // ─────────────────────────────────────────
       joins.push(`
-        LEFT JOIN items i 
+        LEFT JOIN items i
           ON n.source_id = i.source_id
           AND n.source_type IN (${itemsTypesList})
           AND n.source_type = i.type
+        LEFT JOIN shared_drive_copies sdc
+          ON sdc.item_id = i.id
       `);
 
       // ─────────────────────────────────────────
@@ -246,6 +258,25 @@ export const fetchNotes = ({
         LEFT JOIN notebooks nb
           ON n.source_id = nb.id
           AND n.source_type = 'notebook'
+      `);
+
+      // ─────────────────────────────────────────
+      // JOIN shared-notes category (badge)
+      // ─────────────────────────────────────────
+      // Membership in the hidden "shared notes" category is what marks a note
+      // as having come from someone else's bundle. Its id is looked up by name
+      // in a subquery rather than passed in, so this join needs no parameter
+      // and cannot disturb the positional order of the ones below.
+      joins.push(`
+        LEFT JOIN category_items si
+          ON si.item_id = n.rowid
+          AND si.item_type = 'note'
+          AND si.deleted_at IS NULL
+          AND si.category_id = (
+            SELECT id FROM categories
+            WHERE name = '${SHARED_NOTES_CATEGORY}' AND deleted_at IS NULL
+            LIMIT 1
+          )
       `);
 
       // ─────────────────────────────────────────

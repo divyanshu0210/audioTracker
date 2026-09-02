@@ -24,6 +24,7 @@ import RichTextEditor from '../notes/richEditor/RichTextEditor';
 import VideoTracker from './videoTracker';
 import useSettingsStore from '../Settings/settingsStore';
 import VLCPlayerComponent from './VLCPlayer/VLCPlayerComponent';
+import MediaUnavailable from './MediaUnavailable';
 import YouTubePlayerComponent from './VLCPlayer/YouTubePlayerComponent ';
 import AddNewNoteBtn from '../components/buttons/AddNewNoteBtn';
 import PlayerQueue from './PlayerQueue';
@@ -104,6 +105,19 @@ const BacePlayer = () => {
   const [playlist, setPlaylist] = useState(routeItems || (item ? [item] : []));
   const [currentIndex, setCurrentIndex] = useState(routeCurrentIndex || 0);
   const currentItem = playlist[currentIndex] || null;
+
+  // The download service writes file_path back to the items row, but the
+  // playlist here came from route params and would keep showing the download
+  // panel in front of a file that is now on disk. Patching it in place is what
+  // hands the item over to the real player.
+  const handleMediaDownloaded = useCallback((sourceId, localPath) => {
+    if (!localPath) return;
+    setPlaylist(prev =>
+      prev.map(it =>
+        it.source_id === sourceId ? {...it, file_path: localPath} : it,
+      ),
+    );
+  }, []);
   // Seconds left before auto-advancing to the next item, or null when no
   // countdown is running — see handleAutoAdvance/stopAutoAdvanceCountdown.
   const [autoAdvanceSecondsLeft, setAutoAdvanceSecondsLeft] = useState(null);
@@ -861,22 +875,23 @@ const BacePlayer = () => {
                   <ActivityIndicator size="large" color="#fff" />
                 </View>
               )}
-              {source_type === 'youtube_video' && isDataLoaded ? (
-                <YouTubePlayerComponent
-                  ref={playerRef}
-                  item={currentItem}
-                  notesSectionRef={notesSectionRef}
-                  onBack={handleBackPress}
-                  onCurrentTimeChange={handleCurrentTimeChange}
-                  onIsPausedChange={handleIsPausedChange}
-                  onPlayBackRateChange={handlePlaybackRateChange}
-                  updateDuration={updateDuration}
-                  pauseOnStart={pauseOnStart}
-                  startTime={startFrom?.current}
-                  onEnd={handleAutoAdvance}
-                />
-              ) : (
-                currentItem.file_path &&
+              {source_type === 'youtube_video' ? (
+                isDataLoaded && (
+                  <YouTubePlayerComponent
+                    ref={playerRef}
+                    item={currentItem}
+                    notesSectionRef={notesSectionRef}
+                    onBack={handleBackPress}
+                    onCurrentTimeChange={handleCurrentTimeChange}
+                    onIsPausedChange={handleIsPausedChange}
+                    onPlayBackRateChange={handlePlaybackRateChange}
+                    updateDuration={updateDuration}
+                    pauseOnStart={pauseOnStart}
+                    startTime={startFrom?.current}
+                    onEnd={handleAutoAdvance}
+                  />
+                )
+              ) : currentItem.file_path ? (
                 isDataLoaded && (
                   <VLCPlayerComponent
                     ref={playerRef}
@@ -894,6 +909,15 @@ const BacePlayer = () => {
                     onEnd={handleAutoAdvance}
                   />
                 )
+              ) : (
+                // No path and not a YouTube video: media that came with a
+                // shared note and was never fetched, or a device file whose
+                // row outlived its bytes. This branch used to render nothing,
+                // leaving a black rectangle with no explanation.
+                <MediaUnavailable
+                  item={currentItem}
+                  onDownloaded={handleMediaDownloaded}
+                />
               )}
             </ViewShot>
 

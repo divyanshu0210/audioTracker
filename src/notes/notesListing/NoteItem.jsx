@@ -2,7 +2,7 @@ import React, {memo} from 'react';
 import {StyleSheet, Text, View} from 'react-native';
 import Entypo from 'react-native-vector-icons/Entypo';
 import FontAwesome from 'react-native-vector-icons/FontAwesome';
-import {getFileIcon} from '../../contexts/fileIconHelper';
+import {getFileIcon, SharedInChip} from '../../contexts/fileIconHelper';
 
 const NoteItem = ({item}) => {
   const previewText = getPreviewText(item);
@@ -15,9 +15,14 @@ const NoteItem = ({item}) => {
       <View style={styles.noteContent}>
         <View>{getFileIcon(item.source_type, 22)}</View>
         <View style={{marginLeft: 10, flex: 1}}>
-          <Text style={styles.noteTitle}>
-            {item.noteTitle || 'Untitled Note'}
-          </Text>
+          <View style={styles.titleRow}>
+            <Text style={styles.noteTitle} numberOfLines={1}>
+              {item.noteTitle || 'Untitled Note'}
+            </Text>
+            {/* Where the note came from. A shared note now sits under the
+                media it was taken against, so its notebook no longer says. */}
+            {!!item.is_shared_import && <SharedInChip />}
+          </View>
           <Text style={styles.noteText} numberOfLines={1}>{previewText}</Text>
           {item.relatedItem && (
             <Text style={styles.note} numberOfLines={1}>
@@ -56,7 +61,8 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   noteText: {fontSize: 14, color: '#777'},
-  noteTitle: {fontSize: 16, color: '#000'},
+  titleRow: {flexDirection: 'row', alignItems: 'center'},
+  noteTitle: {flexShrink: 1, fontSize: 16, color: '#000'},
   note: {
     fontSize: 11,
     color: '#666',

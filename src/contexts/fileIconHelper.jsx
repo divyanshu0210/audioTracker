@@ -202,6 +202,12 @@ export const SharedLinkChip = () => (
   </View>
 );
 
+export const SharedInChip = () => (
+  <View style={[styles.sharedLinkChip, styles.sharedInChip]}>
+    <MaterialCommunityIcons name="account-multiple" size={12} color="#6D28D9" />
+  </View>
+);
+
 const styles = StyleSheet.create({
   container: {
     borderRadius: 12,
@@ -235,5 +241,10 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
     paddingHorizontal: 0,
     paddingVertical: 0,
+  },
+  // Same tint family as the Shared Notes notebook, so the two ways imported
+  // content shows up read as one thing.
+  sharedInChip: {
+    backgroundColor: '#EDE9FE',
   },
 });

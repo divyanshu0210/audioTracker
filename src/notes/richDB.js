@@ -79,7 +79,10 @@ export const getNoteById = noteRowId => {
   return new Promise((resolve, reject) => {
     fastdb.transaction(tx => {
       tx.executeSql(
-        'SELECT title, content, text_content FROM notes WHERE rowid = ? AND deleted_at IS NULL;',
+        // source_id/source_type ride along for sharing: a bundle carries the
+        // media a note was taken against, and this is the only read that has
+        // the note row in hand.
+        'SELECT source_id, source_type, title, content, text_content FROM notes WHERE rowid = ? AND deleted_at IS NULL;',
         [noteRowId],
         (_, { rows: { _array } }) => resolve(_array[0] || {}),
         (_, error) => {
@@ -87,6 +90,64 @@ export const getNoteById = noteRowId => {
           reject(error);
           return false;
         }
+      );
+    });
+  });
+};
+
+/**
+ * Whether a rowid is free, taken by a live note, or held by a deleted one.
+ *
+ * An imported note keeps the rowid it had on the sender's device — that is
+ * what makes re-importing the same bundle idempotent, with no side table
+ * mapping their id to ours. So the importer has to ask about a specific rowid
+ * before using it, and a soft delete leaves the row in place with its content
+ * blanked, which is neither "free" nor "already imported": the note is gone as
+ * far as the user is concerned, but the rowid is still occupied and an INSERT
+ * would fail on it.
+ *
+ * Returns 'absent' | 'live' | 'deleted'.
+ */
+export const getNoteRowState = noteRowId => {
+  const fastdb = getDb();
+  return new Promise((resolve, reject) => {
+    fastdb.transaction(tx => {
+      tx.executeSql(
+        'SELECT deleted_at FROM notes WHERE rowid = ? LIMIT 1;',
+        [noteRowId],
+        (_, {rows}) => {
+          if (!rows.length) return resolve('absent');
+          return resolve(rows.item(0).deleted_at ? 'deleted' : 'live');
+        },
+        (_, error) => {
+          console.error('Error reading note row state:', error);
+          reject(error);
+          return false;
+        },
+      );
+    });
+  });
+};
+
+/**
+ * Drops a note row outright, rather than blanking it the way deleteNoteById
+ * does. Only for reclaiming the rowid of a note the user deleted so a
+ * re-import can put it back — notes is FTS5 and a second INSERT at the same
+ * rowid would fail.
+ */
+export const purgeNoteRow = noteRowId => {
+  const fastdb = getDb();
+  return new Promise((resolve, reject) => {
+    fastdb.transaction(tx => {
+      tx.executeSql(
+        'DELETE FROM notes WHERE rowid = ?;',
+        [noteRowId],
+        () => resolve(),
+        (_, error) => {
+          console.error('Error purging note row:', error);
+          reject(error);
+          return false;
+        },
       );
     });
   });

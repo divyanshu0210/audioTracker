@@ -7,7 +7,7 @@ import { useMediaStore } from '../stores/useMediaStore';
 import { useShallow } from 'zustand/react/shallow';
 import {
   handleIncomingNoteFile,
-  looksLikeNoteFile,
+  resolvesToNoteFile,
 } from '../notes/share/handleIncomingNoteFile';
 
 const useSharedContentHandler = () => {
@@ -28,16 +28,23 @@ const {userInfo} = useAppState();
   const hasHandledInitialUrl = useRef(false); // <--- Add this
   useEffect(() => {
     // Function to handle shared content
-    const handleShare = (item) => {
+    const handleShare = async (item) => {
+      // Logged either way: a share arriving from audioTracker itself comes
+      // through onNewIntent rather than a cold start, and "did the event even
+      // fire" is the first thing worth knowing when nothing happens after a
+      // share to self.
+      console.log('Shared content received:', item);
       if (!item) return;
-console.log(item)
       const { data, mimeType } = item;
 
       // Note bundles are handled here rather than by handleLinkSubmit, and
       // without waiting for userInfo — importing into the local DB needs no
       // account, and holding it back would silently drop the file when the
       // share arrives on a cold start.
-      if (looksLikeNoteFile(data, mimeType)) {
+      //
+      // Shared from Downloads or a chat app, the type is octet-stream and the
+      // URI is opaque, so this falls back to the file's display name.
+      if (await resolvesToNoteFile(data, mimeType)) {
         handleIncomingNoteFile(data);
         return;
       }

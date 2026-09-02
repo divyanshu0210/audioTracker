@@ -11,7 +11,10 @@ import {
 } from '../../backgroundService/backgroundDownloadService';
 import {DownloadProgressIndicator} from './DownloadProgressIndicator';
 
-const getLocalFilePath = (sourceId, fileName) => {
+// Exported because media arriving with a shared note is downloaded from the
+// same Drive endpoint and has to land on the same path this button would have
+// given it — otherwise tapping Download afterwards fetches a second copy.
+export const getLocalFilePath = (sourceId, fileName) => {
   const sanitizedFileName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
   const sanitizedSourceId = sourceId.replace(/[^a-zA-Z0-9._-]/g, '_');
   return `${RNFS.ExternalDirectoryPath}/${sanitizedSourceId}_${sanitizedFileName}`;

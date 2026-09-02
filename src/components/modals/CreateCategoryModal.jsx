@@ -13,27 +13,36 @@ import {
 import Ionicons from 'react-native-vector-icons/Ionicons';
 
 import ColorPallete from '../ColorPallete';
-import { addCategory, updateCategory } from '../../categories/catDB';
+import {
+  addCategory,
+  HIDDEN_CATEGORY_TAGS,
+  updateCategory,
+} from '../../categories/catDB';
 import { useAppState } from '../../contexts/AppStateContext';
 import { useSelectionStore } from '../../stores/useSelectionStore';
 import { useShallow } from 'zustand/react/shallow';
 
-// getAllCategories hides any name containing "@" or the mentee tag (see its
-// WHERE clause) — that's deliberate, it's how the mentor/mentee categories
-// created from menteeKey/mentorKey stay out of the normal category lists.
+// getAllCategories hides any name containing "@" or one of
+// HIDDEN_CATEGORY_TAGS (see its WHERE clause) — that's deliberate, it's how
+// the mentor/mentee categories created from menteeKey/mentorKey, and the
+// category holding imported notes, stay out of the normal category lists.
 // A user-typed name that trips those same filters would save fine and then
 // never appear anywhere, leaving an invisible row that still holds the name
 // (addCategory reuses an existing row's id on a name match, so even
 // re-creating it later silently returns the hidden one). So this guards the
 // user-typed path only — addCategory itself must keep accepting them.
-const MENTEE_CAT_FILTER_TAG = '[MENTEE_CAT_Filter]';
 
 const getCategoryNameError = name => {
   if (name.includes('@')) {
     return 'Category names cannot contain "@".';
   }
-  if (name.includes(MENTEE_CAT_FILTER_TAG)) {
-    return `Category names cannot contain "${MENTEE_CAT_FILTER_TAG}".`;
+  // The other half of HIDDEN_CATEGORY_TAGS: getAllCategories hides names
+  // carrying one, so a user-made category using the same tag would be saved
+  // and then be invisible everywhere — and, for the shared-notes tag, would
+  // quietly badge its notes as having come from someone else.
+  const hiddenTag = HIDDEN_CATEGORY_TAGS.find(tag => name.includes(tag));
+  if (hiddenTag) {
+    return `Category names cannot contain "${hiddenTag}".`;
   }
   return null;
 };

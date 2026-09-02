@@ -358,8 +358,27 @@ const handleDeviceFileFromUri = async (
     const {name: fileName, mime: mimeType} = await getFileMeta(uri);
 
     if (!isAudioOrVideo(mimeType)) {
-      // setInserting(false);
-      Alert.alert('Invalid URL');
+      // Reached more often since audioTracker started appearing in "Open with"
+      // for files of unknown type — the only way Android will offer it for a
+      // .atnote bundle out of Downloads (see the manifest). So this says what
+      // the app does take, instead of blaming the URL for being invalid.
+      //
+      // The settings button is for the one way that filter can really bite: a
+      // user who picked "Always" in the chooser now has every unknown file
+      // opening audioTracker, and there is no API to undo that from here —
+      // only the app's own details page can clear a default. Whoever is stuck
+      // in that loop is looking at this alert every time, so the way out
+      // belongs on it rather than in a support answer they never read.
+      Alert.alert(
+        'Unsupported file',
+        'audioTracker opens audio and video files, and .atnote note files.\n\n' +
+          'If Android keeps opening files like this one with audioTracker, ' +
+          'clear its default under "Open by default" in app settings.',
+        [
+          {text: 'OK', style: 'cancel'},
+          {text: 'App settings', onPress: () => Linking.openSettings()},
+        ],
+      );
       return;
     }
 

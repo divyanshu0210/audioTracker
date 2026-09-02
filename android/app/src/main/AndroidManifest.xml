@@ -81,16 +81,21 @@
             <data android:scheme="audiotracker"/>
         </intent-filter>
 
-        <!-- Shared note bundles (.atnote). Two filters because the two ways
-             one arrives carry different information:
+        <!-- Shared note bundles (.atnote). Three filters, because Android
+             gives an app three quite different amounts of information about
+             the same file and only the last one covers the common case.
 
-             1. Our own share sets the custom MIME type, which survives a
-                content:// URI even though such URIs usually have no filename.
-             2. Mail and chat apps generally drop the type (sending
-                application/octet-stream) and leave only the extension, which
-                is what pathPattern matches. That only works when the URI
-                actually has a path — a limitation of Android, not of this
-                filter; the SEND route in ShareHandler is the fallback. -->
+             1. Our own share sets the custom MIME type. Anything that
+                preserves it routes here exactly, with no false positives.
+
+             2. Some providers do put the filename in the URI (a chat app's
+                FileProvider, a file manager on a real path), and then the
+                extension is matchable. pathSuffix is the reliable form and
+                needs API 31; the pathPattern list is the pre-31 equivalent,
+                repeated per leading dot because Android's pathPattern does
+                not backtrack — a title like "Lecture 1.2" would otherwise
+                miss. Both need android:host, since a declared path is only
+                evaluated inside an authority match. -->
         <intent-filter>
             <action android:name="android.intent.action.VIEW"/>
             <category android:name="android.intent.category.DEFAULT"/>
@@ -106,9 +111,35 @@
             <data android:scheme="content"/>
             <data android:host="*"/>
             <data android:mimeType="*/*"/>
+            <data android:pathSuffix=".atnote"/>
             <data android:pathPattern=".*\.atnote"/>
             <data android:pathPattern=".*\..*\.atnote"/>
             <data android:pathPattern=".*\..*\..*\.atnote"/>
+            <data android:pathPattern=".*\..*\..*\..*\.atnote"/>
+        </intent-filter>
+
+        <!-- 3. The case the two above cannot reach, and the one that actually
+             happens: a file saved to Downloads, or handed over by a chat app.
+             Its content:// URI is an opaque document id with no filename in
+             the path, and "atnote" is in no system MIME table, so the provider
+             reports application/octet-stream. Neither the type nor the path
+             says anything — there is nothing left to match on but the type.
+
+             The cost is that audioTracker appears in "Open with" for any file
+             of unknown type. That is the price of a custom extension on
+             Android; the alternative is not appearing for our own files. It is
+             kept as narrow as the platform allows: content:// only (a file://
+             path would have matched filter 2 anyway), and no BROWSABLE, so a
+             browser download is never routed here on its own.
+
+             looksLikeNoteFile cannot vet these either — resolvesToNoteFile
+             reads the real display name through FileMeta before the app
+             commits to treating one as ours. -->
+        <intent-filter>
+            <action android:name="android.intent.action.VIEW"/>
+            <category android:name="android.intent.category.DEFAULT"/>
+            <data android:scheme="content"/>
+            <data android:mimeType="application/octet-stream"/>
         </intent-filter>
 
         <intent-filter>

@@ -10,7 +10,7 @@ import { navigationRef } from '../handlers/navigationRef';
 import { setPendingRoute } from '../handlers/navigationIntent';
 import {
   handleIncomingNoteFile,
-  looksLikeNoteFile,
+  resolvesToNoteFile,
 } from '../notes/share/handleIncomingNoteFile';
 
 // The download foreground-service notification opens this URL.
@@ -57,7 +57,9 @@ const {userInfo} = useAppState();
       if (!url || url.startsWith('audiotracker://')) return;
       // A .atnote bundle is ours to import, not a media link — intercept
       // before handleLinkSubmit tries to make a library item out of it.
-      if (looksLikeNoteFile(url)) return handleIncomingNoteFile(url);
+      // Awaited: a bundle opened from Downloads is only identifiable by its
+      // display name, which takes a trip through the content resolver.
+      if (await resolvesToNoteFile(url)) return handleIncomingNoteFile(url);
       if (userInfo && !hasHandledInitialUrl.current) {
         console.log('Initial URL got user:', url);
         handleLinkSubmit(url, { setDriveLinksList, setItems, setDeviceFiles });
@@ -67,10 +69,10 @@ const {userInfo} = useAppState();
       }
     };
 
-    const handleURL = ({ url }) => {
+    const handleURL = async ({ url }) => {
       if (url === DOWNLOADS_URL) return routeToDownloads({cold: false});
       if (url.startsWith('audiotracker://')) return;
-      if (looksLikeNoteFile(url)) return handleIncomingNoteFile(url);
+      if (await resolvesToNoteFile(url)) return handleIncomingNoteFile(url);
       console.log('URL opened while running:', url, userInfo);
       if (userInfo && !hasHandledInitialUrl.current) {
         handleLinkSubmit(url, { setDriveLinksList, setItems, setDeviceFiles });

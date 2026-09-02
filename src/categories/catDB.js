@@ -1,6 +1,42 @@
 import {ITEM_TYPES_THAT_USE_ITEMS_TABLE} from '../contexts/constants';
 import {getDb} from '../database/database';
 
+// Categories the app maintains for itself rather than ones the user made.
+//
+// A tag lives in the category's *name* — there is no column for it — so both
+// halves of hiding one are string matches: getAllCategories excludes them from
+// the only query that lists categories, and CreateCategoryModal refuses to
+// create a name containing one. Add a tag here and both follow; they used to
+// be two hardcoded copies kept in step by a comment.
+//
+// The mentee tag's value cannot change: it is baked into category names as
+// `[MENTEE_CAT_Filter] {name} ({email}) [MENTEE_CAT_Filter]`, and addCategory
+// is get-or-create by exact name, so a different literal would create a second
+// category per mentee and orphan the items in the first.
+export const MENTEE_CAT_FILTER_TAG = '[MENTEE_CAT_Filter]';
+export const SHARED_CAT_FILTER_TAG = '[SHARED_CAT_Filter]';
+
+export const HIDDEN_CATEGORY_TAGS = [
+  MENTEE_CAT_FILTER_TAG,
+  SHARED_CAT_FILTER_TAG,
+];
+
+// Every note imported from someone else's .atnote bundle goes in here, and
+// membership is what the shared badge reads.
+//
+// A category rather than a column or a table of its own: notes are already
+// category members (category_items carries item_type = 'note'), categories and
+// category_items are already backed up and restored, and the row is explicit —
+// unlike deriving it from the media's visibility flags, which a soft delete and
+// an unvisited folder child both set to the same 0/0.
+export const SHARED_NOTES_CATEGORY = `${SHARED_CAT_FILTER_TAG} Shared Notes`;
+const SHARED_NOTES_CATEGORY_COLOR = '#8B5CF6';
+
+// addCategory is already get-or-create, and revives a soft-deleted row of the
+// same name rather than inserting a second one — so this needs nothing else.
+export const getOrCreateSharedNotesCategoryId = () =>
+  addCategory(SHARED_NOTES_CATEGORY, SHARED_NOTES_CATEGORY_COLOR);
+
 export const addCategory = (name, color) => {
   const fastdb = getDb();
   return new Promise((resolve, reject) => {
@@ -65,15 +101,28 @@ export const getAllCategories = (query = null) => {
 
   return new Promise((resolve, reject) => {
     fastdb.transaction(tx => {
-      // These exclusions keep the mentor/mentee categories (created from
-      // menteeKey/mentorKey, which contain emails) out of the normal lists.
-      // CreateCategoryModal rejects user-typed names matching them — see
-      // getCategoryNameError there; keep the two in sync.
+      // These exclusions keep the app's own categories — mentor/mentee, and
+      // the one holding imported notes — out of every list the user sees.
+      // CreateCategoryModal rejects user-typed names matching the same tags,
+      // both driven by HIDDEN_CATEGORY_TAGS above.
+      //
+      // This is the only query that lists categories, so hiding one here hides
+      // it everywhere: the Categories tab, the assign pickers and the header
+      // dropdown all read from it.
+      //
+      // The tags are internal constants, never user input, so interpolating
+      // them is safe. Note '_' is a single-character wildcard in LIKE, which
+      // makes these patterns very slightly looser than exact — the behaviour
+      // they have always had, and harmless for tags nobody types.
+      const hiddenTagClauses = HIDDEN_CATEGORY_TAGS.map(
+        tag => `AND name NOT LIKE '%${tag}%'`,
+      ).join('\n          ');
+
       let sql = `
         SELECT *, 'category' AS type
         FROM categories
         WHERE deleted_at IS NULL
-          AND name NOT LIKE '%[MENTEE_CAT_Filter]%'
+          ${hiddenTagClauses}
           AND name NOT LIKE '%@%'         -- ❗ exclude emails
       `;
 

@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from 'react';
 import { Linking } from 'react-native';
-import { handleLinkSubmit } from './utils/handleLinkSubmit';
+import { handleLinkSubmit, LinkOrigin } from './utils/handleLinkSubmit';
 import { useAppState } from '../contexts/AppStateContext';
 import { useMediaStore } from '../stores/useMediaStore';
 import { useShallow } from 'zustand/react/shallow';
@@ -62,7 +62,12 @@ const {userInfo} = useAppState();
       if (await resolvesToNoteFile(url)) return handleIncomingNoteFile(url);
       if (userInfo && !hasHandledInitialUrl.current) {
         console.log('Initial URL got user:', url);
-        handleLinkSubmit(url, { setDriveLinksList, setItems, setDeviceFiles });
+        handleLinkSubmit(url, {
+          setDriveLinksList,
+          setItems,
+          setDeviceFiles,
+          origin: LinkOrigin.EXTERNAL,
+        });
       } else {
         console.log('Initial URL waiting for user:', url);
         pendingUrlRef.current = url;
@@ -75,7 +80,12 @@ const {userInfo} = useAppState();
       if (await resolvesToNoteFile(url)) return handleIncomingNoteFile(url);
       console.log('URL opened while running:', url, userInfo);
       if (userInfo && !hasHandledInitialUrl.current) {
-        handleLinkSubmit(url, { setDriveLinksList, setItems, setDeviceFiles });
+        handleLinkSubmit(url, {
+          setDriveLinksList,
+          setItems,
+          setDeviceFiles,
+          origin: LinkOrigin.EXTERNAL,
+        });
       } else {
         pendingUrlRef.current = url;
       }

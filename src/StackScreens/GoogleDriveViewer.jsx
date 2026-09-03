@@ -10,6 +10,7 @@ import {useMediaStore} from '../stores/useMediaStore';
 import {getItemBySourceId, upsertItem} from '../database/C';
 import {getChildrenByParent} from '../database/R';
 import BaseMediaListComponent from './BaseMediaListComponent';
+import SaveToListBar from '../components/SaveToListBar';
 import {ItemTypes, ScreenTypes} from '../contexts/constants';
 import AppHeader from '../components/headers/AppHeader';
 import useLoadingStore from '../stores/useLoadingStore';
@@ -313,6 +314,19 @@ const GoogleDriveViewer = () => {
           onFolderPress={openFolder}
         />
       </Animated.View>
+
+      {/* Only at the root of the stack, and only for a folder that isn't in
+          the Drive list yet — that pairing is a folder opened from a shared
+          link. A subfolder is not a separate thing to keep: it comes with its
+          parent, and browsing into one shouldn't offer to file it on its own.
+          Same warning as PlaylistView: a folder has no history to be found in
+          again. */}
+      {folderStack.length === 1 && (
+        <SaveToListBar
+          item={driveInfo}
+          note="Not in your list — add it now, or you'll need the link again."
+        />
+      )}
     </SafeAreaView>
   );
 };

@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { Linking } from 'react-native';
 import ShareMenu from 'react-native-share-menu';
-import { handleLinkSubmit } from './utils/handleLinkSubmit'; // The logic for handling the shared content
+import { handleLinkSubmit, LinkOrigin } from './utils/handleLinkSubmit'; // The logic for handling the shared content
 import { useAppState } from '../contexts/AppStateContext'; // Access app state, e.g., userInfo
 import { useMediaStore } from '../stores/useMediaStore';
 import { useShallow } from 'zustand/react/shallow';
@@ -52,7 +52,12 @@ const {userInfo} = useAppState();
       if (userInfo && !hasHandledInitialUrl.current) {
         console.log('Shared data received for user:', data, mimeType);
         // hasHandledInitialUrl.current = true;
-        handleLinkSubmit(data, { setDriveLinksList, setItems, setDeviceFiles });
+        handleLinkSubmit(data, {
+          setDriveLinksList,
+          setItems,
+          setDeviceFiles,
+          origin: LinkOrigin.EXTERNAL,
+        });
       } else {
         console.log('Waiting for user info, storing shared data:', data, mimeType);
         pendingSharedDataRef.current = item; // Store shared content until user is available
@@ -76,7 +81,12 @@ const {userInfo} = useAppState();
     if (userInfo && pendingSharedDataRef.current && !hasHandledInitialUrl.current) {
       console.log('User info is available, processing pending shared content:', userInfo, pendingSharedDataRef.current);
       // hasHandledInitialUrl.current = true;
-      handleLinkSubmit(pendingSharedDataRef.current.data, { setDriveLinksList, setItems, setDeviceFiles });
+      handleLinkSubmit(pendingSharedDataRef.current.data, {
+        setDriveLinksList,
+        setItems,
+        setDeviceFiles,
+        origin: LinkOrigin.EXTERNAL,
+      });
       pendingSharedDataRef.current = null; // Clear pending shared data after processing
     }
   }, [userInfo, setDriveLinksList, setItems, setDeviceFiles]);

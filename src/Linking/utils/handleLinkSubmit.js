@@ -14,9 +14,76 @@ import useDbStore from '../../database/dbStore';
 import {updateItemFields} from '../../database/U';
 import { getGoogleAccessToken } from '../../auth/tokenManager';
 import { navigationRef } from '../../handlers/navigationRef';
+import {StackActions} from '@react-navigation/native';
 
 const {FileMeta} = NativeModules;
 const {setInserting} = useDbStore.getState();
+
+// Who asked for this item, which decides all three of: whether it joins the
+// root list, whether it is filed into a category, and where we navigate.
+//
+// The distinction that matters is not link-vs-share — those are the same act
+// arriving through two Android APIs — but whether the app or the outside world
+// started it. A link the user pasted into the FAB is a decision to keep
+// something; a link fired at us from another app is not, and used to be
+// treated as one.
+//
+// APP is the default so that any caller which doesn't say keeps the behaviour
+// it has always had.
+export const LinkOrigin = {
+  APP: 'app', // in-app paste / FAB — deliberate, so it joins the list
+  EXTERNAL: 'external', // link or share intent — opens, saves nothing
+  ASSIGNMENT: 'assignment', // mentor-pushed — joins the list, never navigates
+};
+
+const ALREADY_IN_LIST = {
+  youtube_playlist: 'Playlist already in your list',
+  youtube_video: 'Video already in your list',
+  drive_folder: 'Folder already in your list',
+  drive_file: 'File already in your list',
+};
+
+// Only for something that is actually in the list. A row at out_show 0 is one
+// the user has seen before and didn't keep — saying "already exists" about it
+// would contradict the Add bar sitting right there offering to add it.
+const announceIfInList = item => {
+  if (item?.out_show !== 1) return;
+  ToastAndroid.show(
+    ALREADY_IN_LIST[item.type] ?? 'Already in your list',
+    ToastAndroid.SHORT,
+  );
+};
+
+// Where an externally-opened item goes: the thing itself, never a tab.
+//
+// A container opens in its viewer rather than being dropped into a list the
+// user then has to find it in — which is what the Drive and YouTube tab
+// navigations below do for the in-app paths, and which would say nothing at
+// all now that external items no longer appear in those lists.
+//
+// GoogleDriveViewer is pushed rather than navigated to: it builds folderStack
+// from driveInfo once, at mount, so navigating to an instance already on the
+// stack would show the previous folder's contents under the new folder's
+// params. BaseItem pushes for the same reason.
+const openExternalItem = item => {
+  if (item.type === 'youtube_playlist') {
+    navigationRef.navigate('PlaylistView', {
+      playListId: item.source_id,
+      playListInfo: item,
+    });
+    return;
+  }
+  if (item.type === 'drive_folder') {
+    navigationRef.dispatch(
+      StackActions.push('GoogleDriveViewer', {driveInfo: item}),
+    );
+    return;
+  }
+  // Videos and single files play. A drive_file has no file_path until it is
+  // downloaded, which lands on MediaUnavailable — that screen recognises
+  // drive_file and offers the download, so this is a working destination.
+  navigationRef.navigate('BacePlayer', {item});
+};
 // YouTube hangs the playlist context off `list=` even when the user shared a
 // single video, so a shared watch URL carries both ids. `list=` used to be
 // matched first and win outright, which threw the video away: sharing from
@@ -77,6 +144,7 @@ export const handleLinkSubmit = async (
     setItems,
     setDeviceFiles,
     selectedCategory = null,
+    origin = LinkOrigin.APP,
   },
 ) => {
   setInserting(true);
@@ -87,6 +155,7 @@ export const handleLinkSubmit = async (
         inputLink,
         setDeviceFiles,
         selectedCategory,
+        origin,
       );
       return;
     }
@@ -96,9 +165,10 @@ export const handleLinkSubmit = async (
         extracted.id,
         setDriveLinksList,
         selectedCategory,
+        origin,
       );
     } else {
-      await fetchYTData(extracted, setItems, selectedCategory);
+      await fetchYTData(extracted, setItems, selectedCategory, origin);
     }
   } finally {
     console.log('Stopping loader...');
@@ -110,11 +180,24 @@ export const fetchYTData = async (
   extracted,
   setItems,
   selectedCategory,
+  origin = LinkOrigin.APP,
 ) => {
+  const external = origin === LinkOrigin.EXTERNAL;
   try {
     const {id, type} = extracted;
     const existingItem = await getItemBySourceId(id, type);
     if (existingItem) {
+      // Nothing is written here on the external path. A link arriving from
+      // outside is not a statement about how the user holds this item: if they
+      // already keep it, re-sharing must not reorder or re-file it, and if they
+      // once dismissed it, re-sharing must not bring it back on its own. It
+      // opens, and the Add bar on the destination is what changes anything.
+      if (external) {
+        announceIfInList(existingItem);
+        openExternalItem(existingItem);
+        return;
+      }
+
       const updatedItem = await updateItemFields(existingItem.id, {
         out_show: 1,
       });
@@ -126,7 +209,7 @@ export const fetchYTData = async (
 
       await addToSelectedCategory(selectedCategory, updatedItem);
 
-      if (type === 'youtube_video') {
+      if (type === 'youtube_video' && origin === LinkOrigin.APP) {
         navigationRef.navigate('BacePlayer', {item: updatedItem});
       }
 
@@ -154,7 +237,10 @@ export const fetchYTData = async (
         type: 'youtube_video',
         title: video.title,
         parent_id: null,
-        out_show: 1,
+        // Hidden when it came from outside: the row exists so the video can
+        // play, be watched into history and carry notes — it just isn't in
+        // the library until the user says so on the Add bar.
+        out_show: external ? 0 : 1,
       });
 
       const fullItem = await upsertYoutubeMeta({
@@ -163,6 +249,11 @@ export const fetchYTData = async (
         thumbnail: `https://img.youtube.com/vi/${savedItem.source_id}/mqdefault.jpg`,
       });
 
+      if (external) {
+        openExternalItem(fullItem);
+        return;
+      }
+
       setItems(prev => {
         const filtered = prev.filter(item => item.source_id !== id);
         return [fullItem, ...filtered];
@@ -170,7 +261,9 @@ export const fetchYTData = async (
 
       await addToSelectedCategory(selectedCategory, fullItem);
 
-      navigationRef.navigate('BacePlayer', {item: fullItem});
+      if (origin === LinkOrigin.APP) {
+        navigationRef.navigate('BacePlayer', {item: fullItem});
+      }
     } else if (type === 'youtube_playlist') {
       const response = await axios.get(
         `https://www.googleapis.com/youtube/v3/playlists?part=snippet&id=${id}&key=${YOUTUBE_API_KEY}`,
@@ -193,7 +286,7 @@ export const fetchYTData = async (
         type: 'youtube_playlist',
         title: playlist.title,
         parent_id: null,
-        out_show: 1,
+        out_show: external ? 0 : 1,
       });
 
       const fullItem = await upsertYoutubeMeta({
@@ -201,6 +294,11 @@ export const fetchYTData = async (
         channel_title: playlist.channelTitle,
         thumbnail: playlist.thumbnails?.medium?.url ?? null,
       });
+
+      if (external) {
+        openExternalItem(fullItem);
+        return;
+      }
 
       setItems(prev => {
         const filtered = prev.filter(item => item.source_id !== id);
@@ -213,7 +311,10 @@ export const fetchYTData = async (
     console.error('YT Fetch Error:', error);
     Alert.alert('Error', 'Failed to fetch YouTube data.');
   } finally {
-    if (extracted.type === 'youtube_playlist') {
+    // Only the in-app paste lands on the tab. External opens have already
+    // navigated to the playlist itself, and an assignment sync runs this in a
+    // loop — it used to fire one navigation per assignment.
+    if (extracted.type === 'youtube_playlist' && origin === LinkOrigin.APP) {
       navigationRef.navigate('HomeScreen', {screen: 'YouTube'});
     }
   }
@@ -223,7 +324,9 @@ export const handleDriveLink = async (
   driveId,
   setDriveLinksList,
   selectedCategory,
+  origin = LinkOrigin.APP,
 ) => {
+  const external = origin === LinkOrigin.EXTERNAL;
   try {
     const accessToken = await getGoogleAccessToken();
 
@@ -248,11 +351,24 @@ export const handleDriveLink = async (
     const existingItem = await getItemBySourceId(driveId, itemType);
 
     if (existingItem) {
-      // Just update visibility flag (and optionally touch updated_at if you have it)
-      const updatedItem = await updateItemFields(existingItem.id, {
-        out_show: 1,
-        title: itemName, //sync name if it changed
-      });
+      // The name is synced either way — a folder renamed on Drive is a fact
+      // about the folder, not a change to how the user holds it. Visibility is
+      // the part an external link may not touch.
+      const updatedItem = await updateItemFields(
+        existingItem.id,
+        external
+          ? {title: itemName}
+          : {
+              out_show: 1,
+              title: itemName, //sync name if it changed
+            },
+      );
+
+      if (external) {
+        announceIfInList(updatedItem);
+        openExternalItem(updatedItem);
+        return;
+      }
 
       // Move to top: remove old entry → prepend updated one
       setDriveLinksList(prev => {
@@ -276,8 +392,13 @@ export const handleDriveLink = async (
         parent_id: null,
         mimeType: mimeType,
         file_path: null, // only relevant for files maybe
-        out_show: 1,
+        out_show: external ? 0 : 1,
       });
+
+      if (external) {
+        openExternalItem(savedItem);
+        return;
+      }
 
       // Move to top
       setDriveLinksList(prev => {
@@ -292,8 +413,11 @@ export const handleDriveLink = async (
       console.log('✅ Created new drive', isFolder ? 'folder' : 'file');
     }
 
-    // Navigate (same for both existing & new)
-    navigationRef.navigate('HomeScreen', {screen: 'Drive'});
+    // Navigate (existing & new alike). External opens returned above, and an
+    // assignment sync must not throw the user onto a tab mid-loop.
+    if (origin === LinkOrigin.APP) {
+      navigationRef.navigate('HomeScreen', {screen: 'Drive'});
+    }
   } catch (error) {
     console.error('Drive handle error:', error);
 
@@ -326,7 +450,7 @@ const requestDriveAccess = async driveId => {
   }
 };
 
-const generateUUID = () => {
+export const generateUUID = () => {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
     const r = (Math.random() * 16) | 0;
     const v = c === 'x' ? r : (r & 0x3) | 0x8;
@@ -360,10 +484,49 @@ export const extractFileId = url => {
   return match ? match[0] : null;
 };
 
+// A file shared in from another app, played where it lies.
+//
+// No copy is made here. Copying at import spent the user's storage on a file
+// they had not asked to keep — every video forwarded from a chat left a
+// permanent duplicate in the app's directory, reachable from nothing once the
+// row stopped appearing in the Device tab. The bytes are only copied when the
+// Add bar is used (see saveItemToList), which happens in this same session
+// while the grant is still alive.
+//
+// file_path holds the content:// URI meanwhile. VLC takes it: the player's JS
+// wrapper flags a content: scheme as isNetwork, which routes it to
+// `new Media(libvlc, Uri.parse(...))` — the same location-based branch our
+// file:// paths already use, and the one libvlc's Android content module
+// handles.
+//
+// No attempt is made to persist the grant. takePersistableUriPermission needs
+// FLAG_GRANT_PERSISTABLE_URI_PERMISSION, which Android attaches to SAF results
+// (ACTION_OPEN_DOCUMENT) and not to ACTION_SEND or ACTION_VIEW — it would
+// throw for exactly the shares this path exists for. So the URI dies with the
+// task, and an un-saved row is left pointing at nothing. That is a state the
+// app already has an answer for: it looks identical to a device file whose
+// bytes didn't survive a restore, which MediaUnavailable and
+// offerSharedCopyDownload already explain.
+const handleSharedDeviceFile = async ({uri, name, type}) => {
+  const fullItem = await upsertItem({
+    source_id: generateUUID(),
+    type: 'device_file',
+    title: name,
+    mimeType: type,
+    file_path: uri,
+    out_show: 0,
+    in_show: 0,
+  });
+
+  navigationRef.navigate('BacePlayer', {item: fullItem});
+  console.log(`✅ Opened shared ${name} without importing it`);
+};
+
 const handleDeviceFileFromUri = async (
   uri,
   setDeviceFiles,
   selectedCategory,
+  origin = LinkOrigin.APP,
 ) => {
   try {
     if (!uri || !uri.startsWith('content://')) {
@@ -396,6 +559,11 @@ const handleDeviceFileFromUri = async (
           {text: 'App settings', onPress: () => Linking.openSettings()},
         ],
       );
+      return;
+    }
+
+    if (origin === LinkOrigin.EXTERNAL) {
+      await handleSharedDeviceFile({uri, name: fileName, type: mimeType});
       return;
     }
 

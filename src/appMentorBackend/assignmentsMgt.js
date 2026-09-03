@@ -1,5 +1,9 @@
 import {getYouTubeIdType} from '../contexts/utils';
-import {fetchYTData, handleDriveLink} from '../Linking/utils/handleLinkSubmit';
+import {
+  fetchYTData,
+  handleDriveLink,
+  LinkOrigin,
+} from '../Linking/utils/handleLinkSubmit';
 import useMentorMenteeStore from '../appMentor/useMentorMenteeStore';
 import {ToastAndroid} from 'react-native';
 import useDbStore from '../database/dbStore';
@@ -56,12 +60,18 @@ export const fetchAssignmentsForMentee = async (
 
             if (extracted.type === 'youtube') {
               extracted.type = getYouTubeIdType(extracted.id);
-              await fetchYTData(extracted, setItems, categoryId);
+              await fetchYTData(
+                extracted,
+                setItems,
+                categoryId,
+                LinkOrigin.ASSIGNMENT,
+              );
             } else if (extracted.type === 'drive') {
               await handleDriveLink(
                 extracted.id,
                 setDriveLinksList,
                 categoryId,
+                LinkOrigin.ASSIGNMENT,
               );
             }
           }

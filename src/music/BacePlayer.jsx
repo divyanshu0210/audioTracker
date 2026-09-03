@@ -42,6 +42,7 @@ import {
   stopPlaybackKeepAlive,
 } from '../backgroundService/playbackKeepAlive';
 import {usePipMode} from './usePipMode';
+import SaveToListBar from '../components/SaveToListBar';
 // const {PipModule} = NativeModules;
 
 const isAudioFile = mimeType => {
@@ -998,6 +999,13 @@ const BacePlayer = () => {
               onTypingActivity={handleTypingActivity}
             />
           )}
+
+          {/* Only ever visible for something opened from outside the library
+              (or attached to a shared note) — it renders nothing for an item
+              that is already in a list. Not while notes are open: the editor
+              owns the bottom of the screen then, and not in PiP, where there
+              is no room for anything but the video. */}
+          {!isInPip && !showNotes && <SaveToListBar item={currentItem} />}
         </>
       ) : (
         <Text>Loading...</Text>

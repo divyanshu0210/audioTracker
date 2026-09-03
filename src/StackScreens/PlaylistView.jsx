@@ -244,15 +244,9 @@ const {videos, setVideos} = useMediaStore(
         />
       )}
 
-      {/* A playlist opened from a shared link is not in any list, and unlike a
-          video it has no watch history to be found in again — leaving here
-          without adding it means needing the link a second time. Hence the
-          warning; the bar itself renders nothing for a playlist the user
-          already keeps. */}
-      <SaveToListBar
-        item={playListInfo}
-        note="Not in your list — add it now, or you'll need the link again."
-      />
+      {/* Renders nothing for a playlist the user already keeps — only one
+          opened from a shared link, which is in no list at all. */}
+      <SaveToListBar item={playListInfo} />
     </View>
   );
 }

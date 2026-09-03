@@ -322,10 +322,7 @@ const GoogleDriveViewer = () => {
           Same warning as PlaylistView: a folder has no history to be found in
           again. */}
       {folderStack.length === 1 && (
-        <SaveToListBar
-          item={driveInfo}
-          note="Not in your list — add it now, or you'll need the link again."
-        />
+        <SaveToListBar item={driveInfo} />
       )}
     </SafeAreaView>
   );

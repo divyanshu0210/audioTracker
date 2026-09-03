@@ -1,16 +1,15 @@
 // Promoting an item the user only ever *looked* at into one they keep.
 //
 // This is the other half of LinkOrigin.EXTERNAL: an externally-opened link
-// creates its row at out_show 0 and files it nowhere, and this is the single
-// place that reverses that — from the Add bar on the player, the playlist view
-// or the Drive viewer.
+// creates its row at out_show 0, and this is the single place that reverses
+// that — from the Add bar on the player, the playlist view or the Drive
+// viewer.
 //
 // It is deliberately the only writer of out_show outside the in-app paths, so
 // "how does something get into my list" has one answer.
 
 import RNFS from 'react-native-fs';
 
-import {addItemToCategory} from '../categories/catDB';
 import {updateItemFields} from '../database/U';
 import {useMediaStore} from '../stores/useMediaStore';
 import {generateUUID, resolveDestPath} from './utils/handleLinkSubmit';
@@ -33,7 +32,12 @@ const needsImport = item =>
   item?.type === 'device_file' && !!item.file_path?.startsWith('content://');
 
 /**
- * Adds `item` to the root list, optionally filing it into a category.
+ * Adds `item` to the root list.
+ *
+ * Visibility only. Filing it into a category stays where it already is for
+ * every other item — the item's own menu, through CategorySelectionModal — so
+ * this remains the single writer of out_show and that screen remains the
+ * single writer of category_items.
  *
  * The copy for a shared device file happens here rather than at share time —
  * see handleSharedDeviceFile for why. It runs before the visibility change so
@@ -43,7 +47,7 @@ const needsImport = item =>
  *
  * Throws if the copy or the write fails; callers report it.
  */
-export const saveItemToList = async (item, categoryId = null) => {
+export const saveItemToList = async item => {
   if (!item?.id) throw new Error('Nothing to add');
 
   const updates = {out_show: 1};
@@ -59,10 +63,6 @@ export const saveItemToList = async (item, categoryId = null) => {
   }
 
   const saved = await updateItemFields(item.id, updates);
-
-  if (categoryId != null) {
-    await addItemToCategory(categoryId, saved.source_id, saved.type);
-  }
 
   // Prepended, and de-duplicated on source_id: the list may already hold a
   // stale copy of this row from a hidden state it was fetched in.

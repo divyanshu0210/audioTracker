@@ -12,7 +12,11 @@ import RNFS from 'react-native-fs';
 
 import {updateItemFields} from '../database/U';
 import {useMediaStore} from '../stores/useMediaStore';
-import {generateUUID, resolveDestPath} from './utils/handleLinkSubmit';
+import {
+  generateUUID,
+  isInSharedCache,
+  resolveDestPath,
+} from './utils/handleLinkSubmit';
 
 // Which tab's list this item belongs to. The store keeps one array per source,
 // and the newly-saved row has to land in the right one or the tab shows
@@ -25,11 +29,11 @@ const listSetterFor = type => {
 };
 
 /**
- * True when this item is still living on the content:// URI it was shared in
- * on, rather than on bytes of our own.
+ * True when this item is still on the scratch copy it was shared in as, rather
+ * than somewhere the app intends to keep it.
  */
 const needsImport = item =>
-  item?.type === 'device_file' && !!item.file_path?.startsWith('content://');
+  item?.type === 'device_file' && isInSharedCache(item.file_path);
 
 /**
  * Adds `item` to the root list.
@@ -39,11 +43,11 @@ const needsImport = item =>
  * this remains the single writer of out_show and that screen remains the
  * single writer of category_items.
  *
- * The copy for a shared device file happens here rather than at share time —
- * see handleSharedDeviceFile for why. It runs before the visibility change so
- * that a failed copy leaves the row exactly as it was: still playable from the
- * URI for as long as the grant lasts, and still offering the Add bar, rather
- * than sitting in the Device tab pointing at a file that was never written.
+ * A shared device file is still on the scratch copy it arrived as, so keeping
+ * it means moving that into the app's own directory first. That runs before
+ * the visibility change, so a failure leaves the row exactly as it was: still
+ * playable, still offering the Add bar, rather than sitting in the Device tab
+ * pointing at a file that was never written.
  *
  * Throws if the copy or the write fails; callers report it.
  */
@@ -57,7 +61,9 @@ export const saveItemToList = async item => {
       item.title || `file_${Date.now()}`,
       generateUUID(),
     );
-    await RNFS.copyFile(item.file_path, destPath);
+    // Moved, not copied: the scratch copy has no reason to outlive the real
+    // one, and both directories are on the same volume so this is a rename.
+    await RNFS.moveFile(item.file_path, destPath);
     updates.file_path = destPath;
     console.log(`📁 Imported ${item.title} to ${destPath} on add`);
   }

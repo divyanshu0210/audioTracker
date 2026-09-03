@@ -484,42 +484,58 @@ export const extractFileId = url => {
   return match ? match[0] : null;
 };
 
-// A file shared in from another app, played where it lies.
+// Where a shared file waits while the user decides whether to keep it.
 //
-// No copy is made here. Copying at import spent the user's storage on a file
-// they had not asked to keep — every video forwarded from a chat left a
-// permanent duplicate in the app's directory, reachable from nothing once the
-// row stopped appearing in the Device tab. The bytes are only copied when the
-// Add bar is used (see saveItemToList), which happens in this same session
-// while the grant is still alive.
+// The cache directory, not the app's files directory, and that distinction is
+// the whole point: an import goes somewhere permanent and shows up in the
+// Device tab, while this is a scratch copy Android may evict on its own and
+// nothing lists. Sharing a video from a chat to watch it once no longer costs
+// the user a permanent duplicate.
 //
-// file_path holds the content:// URI meanwhile. VLC takes it: the player's JS
-// wrapper flags a content: scheme as isNetwork, which routes it to
-// `new Media(libvlc, Uri.parse(...))` — the same location-based branch our
-// file:// paths already use, and the one libvlc's Android content module
-// handles.
+// Under ExternalCachesDirectoryPath rather than the internal one so that the
+// promotion in saveItemToList is a rename: getExternalCacheDir and
+// getExternalFilesDir are the same volume, and moveFile across volumes is not.
+const SHARED_CACHE_DIR = `${RNFS.ExternalCachesDirectoryPath}/shared`;
+
+export const isInSharedCache = path => !!path?.startsWith(`${SHARED_CACHE_DIR}/`);
+
+// A file shared in from another app, copied to scratch and played from there.
 //
-// No attempt is made to persist the grant. takePersistableUriPermission needs
-// FLAG_GRANT_PERSISTABLE_URI_PERMISSION, which Android attaches to SAF results
-// (ACTION_OPEN_DOCUMENT) and not to ACTION_SEND or ACTION_VIEW — it would
-// throw for exactly the shares this path exists for. So the URI dies with the
-// task, and an un-saved row is left pointing at nothing. That is a state the
-// app already has an answer for: it looks identical to a device file whose
-// bytes didn't survive a restore, which MediaUnavailable and
-// offerSharedCopyDownload already explain.
+// Playing straight from the content:// URI is what this did first, and VLC
+// cannot: the player's JS wrapper does flag a content: scheme as isNetwork and
+// hand it to `new Media(libvlc, Uri.parse(...))`, but this libvlc build has no
+// ContentResolver behind that path. It prefixes file:// and looks for a
+// literal file, so the MRL comes out as `file:////content%3A//...` and the
+// open fails with "No such file or directory" while the player sits at 00:00.
+//
+// Copying here also settles the grant question. An ACTION_SEND URI is not
+// persistable — takePersistableUriPermission needs a flag Android only attaches
+// to SAF results — so the URI dies with the task. Reading it now, while the
+// grant is alive, is the only moment its bytes are reachable at all.
+//
+// The name is the uuid: this file is addressed by the row, and the title the
+// user sees comes from the row too. It gets a real name if it is ever kept.
 const handleSharedDeviceFile = async ({uri, name, type}) => {
+  const uuid = generateUUID();
+  const dot = name.lastIndexOf('.');
+  const ext = dot > 0 ? name.slice(dot) : '';
+
+  await RNFS.mkdir(SHARED_CACHE_DIR);
+  const cachePath = `${SHARED_CACHE_DIR}/${uuid}${ext}`;
+  await RNFS.copyFile(uri, cachePath);
+
   const fullItem = await upsertItem({
-    source_id: generateUUID(),
+    source_id: uuid,
     type: 'device_file',
     title: name,
     mimeType: type,
-    file_path: uri,
+    file_path: cachePath,
     out_show: 0,
     in_show: 0,
   });
 
   navigationRef.navigate('BacePlayer', {item: fullItem});
-  console.log(`✅ Opened shared ${name} without importing it`);
+  console.log(`✅ Opened shared ${name} from scratch copy ${cachePath}`);
 };
 
 const handleDeviceFileFromUri = async (

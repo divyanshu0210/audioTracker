@@ -184,9 +184,13 @@ const HomeTabs = ({categoryId}) => {
             },
           }}>
             
+          {/* Wrapped like every other tab, for the LoadingBar that
+              renderTabContent brings with it. Passing `component` straight
+              through left this one without a loader - and IDT is the tab a
+              cold start lands on, so an import kicked off by a share had one
+              nowhere on screen. */}
           <Tab.Screen
             name="IDT"
-            component={IskconAudioView}
             // options={{
             //   tabBarLabel: () => null,
             //   tabBarIcon: () => (
@@ -197,7 +201,9 @@ const HomeTabs = ({categoryId}) => {
             //     />
             //   ),
             // }}
-          />
+          >
+            {() => renderTabContent(IskconAudioView)}
+          </Tab.Screen>
           <Tab.Screen name="YouTube">
             {() =>
               renderTabContent(MainYouTubeView, {

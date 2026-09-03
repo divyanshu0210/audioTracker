@@ -14,7 +14,10 @@ import {
   NOTE_FILE_MAGIC,
   NOTE_FILE_MIME,
 } from './noteFileFormat';
-import {getFileMeta} from '../../Linking/utils/handleLinkSubmit';
+import {
+  getFileMeta,
+  isAudioOrVideo,
+} from '../../Linking/utils/handleLinkSubmit';
 
 /**
  * Whether an incoming item is one of our note bundles.
@@ -89,12 +92,26 @@ export const resolvesToNoteFile = async (uri, mimeType) => {
   // definition and belongs to handleLinkSubmit.
   if (!uri.startsWith('content://') && !uri.startsWith('file://')) return false;
 
+  // A stated audio or video type is an answer on its own, and the cheapest one
+  // available: a bundle is JSON, and nothing that hands us audio/mpeg is
+  // holding one. Worth its own branch because everything below is a round trip
+  // through the content provider, and on a shared song those cost seconds
+  // before anything reaches the screen — the sniff was reading the head of
+  // every incoming media file to rule out a format it could not have been.
+  //
+  // The uncertain case this is not: application/octet-stream, which is what a
+  // bundle out of Downloads arrives as and what the checks below exist for.
+  if (isAudioOrVideo(mimeType)) return false;
+
   let name = null;
   let mime = null;
   if (uri.startsWith('content://')) {
     try {
       ({name, mime} = await getFileMeta(uri));
       if (looksLikeNoteFile(name, mime)) return true;
+      // Same answer, now that the provider has given us a type the sender
+      // didn't. Saves the read, which is the expensive half.
+      if (isAudioOrVideo(mime)) return false;
     } catch (error) {
       // getFileMeta swallows its own failures; this is for a missing native
       // module. Fall through to the content check rather than giving up.

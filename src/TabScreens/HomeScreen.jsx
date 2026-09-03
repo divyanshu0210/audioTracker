@@ -26,7 +26,7 @@ const HomeScreen = () => {
       })),
     );
 
-  const {userInfo} = useAppState();
+  const {userInfo, continueWatchingSheetRef} = useAppState();
 
   const {setMentors, setMentees, activeMentee, activeMentor} =
     useMentorMenteeStore(
@@ -38,6 +38,15 @@ const HomeScreen = () => {
       })),
     );
   const isActive = activeMentee || activeMentor;
+
+  // The first screen the user actually sees is the one that gets to ask "carry
+  // on with something?" - the sheet used to open itself as soon as the db was
+  // ready, which is during sign-in, so it appeared over the login screen. The
+  // sheet ignores this if the launch came in through a link or a share, and
+  // after the first time either way.
+  useEffect(() => {
+    continueWatchingSheetRef?.current?.expand?.();
+  }, [continueWatchingSheetRef]);
 
   // Initial load
   useEffect(() => {

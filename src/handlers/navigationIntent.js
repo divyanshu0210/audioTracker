@@ -17,3 +17,18 @@ export const consumePendingRoute = () => {
   pendingRoute = null;
   return route;
 };
+
+// Whether this launch came in with something to open — a link or a share from
+// another app. Not a route (those handlers navigate for themselves once they
+// know what the link is); just the fact that the app was opened *at* something,
+// which is the opposite of opening it to carry on where you left off.
+//
+// Not consumed like pendingRoute: it describes the launch, and anything asking
+// later is asking about the same launch. A fresh process starts it false again.
+let externalLaunch = false;
+
+export const markExternalLaunch = () => {
+  externalLaunch = true;
+};
+
+export const wasExternalLaunch = () => externalLaunch;

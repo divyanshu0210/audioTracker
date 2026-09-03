@@ -9,6 +9,7 @@ import {
   handleIncomingNoteFile,
   resolvesToNoteFile,
 } from '../notes/share/handleIncomingNoteFile';
+import {markExternalLaunch} from '../handlers/navigationIntent';
 
 const useSharedContentHandler = () => {
 const {
@@ -35,6 +36,7 @@ const {userInfo} = useAppState();
       // share to self.
       console.log('Shared content received:', item);
       if (!item) return;
+      markExternalLaunch();
       const { data, mimeType } = item;
 
       // Note bundles are handled here rather than by handleLinkSubmit, and

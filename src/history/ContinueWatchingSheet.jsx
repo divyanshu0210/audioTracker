@@ -38,6 +38,7 @@ import {
 import {HistoryItem} from './HistoryCard';
 import {getRecentlyWatchedVideos} from '../database/R';
 import useDbStore from '../database/dbStore';
+import {wasExternalLaunch} from '../handlers/navigationIntent';
 
 // Five, not the twelve the query returns. This is a prompt, not a history
 // screen - past about five the list stops being "what was I doing" and starts
@@ -45,58 +46,71 @@ import useDbStore from '../database/dbStore';
 // wants it.
 const RECENT_COUNT = 5;
 
+// Never rejects: it is started without anyone awaiting it, and a first launch
+// can hit it before the history table exists. An empty shelf and a failed read
+// mean the same thing here - nothing to carry on with, so no sheet.
+const loadRecent = () =>
+  getRecentlyWatchedVideos().catch(error => {
+    console.error('Could not load what to continue watching:', error);
+    return [];
+  });
+
 const ContinueWatchingSheet = forwardRef((props, ref) => {
   const [visible, setVisible] = useState(false);
   const [recent, setRecent] = useState([]);
 
   const close = useCallback(() => setVisible(false), []);
 
+  // Once per app launch. HomeScreen mounting again - coming back from a deep
+  // link, or a sign-out and back in - is not a fresh launch, and a sheet
+  // appearing mid-session for no reason the user could connect to what they
+  // just did is worse than not offering it at all.
+  const openedRef = useRef(false);
+
+  // Loading and showing are two different moments, and the sheet was slow the
+  // moment they were the same one.
+  //
+  // It used to do both as soon as the db appeared - which is during sign-in,
+  // so the sheet landed on GoogleLoginScreen, over the restore prompt. Waiting
+  // for the first real screen instead fixed where it appeared and put the
+  // query on the critical path: Home was up and visibly waiting on a read that
+  // could have been done minutes of user-time earlier.
+  //
+  // So it still reads the moment the db exists, into a promise nobody is
+  // waiting on yet. By the time HomeScreen asks, the answer is already there
+  // and expand is a setState.
+  const db = useDbStore(state => state.db);
+  const recentPromiseRef = useRef(null);
+
+  useEffect(() => {
+    if (!db || recentPromiseRef.current) return;
+    recentPromiseRef.current = loadRecent();
+  }, [db]);
+
+  const expand = useCallback(async () => {
+    if (openedRef.current) return;
+    openedRef.current = true;
+
+    // Opened by a link or a share: the user came here to see one specific
+    // thing, and the handler is already navigating to it. "Where was I" is
+    // the wrong question to answer over the top of that.
+    if (wasExternalLaunch()) return;
+
+    // The fallback is for the order that shouldn't happen but costs one line
+    // to survive: Home up before the db is open.
+    const videos = (await (recentPromiseRef.current ?? loadRecent())) ?? [];
+
+    // Nothing watched yet - on a fresh install there is nothing to carry on
+    // with, and an empty sheet in the way would be worse than none.
+    if (!videos.length) return;
+    setRecent(videos.slice(0, RECENT_COUNT));
+    setVisible(true);
+  }, []);
+
   // expand/close, the two methods the gorhom sheet exposed, so the ref handed
   // down from AppStateContext still means the same thing to anything holding
   // it and this stayed a drop-in swap.
-  useImperativeHandle(
-    ref,
-    () => ({
-      expand: () => setVisible(true),
-      close,
-    }),
-    [close],
-  );
-
-  // The db is null until the user signs in, and every query throws without it.
-  // Subscribing is what makes this work on a cold start: the sheet mounts at
-  // the app root, long before there is anything to read.
-  const db = useDbStore(state => state.db);
-  // Once per app launch. Signing out and back in sets db again, and that is
-  // not a fresh launch - it would be a sheet appearing in the middle of a
-  // session for no reason the user could connect to what they just did.
-  const openedRef = useRef(false);
-
-  useEffect(() => {
-    if (!db || openedRef.current) return;
-    openedRef.current = true;
-
-    let cancelled = false;
-    (async () => {
-      try {
-        const videos = await getRecentlyWatchedVideos();
-        if (cancelled) return;
-        // Nothing watched yet - on a fresh install there is nothing to carry
-        // on with, and an empty sheet in the way would be worse than none.
-        // This is also where a first launch lands when the history table has
-        // not been created yet: the query throws and the sheet stays shut.
-        if (!videos.length) return;
-        setRecent(videos.slice(0, RECENT_COUNT));
-        setVisible(true);
-      } catch (error) {
-        console.error('Could not load what to continue watching:', error);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [db]);
+  useImperativeHandle(ref, () => ({expand, close}), [expand, close]);
 
   // Mounted only while open, like PlayerQueue's: the cards are built eagerly
   // and a hidden Modal renders nothing anyway, so keeping it mounted would

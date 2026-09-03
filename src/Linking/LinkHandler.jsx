@@ -7,7 +7,7 @@ import { useAppState } from '../contexts/AppStateContext';
 import { useMediaStore } from '../stores/useMediaStore';
 import { useShallow } from 'zustand/react/shallow';
 import { navigationRef } from '../handlers/navigationRef';
-import { setPendingRoute } from '../handlers/navigationIntent';
+import { markExternalLaunch, setPendingRoute } from '../handlers/navigationIntent';
 import {
   handleIncomingNoteFile,
   resolvesToNoteFile,
@@ -55,6 +55,9 @@ const {userInfo} = useAppState();
       const url = await Linking.getInitialURL();
       if (url === DOWNLOADS_URL) return routeToDownloads({cold: true});
       if (!url || url.startsWith('audiotracker://')) return;
+      // Said before any of the async work below, so that whatever is deciding
+      // what to put on screen first already knows this launch has a target.
+      markExternalLaunch();
       // A .atnote bundle is ours to import, not a media link — intercept
       // before handleLinkSubmit tries to make a library item out of it.
       // Awaited: a bundle opened from Downloads is only identifiable by its

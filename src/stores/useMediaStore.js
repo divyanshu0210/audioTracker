@@ -14,7 +14,9 @@ export const useMediaStore = create((set, get) => ({
   videos: [],
   data: [],
   folderStack: [],
-  iskconEntries: [],
+  iskconFiles: [],
+  iskconError: null,
+  iskconFolderEntries: [],
 
   setDriveLinksList: async val => {
     const list =
@@ -41,10 +43,33 @@ export const useMediaStore = create((set, get) => ({
       folderStack: typeof val === 'function' ? val(s.folderStack) : val,
     })),
 
-  setIskconEntries: val =>
+  setIskconFiles: val =>
     set(s => ({
-      iskconEntries: typeof val === 'function' ? val(s.iskconEntries) : val,
+      iskconFiles: typeof val === 'function' ? val(s.iskconFiles) : val,
     })),
+
+  setIskconError: val => set({iskconError: val}),
+
+  setIskconFolderEntries: val =>
+    set(s => ({
+      iskconFolderEntries:
+        typeof val === 'function' ? val(s.iskconFolderEntries) : val,
+    })),
+
+  // One file can be rendered out of either list — the tab's or the open
+  // folder's — and often out of both at once (the root listing behind a folder
+  // viewer showing the same file). A download finishing, or its local copy
+  // being removed, has to show up wherever that row is, so both are patched
+  // rather than each caller guessing which list it is in.
+  patchIskconFile: (sourceId, patch) =>
+    set(s => {
+      const apply = list =>
+        list.map(f => (f.source_id === sourceId ? {...f, ...patch} : f));
+      return {
+        iskconFiles: apply(s.iskconFiles),
+        iskconFolderEntries: apply(s.iskconFolderEntries),
+      };
+    }),
 
   setDeviceFiles: async val => {
     const files =
@@ -129,6 +154,14 @@ export const useMediaStore = create((set, get) => ({
       case 'drive':
         set(s => ({
           driveLinksList: s.driveLinksList.filter(f => f.source_id !== id),
+        }));
+        break;
+      // Only ever reached from a category listing: an iskcon file removed from
+      // a category leaves that list, but it is still on the site, so nothing
+      // touches the folder listing.
+      case 'iskcon':
+        set(s => ({
+          iskconFiles: s.iskconFiles.filter(f => f.source_id !== id),
         }));
         break;
     }

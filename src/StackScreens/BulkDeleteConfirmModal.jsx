@@ -19,19 +19,30 @@ import {
 } from 'react-native';
 import {useSelectionStore} from '../stores/useSelectionStore';
 import {useShallow} from 'zustand/react/shallow';
-import {ItemTypes} from '../contexts/constants';
+import {ItemTypes, ScreenTypes} from '../contexts/constants';
 import {bulkDeleteItems, describeFailures} from './bulkActions';
 
 const BulkDeleteConfirmModal = ({visible, onClose, selectedItems, screen}) => {
   const [deleteNotebookNotes, setDeleteNotebookNotes] = useState(false);
   const [busy, setBusy] = useState(false);
 
-  const {setSelectedItems, setSelectionMode} = useSelectionStore(
-    useShallow(state => ({
-      setSelectedItems: state.setSelectedItems,
-      setSelectionMode: state.setSelectionMode,
-    })),
-  );
+  const {setSelectedItems, setSelectionMode, selectedCategory} =
+    useSelectionStore(
+      useShallow(state => ({
+        setSelectedItems: state.setSelectedItems,
+        setSelectionMode: state.setSelectionMode,
+        selectedCategory: state.selectedCategory,
+      })),
+    );
+
+  // Which category a delete should also unlink from — only iskcon files use
+  // it (see bulkDeleteItems). selectedCategory is a global: it is what the
+  // Home tabs are filtered by, and it stays set while you navigate away. So it
+  // only counts on a Home tab, which is what ScreenTypes.MAIN identifies —
+  // exactly the gate CommonMenuItems uses for its "Remove" entry. Anywhere
+  // else (Downloads, search, a playlist, inside a Drive folder) the list has
+  // nothing to do with that category, and a delete there must not touch it.
+  const categoryId = screen === ScreenTypes.MAIN ? selectedCategory : null;
 
   const hasNotebooks = useMemo(
     () => selectedItems.some(i => i.type === ItemTypes.NOTEBOOK),
@@ -50,6 +61,7 @@ const BulkDeleteConfirmModal = ({visible, onClose, selectedItems, screen}) => {
       const {succeeded, failed} = await bulkDeleteItems(selectedItems, {
         deleteNotebookNotes,
         screen,
+        categoryId,
       });
       setSelectedItems([]);
       setSelectionMode(false);
@@ -69,7 +81,7 @@ const BulkDeleteConfirmModal = ({visible, onClose, selectedItems, screen}) => {
       setBusy(false);
       onClose();
     }
-  }, [selectedItems, deleteNotebookNotes, screen, setSelectedItems, setSelectionMode, onClose]);
+  }, [selectedItems, deleteNotebookNotes, screen, categoryId, setSelectedItems, setSelectionMode, onClose]);
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>

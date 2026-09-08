@@ -24,29 +24,7 @@
 
 import Clipboard from '@react-native-clipboard/clipboard';
 import {ToastAndroid} from 'react-native';
-import {ISKCON_BASE} from '../../scrap/iskconAudioApi';
-
-// encodeURI is the right tool here — it leaves the path separators alone and
-// escapes spaces and the like — but it deliberately passes '#' and '?'
-// through, and either one would truncate the url at that point.
-const encodeIskconPath = path =>
-  encodeURI(path).replace(/#/g, '%23').replace(/[?]/g, '%3F');
-
-// source_id for an iskcon file is f.path, i.e. decodeURIComponent(href) — the
-// site path is therefore already in the database and the url can be rebuilt
-// from it instead of stored a second time.
-//
-// This is a reconstruction, not the original string: a name carrying something
-// encodeURI treats differently from however the site wrote it can come out
-// slightly different (paths here do contain apostrophes, for one). So it's
-// only ever the fallback — getShareLink prefers the exact url whenever the
-// item still carries one, and only lands here for a downloaded file, whose
-// file_path the download service has overwritten with the local path.
-const iskconUrlFromSourceId = sourceId => {
-  if (!sourceId) return null;
-  if (sourceId.startsWith('http')) return encodeIskconPath(sourceId);
-  return `${ISKCON_BASE}${encodeIskconPath(sourceId)}`;
-};
+import {iskconUrlFromSourceId} from '../../iskcon/iskconAudioApi';
 
 export const driveFileLink = fileId =>
   `https://drive.google.com/file/d/${fileId}/view`;

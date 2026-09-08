@@ -39,7 +39,7 @@ import SettingsScreen from './Settings/Settings';
 import DeviceFilesView from './StackScreens/DeviceFilesView';
 import GDriveFolderOverview from './StackScreens/GDriveFolderOverview';
 import GoogleDriveViewer from './StackScreens/GoogleDriveViewer';
-import IskconFolderViewer from './scrap/IskconFolderViewer';
+import IskconFolderViewer from './iskcon/IskconFolderViewer';
 import PlaylistView from './StackScreens/PlaylistView';
 import HomeScreen from './TabScreens/HomeScreen';
 import ProfileTab from './TabScreens/ProfileTab';

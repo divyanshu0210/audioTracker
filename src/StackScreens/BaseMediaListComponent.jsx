@@ -41,7 +41,13 @@ const BaseMediaListComponent = ({
   // menu. Lets a screen with its own card design join this list without
   // giving up any of that.
   itemComponent,
-  onFolderPress,  
+  onFolderPress,
+  // Ready-made SectionList sections, for a list whose grouping has nothing to
+  // do with dates — the Iskcon browser's Pinned / All split is the site's own
+  // folder listing, where a scraped entry has no created_at at all and every
+  // row would otherwise land in one "Today" bucket. Everything else keeps
+  // grouping by date.
+  sections: providedSections,
 }) => {
   const renderCount = useRef(0);
   renderCount.current++;
@@ -62,38 +68,50 @@ const BaseMediaListComponent = ({
           subtype={subtype}
           screen={screen}
           itemComponent={itemComponent}
-          onFolderPress={screen===ScreenTypes.IN && type===ItemTypes.DRIVE? onFolderPress : undefined}
+          onFolderPress={
+            (type === ItemTypes.DRIVE && screen === ScreenTypes.IN) ||
+            type === ItemTypes.ISKCON
+              ? onFolderPress
+              : undefined
+          }
         />
       );
     },
-    [type, screen, itemComponent],
+    [type, screen, itemComponent, onFolderPress],
   );
 
   const sections = useMemo(
-    () => groupItemsByDate(mediaList, groupDate),
-    [mediaList, groupDate],
+    () => providedSections ?? groupItemsByDate(mediaList, groupDate),
+    [providedSections, mediaList, groupDate],
   );
 
   const allItemsInThisList = useMemo(
     () =>
-      mediaList.map(item => ({
-        id: getItemId(item),
-        // Resolved per item exactly as renderItem does, so Select All
-        // produces the same entries tapping the rows does. A mixed list
-        // (Downloads) passes no type at all, and stamping null here left
-        // every entry unmatchable — Select All then fed bulkDeleteItems
-        // rows whose type nothing dispatches on.
-        type: type ?? convertTypetoItemType(item.type),
-        subtype: item.type,
-        // Carried along so "Select All" produces the same shape BaseItem's
-        // per-item selectionEntry does — bulk delete needs dbId/file_path,
-        // bulk move needs source_type/source_id.
-        dbId: item.id,
-        file_path: item.file_path,
-        title: item.title,
-        source_type: item.source_type,
-        source_id: item.source_id,
-      })),
+      mediaList
+        // Scraped folder rows (kind:'folder', Iskcon only) are the remote
+        // site's listing, not items — they have no DB row to delete, assign or
+        // categorise, and BaseItem already refuses to select one. Leaving them
+        // in here would make Select All produce entries the bulk actions
+        // can't dispatch on, and isAllSelected could never come out true.
+        .filter(item => item?.kind !== 'folder')
+        .map(item => ({
+          id: getItemId(item),
+          // Resolved per item exactly as renderItem does, so Select All
+          // produces the same entries tapping the rows does. A mixed list
+          // (Downloads) passes no type at all, and stamping null here left
+          // every entry unmatchable — Select All then fed bulkDeleteItems
+          // rows whose type nothing dispatches on.
+          type: type ?? convertTypetoItemType(item.type),
+          subtype: item.type,
+          // Carried along so "Select All" produces the same shape BaseItem's
+          // per-item selectionEntry does — bulk delete needs dbId/file_path,
+          // bulk move needs source_type/source_id.
+          dbId: item.id,
+          file_path: item.file_path,
+          title: item.title,
+          source_type: item.source_type,
+          source_id: item.source_id,
+        })),
     [mediaList, type],
   );
 

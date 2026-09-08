@@ -8,7 +8,8 @@ import NotebookItem from './NoteBook/NotebookItem';
 import FileViewer from 'react-native-file-viewer';
 import {ItemTypes, ScreenTypes} from '../contexts/constants';
 import BaseMenu from '../components/menu/BaseMenu';
-import {playFile as playIskconFile} from '../scrap/iskconActions';
+import {playFile as playIskconFile} from '../iskcon/iskconActions';
+import IskconItem from '../iskcon/IskconItem';
 import NoteItem from '../notes/notesListing/NoteItem';
 import {CategoryItem} from '../categories/CategoryItem';
 import {useMediaStore} from '../stores/useMediaStore';
@@ -57,6 +58,13 @@ const BaseItem = ({
   );
 
   const sourceId = item?.rowid || item?.source_id || item?.id?.toString();
+
+  // A row out of the Iskcon browser's scraped listing rather than our DB:
+  // folders exist only on audio.iskcondesiretree.com, so there is nothing to
+  // select, assign, categorise or put in a menu — a tap just walks into them.
+  // DB-backed iskcon rows (Downloads, search, a category listing) never carry
+  // `kind`, so they keep behaving exactly as before.
+  const isIskconFolder = type === ItemTypes.ISKCON && item?.kind === 'folder';
 
   const renderCount = useRef(0);
   renderCount.current++;
@@ -112,12 +120,13 @@ const BaseItem = ({
   }, [setSelectedItems, sourceId, type, selectionEntry]);
 
   const handleItemLongPress = useCallback(() => {
+    if (isIskconFolder) return;
     const {selectionMode} = useSelectionStore.getState();
     if (!selectionMode) {
       setSelectedItems([selectionEntry]);
       setSelectionMode(true);
     }
-  }, [setSelectedItems, setSelectionMode, selectionEntry]);
+  }, [setSelectedItems, setSelectionMode, selectionEntry, isIskconFolder]);
 
   const handleYoutubePress = useCallback(() => {
     const {videos, items} = useMediaStore.getState();
@@ -250,10 +259,15 @@ const BaseItem = ({
   }, [item, screen]);
 
   const handleIskconPress = useCallback(() => {
+    // Browsing the site's tree: a folder row goes deeper instead of playing.
+    if (item?.kind === 'folder') {
+      onFolderPress?.(item);
+      return;
+    }
     // DB rows only exist for files that were played or downloaded, so
     // file_path is always set (remote URL until a local copy exists).
     playIskconFile(item, item.file_path);
-  }, [item]);
+  }, [item, onFolderPress]);
 
   const handleNotebookPress = useCallback(() => {
     navigationRef.navigate('NotebookNotesScreen', {notebook: item});
@@ -315,19 +329,24 @@ const BaseItem = ({
   const handlePress = useCallback(() => {
     const {selectionMode} = useSelectionStore.getState();
     if (selectionMode) {
-      toggleSelection();
+      // Tapping a scraped folder mid-selection would navigate away from the
+      // selection the user is still building, and it can't be selected either
+      // — so it does nothing until selection mode is closed.
+      if (!isIskconFolder) toggleSelection();
       return;
     }
 
     const action = typeConfigMap[type]?.onPress;
     if (action) action();
 
+    if (isIskconFolder) return;
+
     setActiveItem({
       sourceId: sourceId,
       sourceType: item?.type || type,
       item: item,
     });
-  }, [item, toggleSelection]);
+  }, [item, toggleSelection, isIskconFolder]);
 
   const renderItem = () => {
     // itemComponent wins when a list supplies its own row visual — the rest
@@ -338,8 +357,12 @@ const BaseItem = ({
   };
 
   const renderBaseMenu = () => {
-    // A caller-supplied visual can't be carrying its own menu, so the
-    // per-type answer must not suppress one here — drive says false only
+    // Nothing in the menu applies to a remote folder — and unlike the per-type
+    // answer below, this has to hold even when an itemComponent override is in
+    // play.
+    if (isIskconFolder) return false;
+    // Otherwise a caller-supplied visual can't be carrying its own menu, so
+    // the per-type answer must not suppress one here — drive says false only
     // because DriveItem renders BaseMenu itself, and DriveItem is exactly
     // what an override replaces. Without this, swapping the visual silently
     // takes the menu away from every drive row in that list.
@@ -359,10 +382,16 @@ const BaseItem = ({
       onPress: handleDevicePress,
       showMenu: item => !!item.file_path,
     },
+    // Same arrangement as DRIVE below: the type's own row visual renders its
+    // own BaseMenu — IskconItem has to, because it swaps that menu for a
+    // download progress indicator, and only the row stays mounted for the
+    // whole download. A list that supplies its own visual instead (Downloads,
+    // via DownloadCard) gets the menu back through the itemComponent override
+    // in renderBaseMenu, exactly as Drive rows do there.
     [ItemTypes.ISKCON]: {
-      Component: DeviceItem,
+      Component: IskconItem,
       onPress: handleIskconPress,
-      showMenu: () => true,
+      showMenu: () => false,
     },
     [ItemTypes.DRIVE]: {
       Component: DriveItem,

@@ -13,13 +13,14 @@ import {ItemTypes} from '../contexts/constants';
 import {deleteNoteById, deleteNotebook, softDeleteItem} from '../database/D';
 import {moveNotesToDefaultNotebook} from '../database/C';
 import {moveNoteToNotebook, updateItemFields} from '../database/U';
-import {addItemToCategory} from '../categories/catDB';
+import {addItemToCategory, removeItemFromCategory} from '../categories/catDB';
 import {convertToPdf} from '../notes/utils/convertToPDF';
 import {shareNotesAsFile} from '../notes/share/shareNoteFile';
 import Share from 'react-native-share';
 import {useNotesStore} from '../stores/useNotesStore';
 import {useMediaStore} from '../stores/useMediaStore';
-import {getLocalFilePath} from '../scrap/iskconActions';
+import {getLocalFilePath} from '../iskcon/iskconActions';
+import {iskconUrlFromSourceId} from '../iskcon/iskconAudioApi';
 import {removeSharedCopy} from '../share/shareDeviceFile';
 import useDownloadStore from '../stores/useDownloadStore';
 
@@ -89,7 +90,17 @@ const deleteDeviceItem = async item => {
 // are unlinked for the same reason handleRemove does it: they're normally the
 // same file, but if they ever drift, deleting only file_path leaves the real
 // one on disk and the next download reports "already downloaded".
-const deleteIskconItem = async item => {
+//
+// In a listing that is showing one category, it also drops that category link.
+// Every other type disappears from such a listing when deleted — softDeleteItem
+// stamps the item and getCategoryData filters on deleted_at — so an iskcon row
+// staying put reads as the delete having failed, even though un-downloading is
+// all it can honestly do. The link is dropped rather than the item, which stays
+// available to browse on the site as before.
+//
+// item.id is the source_id here (that's what BaseItem's selectionEntry puts
+// there); item.dbId is the items-table primary key.
+const deleteIskconItem = async (item, categoryId = null) => {
   const paths = new Set(
     [
       item.file_path,
@@ -102,8 +113,20 @@ const deleteIskconItem = async item => {
     }
   }
   if (item.dbId != null) {
-    await updateItemFields(item.dbId, {file_path: null});
+    // The remote url goes back into file_path rather than null. An iskcon
+    // file streams from file_path when there's no local copy — that's what
+    // ensureDbItem parks there — so nulling it left a row that had once been
+    // downloaded unplayable, with nothing to stream from. The browse listing
+    // hid this, because playFile falls back to the url on the freshly scraped
+    // entry; a row read back out of the db (a category listing) has no such
+    // fallback.
+    await updateItemFields(item.dbId, {
+      file_path: iskconUrlFromSourceId(item.id),
+    });
   }
+  if (categoryId == null) return {removedFromList: false};
+  await removeItemFromCategory(categoryId, item.id, 'iskcon_file');
+  return {removedFromList: true};
 };
 
 // Mirrors YTMenuItems.handleDeleteYTItem.
@@ -194,15 +217,25 @@ const applyStoreUpdates = (
     setDeviceFiles(prev => prev.filter(i => !isRemoved(i.source_id, ItemTypes.DEVICE)));
   }
 
-  if (downloadCleared.some(r => r.type === ItemTypes.ISKCON)) {
-    const {setIskconEntries} = useMediaStore.getState();
-    setIskconEntries(prev =>
-      prev.map(i =>
-        isDownloadCleared(i.source_id, ItemTypes.ISKCON)
-          ? {...i, file_path: null}
-          : i,
-      ),
+  if (
+    removed.some(r => r.type === ItemTypes.ISKCON) ||
+    downloadCleared.some(r => r.type === ItemTypes.ISKCON)
+  ) {
+    const {setIskconFiles, setIskconFolderEntries} = useMediaStore.getState();
+    // Removal only ever applies to the tab's list — that's the one that can be
+    // showing a category. The folder listing is the site's, where nothing was
+    // removed; it only needs the file_path patch.
+    const patch = i =>
+      isDownloadCleared(i.source_id, ItemTypes.ISKCON)
+        ? // Back to streaming, matching what deleteIskconItem wrote to the row
+          // — not null, which would leave the entry with no source at all.
+          {...i, file_path: i.url ?? iskconUrlFromSourceId(i.source_id)}
+        : i;
+
+    setIskconFiles(prev =>
+      prev.filter(i => !isRemoved(i.source_id, ItemTypes.ISKCON)).map(patch),
     );
+    setIskconFolderEntries(prev => prev.map(patch));
   }
 
   if (
@@ -227,7 +260,17 @@ const applyStoreUpdates = (
 // notebook in the selection (the Default Notebook always deletes its notes
 // regardless — see deleteNotebookItem). Returns {succeeded, failed} where
 // failed entries carry the original item + error for the caller to report.
-export const bulkDeleteItems = async (items, {deleteNotebookNotes, screen}) => {
+//
+// `categoryId` is the category the list being acted on is showing, or null.
+// BulkDeleteConfirmModal derives it: selectedCategory, but only on a Home tab
+// (ScreenTypes.MAIN) — the same gate CommonMenuItems uses for "Remove" — so a
+// category left selected on Home can't reach into a delete made from
+// Downloads, search or inside a folder. Only iskcon files use it; see
+// deleteIskconItem.
+export const bulkDeleteItems = async (
+  items,
+  {deleteNotebookNotes, screen, categoryId = null},
+) => {
   const removed = [];
   const downloadCleared = [];
   const notesKeptFrom = [];
@@ -259,14 +302,17 @@ export const bulkDeleteItems = async (items, {deleteNotebookNotes, screen}) => {
           await deleteDeviceItem(item);
           removed.push(item);
           break;
-        case ItemTypes.ISKCON:
-          // Only ever un-downloads, so it's a cleared download rather than a
-          // removal — nothing leaves the browse list, the file just stops
-          // being local. Reachable since the Downloads screen started using
-          // this list, where a selection mixes iskcon files with the rest.
-          await deleteIskconItem(item);
+        case ItemTypes.ISKCON: {
+          // Never deletes the item — there is no library entry of ours to
+          // remove. It clears the download, and in a category listing also
+          // drops that one category link, which is what takes the row out of
+          // the list. In the browse listing there is no link and nothing is
+          // removed; the file just stops being local.
+          const {removedFromList} = await deleteIskconItem(item, categoryId);
+          if (removedFromList) removed.push(item);
           downloadCleared.push(item);
           break;
+        }
         case ItemTypes.YOUTUBE:
           await deleteYoutubeItem(item);
           removed.push(item);

@@ -10,6 +10,7 @@ const useLoadingStore = create((set, get) => ({
     device: false,
     drive: false,
     notebooks: false,
+    iskcon: false,
     itemNotes: false,
     mainNotes: false,
     mainMoreNotes: false,
@@ -36,6 +37,7 @@ const useLoadingStore = create((set, get) => ({
         device: isLoading,
         drive: isLoading,
         notebooks: isLoading,
+        iskcon: isLoading,
         // mainNotes, itemNotes, mainMoreNotes are preserved
       },
     })),

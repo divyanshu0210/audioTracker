@@ -18,7 +18,8 @@ import {useSelectionStore} from '../stores/useSelectionStore';
 import {useNotesStore} from '../stores/useNotesStore';
 import {track} from '../utils/rerenderTracker';
 import useLoadingStore from '../stores/useLoadingStore';
-import IskconAudioView from '../scrap/IskconAudioView';
+import IskconAudioView from '../iskcon/IskconAudioView';
+import {loadIskconRootEntries} from '../iskcon/iskconActions';
 
 const Tab = createMaterialTopTabNavigator();
 
@@ -27,6 +28,8 @@ const HomeTabs = ({categoryId}) => {
   const setDriveLinksList = useMediaStore(state => state.setDriveLinksList);
   const setItems = useMediaStore(state => state.setItems);
   const setDeviceFiles = useMediaStore(state => state.setDeviceFiles);
+  const setIskconFiles = useMediaStore(state => state.setIskconFiles);
+  const setIskconError = useMediaStore(state => state.setIskconError);
   const setNotebooks = useNotesStore(state => state.setNotebooks);
   const setMainNotesList = useNotesStore(state => state.setMainNotesList);
 
@@ -113,9 +116,38 @@ const HomeTabs = ({categoryId}) => {
     [categoryId],
   );
 
+  const loadIskconFromDB = useCallback(
+    async (loader = true) => {
+      loader && setLoadingState('iskcon', true);
+      // Cleared before the attempt, not after it succeeds
+      setIskconError(null);
+      try {
+        const list = categoryId
+          ? await getCategoryData(categoryId, ['iskcon_file'])
+          : await loadIskconRootEntries();
+        setIskconFiles(list || []);
+      } catch (error) {
+        console.error('Error loading iskcon entries:', error);
+        setIskconFiles([]);
+        setIskconError(
+          categoryId
+            ? error?.message || 'Failed to load this category.'
+            : error?.message || 'Failed to load. Check your connection.',
+        );
+      } finally {
+        loader && setLoadingState('iskcon', false);
+      }
+    },
+    [categoryId],
+  );
+
   const refreshYouTube = useCallback(() => {
     loadMainYTFromDB(true);
   }, [loadMainYTFromDB]);
+
+  const refreshIskcon = useCallback(() => {
+    loadIskconFromDB(true);
+  }, [loadIskconFromDB]);
 
   const refreshDevice = useCallback(() => {
     loadFilesFromDB(true);
@@ -136,12 +168,14 @@ const HomeTabs = ({categoryId}) => {
     setDeviceFiles([]);
     setNotebooks([]);
     setMainNotesList([]);
+    setIskconFiles([]);
     try {
       await Promise.all([
         loadMainYTFromDB(false),
         loadDriveItemsfromDB(false),
         loadFilesFromDB(false),
         loadNotebooks(false),
+        loadIskconFromDB(false),
       ]);
     } catch (err) {
       console.error('Failed to load data', err);
@@ -202,7 +236,12 @@ const HomeTabs = ({categoryId}) => {
             //   ),
             // }}
           >
-            {() => renderTabContent(IskconAudioView)}
+            {() =>
+              renderTabContent(IskconAudioView, {
+                categoryId,
+                onRefresh: refreshIskcon,
+              })
+            }
           </Tab.Screen>
           <Tab.Screen name="YouTube">
             {() =>

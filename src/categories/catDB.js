@@ -1,5 +1,6 @@
 import {ITEM_TYPES_THAT_USE_ITEMS_TABLE} from '../contexts/constants';
 import {getDb} from '../database/database';
+import {ensureIskconRowsExist} from '../iskcon/iskconActions';
 
 // Categories the app maintains for itself rather than ones the user made.
 //
@@ -151,8 +152,16 @@ export const getAllCategories = (query = null) => {
   });
 };
 
-export const addItemToCategory = (categoryId, itemId, itemType) => {
+export const addItemToCategory = async (categoryId, itemId, itemType) => {
   const fastdb = getDb();
+  // An Iskcon file straight out of the browse listing may not have an items
+  // row yet — see ensureIskconRowsExist. Creating it here rather than at each
+  // call site means every route into a category (the per-item menu, the bulk
+  // SelectionHeader, Assign) is covered by one guard. No-ops for every other
+  // type, and for a file that already has a row.
+  if (itemType === 'iskcon_file') {
+    await ensureIskconRowsExist([String(itemId)]);
+  }
   return new Promise((resolve, reject) => {
     fastdb.transaction(
       tx => {

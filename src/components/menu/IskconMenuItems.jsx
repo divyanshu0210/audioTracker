@@ -16,12 +16,13 @@ import {useShallow} from 'zustand/react/shallow';
 import {updateItemFields} from '../../database/U';
 import {useMediaStore} from '../../stores/useMediaStore';
 import {enqueueDownload} from '../../backgroundService/backgroundDownloadService';
-import {ensureDbItem, getLocalFilePath} from '../../scrap/iskconActions';
+import {ensureDbItem, getLocalFilePath} from '../../iskcon/iskconActions';
+import {iskconUrlFromSourceId} from '../../iskcon/iskconAudioApi';
 import useDownloadStore from '../../stores/useDownloadStore';
 
 const IskconMenuItems = ({item, hideMenu}) => {
-  const {setIskconEntries} = useMediaStore(
-    useShallow(state => ({setIskconEntries: state.setIskconEntries})),
+  const {patchIskconFile} = useMediaStore(
+    useShallow(state => ({patchIskconFile: state.patchIskconFile})),
   );
 
   // Two things were wrong with reading `!!item.file_path` here.
@@ -63,9 +64,7 @@ const IskconMenuItems = ({item, hideMenu}) => {
     }
     const dbItem = await ensureDbItem(item);
     if (dbItem.id !== item.id) {
-      setIskconEntries(prev =>
-        prev.map(f => (f.source_id === item.source_id ? {...f, id: dbItem.id} : f)),
-      );
+      patchIskconFile(item.source_id, {id: dbItem.id});
     }
     await enqueueDownload({
       id: dbItem.id,
@@ -94,10 +93,14 @@ const IskconMenuItems = ({item, hideMenu}) => {
           await RNFS.unlink(path);
         }
       }
-      await updateItemFields(item.id, {file_path: null});
-      setIskconEntries(prev =>
-        prev.map(f => (f.source_id === item.source_id ? {...f, file_path: null} : f)),
-      );
+      // The remote url goes back into file_path rather than null: an iskcon
+      // file streams from file_path when there is no local copy (ensureDbItem
+      // parks it there), so nulling it left the row with nothing to play. The
+      // exact url when the entry still carries one, the reconstruction from
+      // source_id otherwise.
+      const streamUrl = item.url ?? iskconUrlFromSourceId(item.source_id);
+      await updateItemFields(item.id, {file_path: streamUrl});
+      patchIskconFile(item.source_id, {file_path: streamUrl});
       useDownloadStore.getState().notifyDownloadsChanged();
       ToastAndroid.show('Download removed', ToastAndroid.SHORT);
     } catch (error) {

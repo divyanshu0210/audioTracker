@@ -10,18 +10,26 @@ import {SafeAreaView, StyleSheet} from 'react-native';
 import {useFocusEffect, useNavigation, useRoute} from '@react-navigation/native';
 import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
 
-import {loadFolderEntries} from './iskconActions';
+import {loadIskconFolderEntries} from './iskconActions';
 import IskconList from './IskconList';
 import AppHeader from '../components/headers/AppHeader';
 import SearchBarToggle from '../appMentor/SearchBarToggle';
+import {useMediaStore} from '../stores/useMediaStore';
 
 const IskconFolderViewer = () => {
   const route = useRoute();
   const navigation = useNavigation();
   const {folder} = route.params || {};
 
+  // folderStack stays local — it's this screen's navigation state, exactly as
+  // GoogleDriveViewer keeps its own. The listing, though, lives in the store
+  // (useMediaStore.data is Drive's equivalent), so a row can read its download
+  // state from there instead of this screen prop-drilling it down.
   const [folderStack, setFolderStack] = useState([folder]);
-  const [entries, setEntries] = useState([]);
+  const entries = useMediaStore(state => state.iskconFolderEntries);
+  const setEntries = useMediaStore(state => state.setIskconFolderEntries);
+  // Loading and error stay local: they describe this screen's fetch, not the
+  // data. PlaylistView keeps its `loading` local the same way.
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
@@ -31,19 +39,21 @@ const IskconFolderViewer = () => {
 
   const current = folderStack[folderStack.length - 1];
 
-  const load = useCallback(async encodedPath => {
-    setLoading(true);
-    setError(null);
-    try {
-      const {folders, files} = await loadFolderEntries(encodedPath);
-      setEntries([...folders, ...files]);
-    } catch (e) {
-      setError(e?.message || 'Failed to load. Check your connection.');
-      setEntries([]);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const load = useCallback(
+    async encodedPath => {
+      setLoading(true);
+      setError(null);
+      try {
+        await loadIskconFolderEntries(encodedPath);
+      } catch (e) {
+        setError(e?.message || 'Failed to load. Check your connection.');
+        setEntries([]);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [setEntries],
+  );
 
   useEffect(() => {
     load(current.encodedPath);
@@ -51,9 +61,22 @@ const IskconFolderViewer = () => {
     searchBarRef.current?.close();
   }, [current.encodedPath, load]);
 
-  const displayEntries = useMemo(() => {
+  // Clear on unmount so the next folder opened doesn't flash the last one's
+  // contents before its fetch lands — same cleanup GoogleDriveViewer does for
+  // useMediaStore.data.
+  useEffect(
+    () => () => useMediaStore.getState().setIskconFolderEntries([]),
+    [],
+  );
+
+  // One unlabelled group: a folder's contents are its contents, and the base
+  // list's date grouping means nothing for entries scraped off a web page.
+  const sections = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
-    return q ? entries.filter(e => e.title?.toLowerCase().includes(q)) : entries;
+    const displayEntries = q
+      ? entries.filter(e => e.title?.toLowerCase().includes(q))
+      : entries;
+    return displayEntries.length ? [{title: '', data: displayEntries}] : [];
   }, [entries, searchQuery]);
 
   const onFolderPress = useCallback(f => {
@@ -124,7 +147,8 @@ const IskconFolderViewer = () => {
       <IskconList
         loading={loading}
         error={error}
-        entries={displayEntries}
+        sections={sections}
+        showSectionHeaders={false}
         onRetry={() => load(current.encodedPath)}
         onFolderPress={onFolderPress}
       />

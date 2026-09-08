@@ -23,7 +23,10 @@ const MentorshipRequestBottomSheet = forwardRef(({}, ref) => {
   const [userExists, setUserExists] = useState(false);
   const [userFullName, setUserFullName] = useState('');
   const [checking, setChecking] = useState(false);
-  const [loading, setLoading] = useState(false);
+  // Which role is being sent, not just whether something is — the spinner has
+  // to go in the button that was actually pressed.
+  const [sendingType, setSendingType] = useState(null);
+  const loading = sendingType !== null;
   const {userInfo} = useAppState();
 
   // Typing cancels the pending timer but not a fetch already on its way, and
@@ -81,7 +84,7 @@ const MentorshipRequestBottomSheet = forwardRef(({}, ref) => {
   };
 
   const sendRequest = async type => {
-    setLoading(true);
+    setSendingType(type);
     try {
       const res = await fetch(`${BASE_URL}/request/send/`, {
         method: 'POST',
@@ -107,7 +110,7 @@ const MentorshipRequestBottomSheet = forwardRef(({}, ref) => {
       console.error(err);
       Alert.alert('Network error');
     }
-    setLoading(false);
+    setSendingType(null);
   };
 
   const renderBackdrop = useCallback(
@@ -163,16 +166,30 @@ const MentorshipRequestBottomSheet = forwardRef(({}, ref) => {
 
         <View style={styles.buttonContainer}>
           <TouchableOpacity
-            style={[styles.sendButton, !userExists && styles.disabledButton]}
+            style={[
+              styles.sendButton,
+              (!userExists || loading) && styles.disabledButton,
+            ]}
             onPress={() => sendRequest('mentor')}
             disabled={!userExists || loading}>
-            <Text style={styles.sendButtonText}>Add as Mentor</Text>
+            {sendingType === 'mentor' ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <Text style={styles.sendButtonText}>Add as Mentor</Text>
+            )}
           </TouchableOpacity>
           <TouchableOpacity
-            style={[styles.sendButton, !userExists && styles.disabledButton]}
+            style={[
+              styles.sendButton,
+              (!userExists || loading) && styles.disabledButton,
+            ]}
             onPress={() => sendRequest('mentee')}
             disabled={!userExists || loading}>
-            <Text style={styles.sendButtonText}>Add as Mentee</Text>
+            {sendingType === 'mentee' ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <Text style={styles.sendButtonText}>Add as Mentee</Text>
+            )}
           </TouchableOpacity>
         </View>
 
@@ -274,6 +291,8 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderRadius: 5,
     alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 40,
   },
   disabledButton: {
     backgroundColor: '#ccc',

@@ -20,6 +20,13 @@ export const styles = StyleSheet.create({
   messageContainer: {
     flex: 1,
   },
+  // Was inline on the received-request row; shared now that one component
+  // renders every kind.
+  actions: {
+    flexDirection: 'row',
+    gap: 10,
+    marginLeft: 8,
+  },
   messageText: {
     fontSize: 16,
     color: '#333',
@@ -29,6 +36,15 @@ export const styles = StyleSheet.create({
     fontSize: 13,
     color: '#555',
     marginTop: 4,
+  },
+  sectionHeader: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#666',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginTop: 18,
+    marginBottom: 6,
   },
   emptyText: {
     color: '#777',

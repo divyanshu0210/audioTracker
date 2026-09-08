@@ -1,4 +1,4 @@
-import React, {forwardRef, useCallback, useEffect, useState} from 'react';
+import React, {forwardRef, useCallback, useEffect, useRef, useState} from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -26,22 +26,34 @@ const MentorshipRequestBottomSheet = forwardRef(({}, ref) => {
   const [loading, setLoading] = useState(false);
   const {userInfo} = useAppState();
 
+  // Typing cancels the pending timer but not a fetch already on its way, and
+  // that older response would otherwise clear the spinner and write its result
+  // while a newer lookup is still running. Only the latest id may touch state.
+  const lookupIdRef = useRef(0);
+
   const snapPoints = ['40%'];
 
+  // The spinner comes up on the keystroke rather than 300ms later when the
+  // request actually goes out — otherwise the field sits dead through the
+  // whole debounce and reads as nothing having happened.
   useEffect(() => {
+    const lookupId = ++lookupIdRef.current;
+
+    if (!email.trim()) {
+      setChecking(false);
+      setUserExists(false);
+      setUserFullName('');
+      return;
+    }
+
+    setChecking(true);
     const delayDebounce = setTimeout(() => {
-      if (email.trim()) {
-        checkUser(email.trim());
-      } else {
-        setUserExists(false);
-        setUserFullName('');
-      }
+      checkUser(email.trim(), lookupId);
     }, 300);
     return () => clearTimeout(delayDebounce);
   }, [email]);
 
-  const checkUser = async emailToCheck => {
-    setChecking(true);
+  const checkUser = async (emailToCheck, lookupId) => {
     try {
       const res = await fetch(`${BASE_URL}/user/check-email/`, {
         method: 'POST',
@@ -49,6 +61,8 @@ const MentorshipRequestBottomSheet = forwardRef(({}, ref) => {
         body: JSON.stringify({email: emailToCheck}),
       });
       const data = await res.json();
+      if (lookupId !== lookupIdRef.current) return;
+
       if (res.ok) {
         setUserExists(true);
         setUserFullName(data.full_name);
@@ -58,9 +72,11 @@ const MentorshipRequestBottomSheet = forwardRef(({}, ref) => {
       }
     } catch (err) {
       console.error(err);
+      if (lookupId !== lookupIdRef.current) return;
       setUserExists(false);
       setUserFullName('');
     }
+
     setChecking(false);
   };
 
@@ -145,8 +161,6 @@ const MentorshipRequestBottomSheet = forwardRef(({}, ref) => {
           />
         </View>
 
-        {/* {checking && <ActivityIndicator size="small" color="#888" style={styles.activityIndicator} />} */}
-
         <View style={styles.buttonContainer}>
           <TouchableOpacity
             style={[styles.sendButton, !userExists && styles.disabledButton]}
@@ -162,13 +176,23 @@ const MentorshipRequestBottomSheet = forwardRef(({}, ref) => {
           </TouchableOpacity>
         </View>
 
-        {userExists && (
+        {!!email.trim() && (
           <View style={styles.resultContainer}>
-            <Text style={styles.messageText}>
-              <Text style={styles.nameText}>{userFullName}</Text> is a
-              registered user.
-            </Text>
-            <Text style={styles.emailText}>{email}</Text>
+            {checking ? (
+              <ActivityIndicator size="small" color="#007bff" />
+            ) : userExists ? (
+              <>
+                <Text style={styles.messageText}>
+                  <Text style={styles.nameText}>{userFullName}</Text> is a
+                  registered user.
+                </Text>
+                <Text style={styles.emailText}>{email}</Text>
+              </>
+            ) : (
+              <Text style={styles.emptyText}>
+                No user found with this email.
+              </Text>
+            )}
           </View>
         )}
       </BottomSheetView>
@@ -219,11 +243,9 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#000',
   },
-  activityIndicator: {
-    marginBottom: 15,
-  },
   resultContainer: {
     marginVertical: 15,
+    minHeight: 40,
   },
   messageText: {
     fontSize: 15,
@@ -236,6 +258,10 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#666',
     marginTop: 2,
+  },
+  emptyText: {
+    fontSize: 15,
+    color: '#666',
   },
   buttonContainer: {
     flexDirection: 'row',

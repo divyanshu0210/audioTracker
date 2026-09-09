@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Debug override of the release config. Setting networkSecurityConfig at all
+  makes the platform ignore the debug manifest's usesCleartextTraffic="true",
+  which would cut the app off from a Metro dev server reached over a LAN
+  address. Debug builds keep the blanket permission they had before.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>

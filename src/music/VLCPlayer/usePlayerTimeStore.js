@@ -9,6 +9,9 @@ const usePlayerTimeStore = create((set, get) => ({
   // --- moved out of VLCPlayerComponent ---
   isPaused: false,
   controlsVisible: true,
+  // Lives here rather than in VLCPlayerComponent so a stall doesn't re-render
+  // <VLCPlayer> itself — only the two small pieces of chrome that show it.
+  isBuffering: true,
   skipDirection: null,      // 'forward' | 'backward' | null
   showSkipIndicator: false,
 
@@ -17,6 +20,7 @@ const usePlayerTimeStore = create((set, get) => ({
   setIsPlaying: (isPlaying) => set({ isPlaying }),
   setIsPaused: (isPaused) => set({ isPaused }),
   setControlsVisible: (controlsVisible) => set({ controlsVisible }),
+  setIsBuffering: (isBuffering) => set({ isBuffering }),
   setSkipDirection: (skipDirection) => set({ skipDirection }),
   setShowSkipIndicator: (showSkipIndicator) => set({ showSkipIndicator }),
 
@@ -24,6 +28,7 @@ const usePlayerTimeStore = create((set, get) => ({
   getCurrentTime: () => get().currentTime,
   getDuration: () => get().duration,
   getIsPaused: () => get().isPaused,
+  getIsBuffering: () => get().isBuffering,
 }));
 
 export default usePlayerTimeStore;

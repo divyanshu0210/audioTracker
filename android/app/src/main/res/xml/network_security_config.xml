@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The Drive streaming proxy (DriveStreamServer) serves plain HTTP on 127.0.0.1,
+  which the platform blocks by default from targetSdk 28 onwards. This opens
+  cleartext for the loopback address only; every other host stays on the
+  default deny, so nothing else in the app gains permission to talk in the
+  clear.
+-->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">127.0.0.1</domain>
+        <domain includeSubdomains="false">localhost</domain>
+    </domain-config>
+</network-security-config>

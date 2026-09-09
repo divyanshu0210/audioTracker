@@ -15,9 +15,20 @@ import React, {
   } from 'react-native';
   import Icon from 'react-native-vector-icons/MaterialIcons';
   
-  const PlayerSettings = forwardRef((props, ref) => {
-    const [playbackRate, setPlaybackRate] = useState(1.0);
-    const [aspectRatio, setAspectRatio] = useState('9:16');
+  // Controlled on purpose. This component is rendered inside BottomControls,
+  // which unmounts whenever the player's controls auto-hide, so anything it
+  // held in local state lasted only until the next hide — the speed and ratio
+  // now belong to VLCPlayerComponent and are passed back down.
+  const PlayerSettings = forwardRef((
+    {
+      playbackRate,
+      onSelectPlaybackRate,
+      aspectRatio,
+      onSelectAspectRatio,
+      onVisibilityChange,
+    },
+    ref,
+  ) => {
     const [showSettings, setShowSettings] = useState(false);
     const [showSpeedOptions, setShowSpeedOptions] = useState(false);
     const [showAspectOptions, setShowAspectOptions] = useState(false);
@@ -28,12 +39,14 @@ import React, {
     useImperativeHandle(ref, () => ({
         openSettingsModal,
         closeSettingsModal,
-        getPlaybackRate: () => playbackRate,
-        getAspectRatio: () => aspectRatio,
       }));
 
+    // Told on open, and again once the close animation has finished, so the
+    // player knows not to run its auto-hide timer while a choice is in
+    // progress.
     const openSettingsModal = () => {
       setShowSettings(true);
+      onVisibilityChange?.(true);
       Animated.timing(settingsAnimation, {
         toValue: 1,
         duration: 200,
@@ -51,8 +64,23 @@ import React, {
         setShowSettings(false);
         setShowSpeedOptions(false);
         setShowAspectOptions(false);
+        onVisibilityChange?.(false);
       });
     };
+
+    // Should the panel be torn down while still open — a screen rotation, the
+    // player closing — the flag has to be cleared anyway, or the controls
+    // would never auto-hide again. Only then, though: this component is
+    // unmounted by every ordinary controls hide, and reporting a close on
+    // those would be reporting something that never happened.
+    const showSettingsRef = useRef(false);
+    showSettingsRef.current = showSettings;
+    useEffect(() => {
+      return () => {
+        if (showSettingsRef.current) onVisibilityChange?.(false);
+      };
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
   
     const toggleSettingsModal = () => {
       showSettings ? closeSettingsModal() : openSettingsModal();
@@ -139,7 +167,7 @@ import React, {
                           playbackRate === speed && styles.selectedOption,
                         ]}
                         onPress={() => {
-                          setPlaybackRate(speed);
+                          onSelectPlaybackRate?.(speed);
                           closeSettingsModal();
                         }}
                       >
@@ -164,19 +192,21 @@ import React, {
                
                   <View style={styles.aspectOptions}>
                     {[
+                      // null = leave the file's own ratio alone. Without a way
+                      // back to it, picking any ratio was a one-way door.
+                      { label: 'Original', value: null },
                       { label: '1:1', value: '1:1' },
                       { label: '16:9', value: '16:9' },
                       { label: '9:16', value: '9:16' },
                     ].map(ratio => (
                       <TouchableOpacity
-                        key={ratio.value}
+                        key={ratio.label}
                         style={[
                           styles.optionButton,
                           aspectRatio === ratio.value && styles.selectedOption,
                         ]}
                         onPress={() => {
-                        
-                          setAspectRatio(ratio.value);
+                          onSelectAspectRatio?.(ratio.value);
                           closeSettingsModal();
                         }}
                       >
@@ -238,7 +268,9 @@ import React, {
       justifyContent: 'space-between',
     },
     aspectOptions: {
-      flexDirection: 'column',
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      justifyContent: 'space-between',
     },
     optionButton: {
       padding: 8,

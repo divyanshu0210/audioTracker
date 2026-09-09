@@ -8,7 +8,14 @@ import React, {
   forwardRef,
   useImperativeHandle,
 } from 'react';
-import {StyleSheet, Text, TouchableOpacity, Animated, View} from 'react-native';
+import {
+  ActivityIndicator,
+  Animated,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import {VLCPlayer} from 'react-native-vlc-media-player';
 import Icon from 'react-native-vector-icons/MaterialIcons';
 import SkipHandler from './SkipHandler';
@@ -52,6 +59,8 @@ const VLCPlayerComponent = forwardRef(
       setCurrentTime,
       setDuration,
       setControlsVisible,
+      setIsBuffering,
+      getIsBuffering,
       getCurrentTime,
       getDuration,
     } = usePlayerTimeStore(
@@ -59,6 +68,8 @@ const VLCPlayerComponent = forwardRef(
         setCurrentTime: state.setCurrentTime,
         setDuration: state.setDuration,
         setControlsVisible: state.setControlsVisible,
+        setIsBuffering: state.setIsBuffering,
+        getIsBuffering: state.getIsBuffering,
         getCurrentTime: state.getCurrentTime,
         getDuration: state.getDuration,
       })),
@@ -107,17 +118,98 @@ const VLCPlayerComponent = forwardRef(
     // replayed track silently does nothing (no countdown, no autoplay).
     const hasEndedRef = useRef(false);
 
+    // Whether the clock has ever moved for this source. libVLC reports
+    // Buffering(100) and then Playing well before it has actually filled, and
+    // goes straight back to buffering afterwards — trusting either one on its
+    // own flashed the controls up mid-open (spinner, pause button, spinner,
+    // picture). Until time is genuinely on the clock, those two are ignored.
+    //
+    // A ref: nothing renders from it, it only decides whether those early
+    // claims can be believed. As state it would have re-rendered this whole
+    // component — <VLCPlayer> included — four times a second.
+    const hasStartedRef = useRef(false);
+
+    // Aspect ratio and "is the settings panel open" live here, not inside
+    // PlayerSettings. That component is rendered by BottomControls, which
+    // returns null the moment the controls auto-hide — so its local state went
+    // with it and a chosen ratio survived about three seconds. Worse, the
+    // unmount nulled settingsRef, and videoAspectRatio was read off that ref
+    // during render: every re-render after a hide (pausing being the obvious
+    // one) swapped the value between the choice and undefined, and the picture
+    // changed shape underneath the user.
+    //
+    // null means "whatever the file says". Nothing should impose a ratio the
+    // user never asked for, which is what defaulting to 9:16 was doing.
+    // Aspect ratio has to be state — it is a prop on <VLCPlayer>, so applying
+    // it *is* a re-render, exactly like playbackRateIndex above. It changes
+    // only when the user picks one.
+    const [aspectRatio, setAspectRatio] = useState(null);
+    // Whether the settings panel is open. A ref, not state: nothing in the
+    // output depends on it, only the auto-hide timer does.
+    const settingsOpenRef = useRef(false);
+
     // ─── Side-effects ─────────────────────────────────────────────────────────
     useEffect(() => {
       onIsPausedChange?.(isPaused);
     }, [isPaused, onIsPausedChange]);
 
+    // A new source, or a fresh native instance, starts empty again. Without
+    // this the spinner would stay hidden through the wait for the next track
+    // in a queue, which is the same wait it exists to explain.
     useEffect(() => {
-      onPlayBackRateChange?.(
-        settingsRef.current?.getPlaybackRate() ??
-          playbackRates[playbackRateIndex],
-      );
-    }, [playbackRateIndex, onPlayBackRateChange]);
+      hasStartedRef.current = false;
+      setIsBuffering(true);
+    }, [item?.file_path, playerKey, setIsBuffering]);
+
+    // A different track inherits nothing from the last one.
+    //
+    // Two separate leaks were showing here. The store is global and
+    // SliderWithTime reads currentTime/duration straight out of it, so until
+    // the new source's first progress event the scrubber sat at the previous
+    // video's position. And durationRef is a ref in a component BacePlayer
+    // does *not* remount between tracks — it swaps the item prop in place — so
+    // the `!durationRef.current` guard in onProgress stayed false and the new
+    // track's real duration was never recorded at all.
+    //
+    // Keyed on source_id, not file_path or playerKey: resetToStart bumps
+    // playerKey deliberately, and re-arming hasAppliedStartTimeRef there would
+    // seek a replayed track back to its old saved position instead of the 0 it
+    // was just reset to.
+    useEffect(() => {
+      setCurrentTime(0);
+      setDuration(0);
+      durationRef.current = 0;
+      currentTimeRef.current = 0;
+      hasAppliedStartTimeRef.current = false;
+      hasEndedRef.current = false;
+    }, [item?.source_id, setCurrentTime, setDuration]);
+
+    // libVLC reports its fill level 0→100 while buffering, and again from 0 on
+    // a mid-playback stall. onPlaying is the backstop: whatever the last fill
+    // event claimed, media that has actually started is not buffering.
+    const handleBuffering = useCallback(
+      event => {
+        const filling = (event?.bufferRate ?? 100) < 100;
+        // "Done" is only credible once something has actually played; before
+        // that it is the premature report described above.
+        if (!filling && !hasStartedRef.current) return;
+        setIsBuffering(filling);
+      },
+      [setIsBuffering],
+    );
+
+    const handlePlaying = useCallback(() => {
+      if (hasStartedRef.current) setIsBuffering(false);
+    }, [setIsBuffering]);
+
+    // The speed the settings panel picks and the speed the cycle button picks
+    // are now the same piece of state, so neither can be silently overridden
+    // by a stale read of the other.
+    const playbackRate = playbackRates[playbackRateIndex];
+
+    useEffect(() => {
+      onPlayBackRateChange?.(playbackRate);
+    }, [playbackRate, onPlayBackRateChange]);
 
     // ─── Controls visibility ──────────────────────────────────────────────────
     const hideControls = useCallback(() => {
@@ -143,16 +235,32 @@ const VLCPlayerComponent = forwardRef(
       // Audio has no video content for controls to obstruct, and no tap
       // handler to bring them back (handleScreenTap no-ops for audio) — they
       // should just stay up permanently, never auto-hide.
-      if (!isPaused && !isAudio) {
+      // An open settings panel is an interaction in progress; hiding the
+      // controls unmounts BottomControls and takes the panel with it, which is
+      // what made speed and aspect ratio feel impossible to set.
+      //
+      // Nor while the source is still loading: the timer would run out during
+      // the wait and leave a spinner alone on a black frame, with no title, no
+      // scrubber and no way back except a tap. The countdown is meant to
+      // measure how long the controls have sat over *a playing picture*, so it
+      // starts when there is one — see the first-progress branch in onProgress.
+      if (
+        !isPaused &&
+        !isAudio &&
+        !settingsOpenRef.current &&
+        !getIsBuffering()
+      ) {
         controlsTimeout.current = setTimeout(hideControls, 3000);
       }
-    }, [controlsOpacity, hideControls, isPaused, isAudio]);
+    }, [controlsOpacity, hideControls, isPaused, isAudio, getIsBuffering]);
 
     // Show controls on mount via showControls() (not a bare
     // setControlsVisible(true)) so the initial display also schedules the
     // 3s auto-hide for video — otherwise, until the user taps the screen
     // once, nothing ever starts that timer and controls stay visible
-    // indefinitely. showControls itself skips scheduling that hide for audio.
+    // indefinitely. showControls itself skips scheduling that hide for audio,
+    // and while the source is still loading; in that case onProgress arms it
+    // once playback actually starts.
     useEffect(() => {
       showControls();
       // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -164,6 +272,25 @@ const VLCPlayerComponent = forwardRef(
       showControls();
       settingsRef.current?.closeSettingsModal?.();
     }, [isAudio, showControls]);
+
+    // Cancel any pending hide the moment the panel opens, and start the timer
+    // again once it closes — otherwise a timer armed just before the panel
+    // opened would still fire mid-choice.
+    const handleSettingsVisibilityChange = useCallback(
+      open => {
+        const wasOpen = settingsOpenRef.current;
+        settingsOpenRef.current = open;
+        if (open) {
+          clearTimeout(controlsTimeout.current);
+          return;
+        }
+        // Only on a real close. PlayerSettings also reports "not open" as it
+        // unmounts, and it unmounts every time the controls hide — bringing
+        // them straight back, hiding again three seconds later, forever.
+        if (wasOpen) showControls();
+      },
+      [showControls],
+    );
 
     // Reset to 0, called both when the track actually ends (stay paused —
     // "replay" state) and when the user presses Play after it ended (resume
@@ -224,6 +351,13 @@ const VLCPlayerComponent = forwardRef(
 
     const changePlaybackRate = useCallback(() => {
       setPlaybackRateIndex(prev => (prev + 1) % playbackRates.length);
+    }, []);
+
+    // The panel offers the same list this component cycles through, so a pick
+    // is just a jump to that entry.
+    const selectPlaybackRate = useCallback(speed => {
+      const index = playbackRates.indexOf(speed);
+      if (index >= 0) setPlaybackRateIndex(index);
     }, []);
 
     // ─── Imperative API ───────────────────────────────────────────────────────
@@ -293,6 +427,18 @@ const VLCPlayerComponent = forwardRef(
             }
             setCurrentTime(event.currentTime);
             currentTimeRef.current = event.currentTime;
+            // Time on the clock is the only unambiguous "it started" signal —
+            // every event libVLC sends before this can still be followed by
+            // more buffering. Guarded by the ref so this runs once per source
+            // rather than on all four progress ticks a second.
+            if (event.currentTime > 0 && !hasStartedRef.current) {
+              hasStartedRef.current = true;
+              setIsBuffering(false);
+              // Playback exists now, so the controls have something to sit
+              // over and the 3s countdown finally means something. showControls
+              // skipped arming it every time it was called before this point.
+              showControls();
+            }
             onCurrentTimeChange?.(event.currentTime);
           }}
           onOpen={() => {
@@ -304,12 +450,11 @@ const VLCPlayerComponent = forwardRef(
             }
             hasAppliedStartTimeRef.current = true;
           }}
+          onBuffering={handleBuffering}
+          onPlaying={handlePlaying}
           playInBackground={true}
-          videoAspectRatio={settingsRef.current?.getAspectRatio?.()}
-          rate={
-            settingsRef.current?.getPlaybackRate?.() ??
-            playbackRates[playbackRateIndex]
-          }
+          videoAspectRatio={aspectRatio ?? undefined}
+          rate={playbackRate}
           // The app drives its own end-of-track behavior via handleReplay/onEnd
           // (pause-and-offer-replay, or advance to the next playlist item) —
           // native repeat would auto-restart playback underneath that,
@@ -329,6 +474,8 @@ const VLCPlayerComponent = forwardRef(
           />
         )}
 
+        {!isInPip && !isAudio && <BufferingOverlay isPaused={isPaused} />}
+
         {!isInPip && <SkipIndicator />}
 
         {!isInPip && <BottomControls
@@ -343,11 +490,38 @@ const VLCPlayerComponent = forwardRef(
           playbackRateIndex={playbackRateIndex}
           settingsRef={settingsRef}
           isPaused={isPaused}
+          playbackRate={playbackRate}
+          onSelectPlaybackRate={selectPlaybackRate}
+          aspectRatio={aspectRatio}
+          onSelectAspectRatio={setAspectRatio}
+          onSettingsVisibilityChange={handleSettingsVisibilityChange}
         />}
       </SkipHandler>
     );
   },
 );
+
+// ─── BufferingOverlay ─────────────────────────────────────────────────────────
+// Video only, and deliberately not tied to controlsOpacity: the controls fade
+// out on their own timeout, and a network source can take longer than that to
+// fill — which left a black frame with nothing on it and no way to tell a
+// stalled stream from a broken one. Audio never auto-hides its controls (see
+// showControls), so it has nothing to outlast and says it in the transport row
+// instead.
+//
+// Subscribes to the store rather than taking the flag from the parent, so a
+// stall re-renders these few lines and not <VLCPlayer>.
+const BufferingOverlay = React.memo(({isPaused}) => {
+  const isBuffering = usePlayerTimeStore(state => state.isBuffering);
+
+  if (!isBuffering || isPaused) return null;
+
+  return (
+    <View style={styles.bufferingOverlay} pointerEvents="none">
+      <ActivityIndicator size="large" color="#fff" />
+    </View>
+  );
+});
 
 // ─── BottomControls ───────────────────────────────────────────────────────────
 // Subscribes to controlsVisible + isPaused independently.
@@ -364,10 +538,20 @@ const BottomControls = React.memo(
     playbackRateIndex,
     settingsRef,
     isPaused,
+    playbackRate,
+    onSelectPlaybackRate,
+    aspectRatio,
+    onSelectAspectRatio,
+    onSettingsVisibilityChange,
   }) => {
     const controlsVisible = usePlayerTimeStore(state => state.controlsVisible);
+    const isBuffering = usePlayerTimeStore(state => state.isBuffering);
 
     if (!controlsVisible) return null;
+
+    // Paused is waiting on the user, not on the network — nothing is loading,
+    // so a spinner there would never resolve.
+    const showBuffering = isBuffering && !isPaused;
 
     return (
       <Animated.View
@@ -379,15 +563,30 @@ const BottomControls = React.memo(
               onPress={() => onSkip(-10)}>
               <Icon name="replay-10" size={30} color="white" />
             </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.audioMainButton}
-              onPress={onTogglePlayPause}>
-              <Icon
-                name={isPaused ? 'play-arrow' : 'pause'}
-                size={30}
-                color="white"
-              />
-            </TouchableOpacity>
+            {/* While buffering the spinner replaces the button rather than
+                sitting inside it: there is nothing to toggle yet, and a
+                control that still looks pressable but does nothing reads as a
+                stuck app. Same padding and margins as the button, and the same
+                glyph slot, so the row doesn't shift either way. */}
+            {showBuffering ? (
+              <View style={styles.audioMainPlaceholder}>
+                <View style={styles.audioMainGlyph}>
+                  <ActivityIndicator size="large" color="white" />
+                </View>
+              </View>
+            ) : (
+              <TouchableOpacity
+                style={styles.audioMainButton}
+                onPress={onTogglePlayPause}>
+                <View style={styles.audioMainGlyph}>
+                  <Icon
+                    name={isPaused ? 'play-arrow' : 'pause'}
+                    size={30}
+                    color="white"
+                  />
+                </View>
+              </TouchableOpacity>
+            )}
             <TouchableOpacity
               style={styles.audioControlButton}
               onPress={() => onSkip(10)}>
@@ -404,7 +603,14 @@ const BottomControls = React.memo(
           />
           {!isAudio ? (
             <View style={styles.inlineButtonRow}>
-              <PlayerSettings ref={settingsRef} />
+              <PlayerSettings
+                ref={settingsRef}
+                playbackRate={playbackRate}
+                onSelectPlaybackRate={onSelectPlaybackRate}
+                aspectRatio={aspectRatio}
+                onSelectAspectRatio={onSelectAspectRatio}
+                onVisibilityChange={onSettingsVisibilityChange}
+              />
               <TouchableOpacity
                 style={styles.controlButton}
                 onPress={onToggleSize}>
@@ -432,6 +638,15 @@ const BottomControls = React.memo(
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
+  bufferingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'center',
+    alignItems: 'center',
+    // Above PlayPauseOverlay's zIndex 10, so a controls re-render arriving
+    // mid-buffer cannot land on top of the spinner.
+    zIndex: 11,
+  },
+
   hiddenInPip: {display: 'none'},
   videoPlayer: {flex: 1, width: '100%'},
   audioPlayer: {height: 100, width: '100%'},
@@ -475,6 +690,23 @@ const styles = StyleSheet.create({
     marginBottom: 5,
   },
   audioControlButton: {padding: 10, marginHorizontal: 15},
+  audioMainGlyph: {
+    // 36, not the icon's 30: "large" is the only size ActivityIndicator takes
+    // cross-platform and it draws at 36 on Android, so the slot is sized to
+    // the bigger of the two occupants. Shared by both states — sizing it to
+    // the glyph on show would shift the skip buttons every time buffering
+    // started.
+    width: 36,
+    height: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  // audioMainButton's box without its chrome — the pill background is the
+  // part that says "press me", and there is nothing to press while buffering.
+  audioMainPlaceholder: {
+    padding: 10,
+    marginHorizontal: 15,
+  },
   audioMainButton: {
     padding: 10,
     marginHorizontal: 15,

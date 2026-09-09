@@ -43,6 +43,7 @@ import {
 } from '../backgroundService/playbackKeepAlive';
 import {usePipMode} from './usePipMode';
 import SaveToListBar from '../components/SaveToListBar';
+import {isStreamUrl, resolveDrivePlaybackPath} from './driveStream';
 // const {PipModule} = NativeModules;
 
 const isAudioFile = mimeType => {
@@ -119,6 +120,41 @@ const BacePlayer = () => {
       ),
     );
   }, []);
+
+  // Drive files stream through the loopback proxy, so a download is no longer
+  // a precondition for playing one. Resolving here rather than at each tap
+  // covers every route into the player at once — a queue advance, a history
+  // card, a note's timestamp — and each of those hands over a row whose
+  // file_path is whatever the database happened to hold.
+  const [isResolvingSource, setIsResolvingSource] = useState(false);
+  const currentSourceId = currentItem?.source_id;
+  useEffect(() => {
+    if (!currentItem || currentItem.type !== 'drive_file') {
+      setIsResolvingSource(false);
+      return;
+    }
+    // Already streaming — re-resolving would mint a second url for the same
+    // file and restart playback from the top.
+    if (isStreamUrl(currentItem.file_path)) return;
+
+    let cancelled = false;
+    setIsResolvingSource(true);
+    (async () => {
+      const path = await resolveDrivePlaybackPath(currentItem);
+      if (cancelled) return;
+      setIsResolvingSource(false);
+      if (!path || path === currentItem.file_path) return;
+      setPlaylist(prev =>
+        prev.map(it =>
+          it.source_id === currentSourceId ? {...it, file_path: path} : it,
+        ),
+      );
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [currentSourceId]);
+
   // Seconds left before auto-advancing to the next item, or null when no
   // countdown is running — see handleAutoAdvance/stopAutoAdvanceCountdown.
   const [autoAdvanceSecondsLeft, setAutoAdvanceSecondsLeft] = useState(null);
@@ -298,7 +334,14 @@ const BacePlayer = () => {
       deactivateKeepAwake();
       setActiveNoteId(null);
     };
-  }, [currentItem]);
+    // Keyed on which item is playing, not on the object holding it. This
+    // effect builds the VideoTracker, and anything that rewrites a field on
+    // the playing row — the stream url resolved above, a download finishing —
+    // used to hand it a new object and tear the tracker down mid-session. The
+    // replacement never saw the onPlay that had already fired, so on the way
+    // out onPause found no open interval, saved nothing, and the next visit
+    // had no lastWatchTime to resume from.
+  }, [currentSourceId]);
 
   // Handle playlist changes
   useEffect(() => {
@@ -910,11 +953,18 @@ const BacePlayer = () => {
                     onEnd={handleAutoAdvance}
                   />
                 )
+              ) : isResolvingSource ? (
+                // Working out where a Drive file plays from — a disk check,
+                // and starting the proxy on the first stream of the session.
+                <View style={styles.loadingContainer}>
+                  <ActivityIndicator size="large" color="#fff" />
+                </View>
               ) : (
                 // No path and not a YouTube video: media that came with a
-                // shared note and was never fetched, or a device file whose
-                // row outlived its bytes. This branch used to render nothing,
-                // leaving a black rectangle with no explanation.
+                // shared note and was never fetched, a device file whose row
+                // outlived its bytes, or a Drive file with no local copy and
+                // no connection to stream over. This branch used to render
+                // nothing, leaving a black rectangle with no explanation.
                 <MediaUnavailable
                   item={currentItem}
                   onDownloaded={handleMediaDownloaded}

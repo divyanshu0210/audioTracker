@@ -23,9 +23,12 @@ export const useMediaStore = create((set, get) => ({
       typeof val === 'function' ? val(get().driveLinksList) : val;
     set({driveLinksList: list});
 
+    // No file_path gate: Drive media streams through the loopback proxy, so a
+    // file with no local copy is queueable like any other. Leaving the gate in
+    // would have made the queue disagree with the list the user is looking at
+    // — tapping the third row would start at the third *downloaded* file.
     const nonFolderFiles = list.filter(
       item =>
-        item.file_path &&
         item.mimeType !== 'application/vnd.google-apps.folder' &&
         isAudioOrVideo(item.mimeType),
     );
@@ -121,13 +124,17 @@ export const useMediaStore = create((set, get) => ({
     const results = await Promise.all(
       snapshot.map(async item => {
         if (
-          item.file_path &&
-          item.mimeType !== 'application/vnd.google-apps.folder' &&
-          isAudioOrVideo(item.mimeType)
+          item.mimeType === 'application/vnd.google-apps.folder' ||
+          !isAudioOrVideo(item.mimeType)
         ) {
-          return (await RNFS.exists(item.file_path)) ? item : null;
+          return null;
         }
-        return null;
+        // A Drive file streams whether or not it was ever downloaded. Anything
+        // else in this list is only as playable as its bytes on disk.
+        if (item.type === 'drive_file') return item;
+        return item.file_path && (await RNFS.exists(item.file_path))
+          ? item
+          : null;
       }),
     );
 

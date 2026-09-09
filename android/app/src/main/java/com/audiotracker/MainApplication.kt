@@ -14,6 +14,7 @@ import com.facebook.soloader.SoLoader
 import com.transistorsoft.rnbackgroundfetch.RNBackgroundFetchPackage;
 import com.audiotracker.BackupLifecycleObserver
 import com.audiotracker.BackupPauseObserver
+import com.audiotracker.drivestream.DriveStreamPackage
 //import com.audiotracker.ShellPackage
 
 class MainApplication : Application(), ReactApplication {
@@ -29,6 +30,7 @@ class MainApplication : Application(), ReactApplication {
               add(BackupModulePackage())
               add(PlaybackServicePackage())
               add(PipPackage())
+              add(DriveStreamPackage())
              //  add(RNBackgroundFetchPackage())
             }
  

@@ -221,16 +221,12 @@ const BaseItem = ({
       data.find(f => f.source_id === item.source_id);
     const filePath = storeFile?.file_path ?? item.file_path ?? null;
 
-    if (filePath && isAudioOrVideo(item.mimeType)) {
-      // Checked, not repaired. Clearing file_path here would make the next tap
-      // fall through both of these branches — they're gated on filePath — and go
-      // back to doing nothing silently. DriveItem already renders a Download
-      // button off its own existence check, so the row is not misleading; the
-      // only thing missing was saying why the tap did nothing.
-      if (!(await RNFS.exists(filePath))) {
-        ToastAndroid.show('Download is no longer on this device', ToastAndroid.SHORT);
-        return;
-      }
+    if (isAudioOrVideo(item.mimeType)) {
+      // No file_path check on the way in any more: audio and video stream from
+      // Drive, so a row with nothing on disk is playable too. The player works
+      // out where the bytes come from — local copy, stream, or neither when
+      // there's no connection — because every other route into it (queue,
+      // history, a note's timestamp) needs the same answer.
       const dataSource =
         screen === ScreenTypes.IN ? nonFolderFilesInside : nonFolderFiles;
       if (screen === 'search' || !dataSource || dataSource.length === 0) {
@@ -240,11 +236,19 @@ const BaseItem = ({
       const startingIndex = dataSource.findIndex(
         f => f.source_id === item.source_id,
       );
+      // A row the queue doesn't contain (a search result, a stale list) would
+      // otherwise start the player at index -1 and play nothing at all.
+      if (startingIndex < 0) {
+        navigationRef.navigate('BacePlayer', {item});
+        return;
+      }
       navigationRef.navigate('BacePlayer', {
         items: dataSource,
         currentIndex: startingIndex,
       });
     } else if (filePath) {
+      // Everything else still opens in another app, which needs real bytes on
+      // disk — there is nothing to hand a viewer but a path.
       if (!(await RNFS.exists(filePath))) {
         ToastAndroid.show('Download is no longer on this device', ToastAndroid.SHORT);
         return;

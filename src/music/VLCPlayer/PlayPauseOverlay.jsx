@@ -12,10 +12,17 @@ import usePlayerTimeStore from './usePlayerTimeStore';
  *  onTogglePlayPause – callback to toggle isPaused in the store & on the player
  *  isAudio – hide overlay for audio mode
  */
+// isBuffering comes from the store, not the parent: reading it here keeps a
+// stall from re-rendering VLCPlayerComponent just to hide this button.
+/*
+ */
 const PlayPauseOverlay = ({ controlsOpacity, onTogglePlayPause, isAudio , isPaused}) => {
   const controlsVisible = usePlayerTimeStore(state => state.controlsVisible);
+  const isBuffering = usePlayerTimeStore(state => state.isBuffering);
 
-  if (isAudio || !controlsVisible) return null;
+  // Both sit dead centre. While buffering the spinner is the honest one — a
+  // pause button over a stalled stream invites a tap that does nothing.
+  if (isAudio || !controlsVisible || (isBuffering && !isPaused)) return null;
 
   return (
     <Animated.View style={[styles.overlayControls, { opacity: controlsOpacity }]}>

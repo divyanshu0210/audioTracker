@@ -16,11 +16,11 @@ export const handleBackgroundNotifications = async () => {
   }
 };
 
-export const handleFCMNotifications = async notification => {
+export const handleFCMNotifications = async remoteMessage => {
   // await updateNotificationCountByOne();
   await fetchNotification();
   await updateNotificationCount();
-  await displayFCMNotifications(notification);
+  await displayFCMNotifications(remoteMessage);
 };
 
 export const fetchNotification = async () => {
@@ -67,13 +67,24 @@ const displayNotifications = async data => {
   }
 };
 
-const displayFCMNotifications = async notification => {
+// Takes the whole remote message rather than just its `notification` block.
+// A data-only push has no `notification` block at all, and reading title/body
+// off `undefined` used to post an empty notifee notification — which most
+// Android ROMs render as nothing, so the push looked like it never arrived.
+const displayFCMNotifications = async remoteMessage => {
   try {
-    const message = notification?.body;
-    const title = notification?.title;
+    const {notification, data} = remoteMessage ?? {};
+    const title = notification?.title || data?.title;
+    const message = notification?.body || data?.body;
+
+    if (!title && !message) {
+      console.warn('FCM message had no title or body to display:', remoteMessage);
+      return;
+    }
+
     await onDisplayNotification(title, message);
   } catch (error) {
-    console.error('Error processing notification:', error, notification);
+    console.error('Error processing notification:', error, remoteMessage);
   }
 };
 

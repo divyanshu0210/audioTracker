@@ -21,7 +21,26 @@ export const DownloadProgressIndicator = ({progress, onCancel, size = 30}) => {
       onPress={onCancel}
       style={{width: size, height: size, alignItems: 'center', justifyContent: 'center'}}>
       {displayProgress === null || displayProgress === 0 ? (
-        <ActivityIndicator size="small" />
+        // Indeterminate: a server that sends no Content-Length gives nothing to
+        // fill a ring with. The × still belongs here — the whole control is
+        // tap-to-cancel either way, and a bare spinner looked like something
+        // you could only wait out. Sized to the spinner the way the close icon
+        // below is sized to the ring, so it sits inside rather than over it.
+        <View
+          style={{
+            width: size,
+            height: size,
+            justifyContent: 'center',
+            alignItems: 'center',
+          }}>
+          <ActivityIndicator size="small" />
+          <Ionicons
+            name="close"
+            size={12}
+            color="#000"
+            style={{position: 'absolute'}}
+          />
+        </View>
       ) : (
         <View style={{width: size, height: size, justifyContent: 'center', alignItems: 'center'}}>
           <CircularProgress

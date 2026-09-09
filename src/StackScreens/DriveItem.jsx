@@ -1,15 +1,53 @@
 import React, {useEffect, useState} from 'react';
 import { StyleSheet, Text, View} from 'react-native';
 import RNFS from 'react-native-fs';
-import {DownloadButton} from '../components/buttons/Download';
+import {useShallow} from 'zustand/react/shallow';
+import {DownloadProgressIndicator} from '../components/buttons/DownloadProgressIndicator';
 import BaseMenu from '../components/menu/BaseMenu';
 import {ItemTypes} from '../contexts/constants';
 import {useAppState} from '../contexts/AppStateContext';
 import {DownloadedBadge, getFileIcon} from '../contexts/fileIconHelper';
 import { useMediaStore } from '../stores/useMediaStore';
+import useDownloadStore from '../stores/useDownloadStore';
+import {cancelDownload} from '../backgroundService/backgroundDownloadService';
 
 const DriveItem = ({item, screen}) => {
   const [fileExists, setFileExists] = useState(false);
+
+  const {setDriveLinksList, setData} = useMediaStore(
+    useShallow(state => ({
+      setDriveLinksList: state.setDriveLinksList,
+      setData: state.setData,
+    })),
+  );
+
+  const download = useDownloadStore(state => state.downloads[item.source_id]);
+  const removeDownload = useDownloadStore(state => state.removeDownload);
+  const isDownloading =
+    download?.status === 'queued' || download?.status === 'downloading';
+
+  // The row owns the "download finished" sync, not the menu entry that starts
+  // it. react-native-material-menu keeps its children in a Modal that renders
+  // nothing while closed, so the menu is almost never mounted at the moment a
+  // download completes — the same reason IskconItem carries this too.
+  useEffect(() => {
+    if (download?.status !== 'done') return;
+    const localPath = download.localPath;
+
+    setData(prev =>
+      prev.map(f =>
+        f.source_id === item.source_id ? {...f, file_path: localPath} : f,
+      ),
+    );
+    setDriveLinksList(prev =>
+      prev.map(f =>
+        f.source_id === item.source_id ? {...f, file_path: localPath} : f,
+      ),
+    );
+
+    removeDownload(item.source_id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [download?.status]);
 
   // Read file_path from the store so it stays fresh after a download completes,
   // even when the parent component holds a stale local copy of the item.
@@ -60,14 +98,18 @@ const DriveItem = ({item, screen}) => {
         )}
       </View>
 
+      {/* The menu is the row's permanent action now that a Drive file plays
+          without being downloaded — Download moved inside it. Progress sits
+          beside the menu rather than replacing it, so everything else the menu
+          offers stays reachable while bytes are coming down. */}
       <View style={styles.actionWrapper}>
-        {isFolder ? (
-          <BaseMenu item={item} screen={screen} type={ItemTypes.DRIVE} />
-        ) : fileExists ? (
-          <BaseMenu item={item} screen={screen} type={ItemTypes.DRIVE} />
-        ) : (
-          <DownloadButton file={item} />
+        {!isFolder && isDownloading && (
+          <DownloadProgressIndicator
+            progress={download.progress}
+            onCancel={() => cancelDownload(item.source_id)}
+          />
         )}
+        <BaseMenu item={item} screen={screen} type={ItemTypes.DRIVE} />
       </View>
     </View>
   );
@@ -93,9 +135,12 @@ const styles = StyleSheet.create({
   },
 
   actionWrapper: {
-    width: 36,
+    // minWidth, not width: the row grows by the progress ring while a download
+    // runs and settles back afterwards.
+    minWidth: 36,
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
+    justifyContent: 'flex-end',
   },
 
   title: {

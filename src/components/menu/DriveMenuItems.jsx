@@ -1,4 +1,4 @@
-import React, {useState} from 'react';
+import React, {useEffect, useState} from 'react';
 import {Alert, StyleSheet, Text, ToastAndroid, TouchableOpacity, View} from 'react-native';
 import RNFS from 'react-native-fs';
 import {Menu, MenuDivider, MenuItem} from 'react-native-material-menu';
@@ -10,6 +10,7 @@ import { useMediaStore } from '../../stores/useMediaStore';
 import { useShallow } from 'zustand/react/shallow';
 import { navigationRef } from '../../handlers/navigationRef';
 import useDownloadStore from '../../stores/useDownloadStore';
+import {enqueueDriveDownload} from '../buttons/Download';
 import {
   offerSharedCopyDownload,
   removeSharedCopy,
@@ -48,6 +49,37 @@ const {
   // the download service writes file_path back, the row rejoins
   // validDeviceFiles, and this gives way to the ordinary Delete entry.
   const canRestoreFromDrive = isDevice && isMissing && hasSharedCopy;
+
+  // Downloading a Drive file used to be the row's whole action, because
+  // playing one required it. It streams now, so it belongs in here with
+  // everything else — and the row keeps its menu instead of swapping it for a
+  // button.
+  const isDriveFile = !isFolder && !isDevice;
+
+  // The path outlives the file: Android can reclaim the app's files directory
+  // and a file manager can delete out of it, so this asks the filesystem
+  // rather than trusting file_path. One check per menu open, not per row —
+  // react-native-material-menu renders nothing while closed.
+  const [downloaded, setDownloaded] = useState(!!item?.file_path);
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      const exists = item?.file_path
+        ? await RNFS.exists(item.file_path).catch(() => false)
+        : false;
+      if (mounted) setDownloaded(exists);
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, [item?.file_path]);
+
+  const isDownloading = useDownloadStore(s => {
+    const active = s.downloads[item?.source_id];
+    return active?.status === 'queued' || active?.status === 'downloading';
+  });
+
+
 
   // Un-shares without deleting anything else: trashes the Drive copy, drops
   // the mapping, leaves the file and its row alone. Until this existed there
@@ -205,19 +237,35 @@ const {
         </MenuItem>
       )}
 
-      <MenuItem
-        onPress={() => {
-          hideMenu();
-          handleDeleteConfirm();
-        }}>
-        <Text style={styles.menuItemText}>
-          {isFolder
-            ? 'Delete Folder'
-            : screen === 'in'
-              ? 'Remove Download'
-              : 'Delete'}
-        </Text>
-      </MenuItem>
+      {isDriveFile && !downloaded && !isDownloading && (
+        <MenuItem
+          onPress={() => {
+            hideMenu();
+            enqueueDriveDownload(item);
+          }}>
+          <Text style={styles.menuItemText}>Download</Text>
+        </MenuItem>
+      )}
+
+      {/* Inside a folder this entry only ever means "remove the local copy",
+          so with nothing downloaded there is nothing for it to do. It used to
+          be unreachable in that state anyway — the row showed a download
+          button instead of this menu. */}
+      {!(isDriveFile && !downloaded && screen === 'in') && (
+        <MenuItem
+          onPress={() => {
+            hideMenu();
+            handleDeleteConfirm();
+          }}>
+          <Text style={styles.menuItemText}>
+            {isFolder
+              ? 'Delete Folder'
+              : screen === 'in'
+                ? 'Remove Download'
+                : 'Delete'}
+          </Text>
+        </MenuItem>
+      )}
     </View>
   );
 };

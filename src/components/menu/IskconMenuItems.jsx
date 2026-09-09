@@ -3,10 +3,11 @@
 // Menu entries for an Iskcon file: "Download" when no local copy exists yet,
 // "Remove Download" once one does. Downloading runs in the background
 // service (with its own notification); this just kicks it off and toasts.
-// Only rendered (via BaseMenu) once a download isn't active — see
-// IskconItem, which swaps this out for a progress indicator while
-// queued/downloading — so the "download finished" store sync can't live
-// here; it's handled in IskconItem instead, which stays mounted throughout.
+// Reachable during a download too (IskconItem keeps the menu alongside the
+// progress ring), so the entry steps aside while one is running — the ring is
+// what offers cancel. The "download finished" store sync can't live here
+// either: this is inside a Modal that renders nothing while closed, so it is
+// handled in IskconItem, which stays mounted throughout.
 
 import React, {useEffect, useState} from 'react';
 import {Alert, StyleSheet, Text, ToastAndroid} from 'react-native';
@@ -115,6 +116,15 @@ const IskconMenuItems = ({item, hideMenu}) => {
       {text: 'Delete', style: 'destructive', onPress: handleRemove},
     ]);
   };
+
+  const isDownloading = useDownloadStore(s => {
+    const active = s.downloads[item?.source_id];
+    return active?.status === 'queued' || active?.status === 'downloading';
+  });
+
+  // Nothing sensible to offer mid-download: starting a second one is a no-op
+  // and removing a copy that isn't there yet is worse.
+  if (isDownloading) return null;
 
   return (
     <MenuItem

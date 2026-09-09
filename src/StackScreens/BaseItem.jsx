@@ -1,6 +1,7 @@
 import {StyleSheet, View, Pressable, Alert, ToastAndroid} from 'react-native';
 import React, {useCallback, useMemo, useRef} from 'react';
 import {isAudioOrVideo} from '../Linking/utils/handleLinkSubmit';
+import {enqueueDriveDownload} from '../components/buttons/Download';
 import YouTubeItem from './YouTubeItem';
 import DeviceItem from './DeviceItem';
 import DriveItem from './DriveItem';
@@ -259,6 +260,13 @@ const BaseItem = ({
           'You do not have a proper app to view this file',
         );
       });
+    } else {
+      // Anything not played in the app is handed to another one as a path, so
+      // streaming doesn't help — it needs real bytes on disk.
+      Alert.alert('Not downloaded', 'Download this file to open it.', [
+        {text: 'Cancel', style: 'cancel'},
+        {text: 'Download', onPress: () => enqueueDriveDownload(item)},
+      ]);
     }
   }, [item, screen]);
 

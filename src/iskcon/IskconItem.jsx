@@ -8,12 +8,16 @@
 // routes it to onFolderPress off `kind`), and it can't be selected.
 //
 // Files are always playable (streamed remotely if not downloaded), so they
-// normally show the three-dot menu — "Download"/"Remove Download" lives inside
-// it — except while a download for that file is active, when it's swapped for
-// a progress indicator. That swap is why this row renders BaseMenu itself
-// rather than letting BaseItem do it (BaseItem defers for ItemTypes.ISKCON +
-// itemComponent): the menu is unmounted for the duration of a download, and
-// only this row is guaranteed to stay mounted throughout.
+// show the three-dot menu — "Download"/"Remove Download" lives inside it — and
+// keep it while a download runs, with the progress ring beside it rather than
+// in place of it. Everything else the menu offers stays reachable that way.
+// This row renders BaseMenu itself rather than letting BaseItem do it (BaseItem
+// defers for ItemTypes.ISKCON + itemComponent) so the two can sit together.
+//
+// The "download finished" sync still belongs to the row, not the menu entry
+// that starts it: react-native-material-menu keeps its children in a Modal
+// that renders nothing while closed, so the menu is almost never mounted at
+// the moment a download completes.
 //
 // file_path is read from the store (not the item prop) so it stays fresh after
 // a download completes or is removed via the menu — same pattern
@@ -107,11 +111,9 @@ const IskconItem = ({item: entry, screen}) => {
     };
   }, [filePath]);
 
-  // BaseMenu (and the "Remove Download" logic inside it) is swapped out for
-  // a progress indicator while downloading — see below — so this row is the
-  // only thing guaranteed to stay mounted for the whole download. Sync the
-  // finished file into the store and clear the download entry here rather
-  // than relying on a menu item that isn't mounted yet at that moment.
+  // See the note at the top of the file: the menu lives in a Modal that is
+  // unmounted while closed, so the finished file is synced into the store from
+  // here — the row is the only thing mounted for the whole download.
   useEffect(() => {
     if (isFolder || download?.status !== 'done') return;
     patchIskconFile(entry.source_id, {file_path: download.localPath});
@@ -149,17 +151,20 @@ const IskconItem = ({item: entry, screen}) => {
           </TouchableOpacity>
           <MaterialIcons name="chevron-right" size={24} color="#bbb" />
         </>
-      ) : isDownloading ? (
-        <DownloadProgressIndicator
-          progress={download.progress}
-          onCancel={() => cancelDownload(entry.source_id)}
-        />
       ) : (
-        <BaseMenu
-          item={{...mergedEntry, file_path: fileExists ? filePath : null}}
-          type={ItemTypes.ISKCON}
-          screen={screen}
-        />
+        <View style={styles.actionWrapper}>
+          {isDownloading && (
+            <DownloadProgressIndicator
+              progress={download.progress}
+              onCancel={() => cancelDownload(entry.source_id)}
+            />
+          )}
+          <BaseMenu
+            item={{...mergedEntry, file_path: fileExists ? filePath : null}}
+            type={ItemTypes.ISKCON}
+            screen={screen}
+          />
+        </View>
       )}
     </View>
   );
@@ -179,6 +184,14 @@ const styles = StyleSheet.create({
   },
   iconWrapper: {position: 'relative'},
   textCol: {flex: 1},
+  // minWidth, not width: the row grows by the progress ring while a download
+  // runs and settles back afterwards.
+  actionWrapper: {
+    minWidth: 36,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+  },
   title: {fontSize: 14, fontWeight: '500', color: '#222'},
   breadcrumb: {fontSize: 11, color: '#999', marginTop: 2},
 });

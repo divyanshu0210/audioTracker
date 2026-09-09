@@ -110,9 +110,19 @@ const downloadSingleFile = async file => {
     // download would carry a dead one. Gated on an explicit flag rather than
     // sniffing the URL so third-party downloads (iskcon_file) never get the
     // user's Google token attached.
-    const headers = file.googleAuth
-      ? {Authorization: `Bearer ${await getGoogleAccessToken()}`}
-      : {};
+    const headers = {
+      // Android's HTTP stack offers gzip by default, and audio.iskcondesiretree
+      // .com takes it up even for an mp3 — which compresses to nothing and
+      // costs the Content-Length, because a gzipped response is sent chunked.
+      // RNFS then reports contentLength -1, the progress callback has no
+      // denominator, and every download of theirs showed a bare spinner
+      // instead of a filling ring. Asking for identity gets the plain file
+      // back, with its length and byte ranges intact.
+      'Accept-Encoding': 'identity',
+      ...(file.googleAuth
+        ? {Authorization: `Bearer ${await getGoogleAccessToken()}`}
+        : {}),
+    };
 
     const {promise} = RNFS.downloadFile({
       fromUrl: file.url,
@@ -123,6 +133,13 @@ const downloadSingleFile = async file => {
         activeJobIds.set(file.sourceId, res.jobId);
         kindsInFlight.set(file.sourceId, 'download');
         const total = Number(res.contentLength) || 0;
+        // A zero here is the whole reason a download shows a bare spinner
+        // instead of a filling ring: no Content-Length, no denominator. Left
+        // in because there is no other way to tell that apart from a stuck
+        // download from the outside — drop it once the question is settled.
+        console.log(
+          `⬇️ download begin ${file.type} ${file.title} contentLength=${total} status=${res.statusCode}`,
+        );
         fileProgress.set(file.sourceId, {total, written: 0});
         updateServiceNotification();
       },

@@ -24,8 +24,7 @@ export const DownloadProgressIndicator = ({progress, onCancel, size = 30}) => {
         // Indeterminate: a server that sends no Content-Length gives nothing to
         // fill a ring with. The × still belongs here — the whole control is
         // tap-to-cancel either way, and a bare spinner looked like something
-        // you could only wait out. Sized to the spinner the way the close icon
-        // below is sized to the ring, so it sits inside rather than over it.
+        // you could only wait out.
         <View
           style={{
             width: size,
@@ -33,10 +32,14 @@ export const DownloadProgressIndicator = ({progress, onCancel, size = 30}) => {
             justifyContent: 'center',
             alignItems: 'center',
           }}>
-          <ActivityIndicator size="small" />
+          {/* Numeric size is Android-only, which is where this ships; iOS
+              would fall back to the 20px default. Matched to the ring's
+              diameter and colour so the two states are the same object in
+              two moods rather than two different controls. */}
+          <ActivityIndicator size={size} color="#2196F3" />
           <Ionicons
             name="close"
-            size={12}
+            size={22}
             color="#000"
             style={{position: 'absolute'}}
           />

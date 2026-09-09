@@ -76,13 +76,20 @@ const HomeScreen = () => {
   }, []);
 
   const fetchMentorMenteeData = useCallback(async () => {
+    // Flagged so the drawer can show a spinner rather than "No mentees found."
+    // while this is still in flight — this runs on mount, which is exactly when
+    // someone is most likely to open it.
+    const {setIsLoading} = useMentorMenteeStore.getState();
     try {
+      setIsLoading(true);
       const response = await fetch(`${BASE_URL}/mentorships/${userInfo?.id}/`);
       const data = await response.json();
       setMentors(data.mentors || []);
       setMentees(data.mentees || []);
     } catch (err) {
       console.error('Error:', err);
+    } finally {
+      setIsLoading(false);
     }
   }, [userInfo?.id]);
 

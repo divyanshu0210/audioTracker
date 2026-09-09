@@ -20,6 +20,7 @@ export const syncUserToBackend = async user => {
         id: user.id,
         email: user.email,
         full_name: user.name,
+        photo_url: user.photo ?? '',
       }),
     });
 
@@ -34,6 +35,7 @@ export const syncUserToBackend = async user => {
 };
 
 export const fetchNewConnections = async () => {
+  const {setIsLoading} = useMentorMenteeStore.getState();
   try {
     const userId = await AsyncStorage.getItem('userId');
     if (!userId) {
@@ -41,6 +43,7 @@ export const fetchNewConnections = async () => {
       return;
     }
 
+    setIsLoading(true);
     const response = await fetch(`${BASE_URL}/mentorships/${userId}/`);
     if (!response.ok) {
       throw new Error(`HTTP error! Status: ${response.status}`);
@@ -51,5 +54,7 @@ export const fetchNewConnections = async () => {
     setMentees(data.mentees || []);
   } catch (err) {
     console.error('Error fetching mentorship data:', err);
+  } finally {
+    setIsLoading(false);
   }
 };

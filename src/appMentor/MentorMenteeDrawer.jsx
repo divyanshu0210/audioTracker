@@ -176,11 +176,12 @@ const MentorMenteeDrawer = () => {
             p.email?.toLowerCase().includes(searchText.toLowerCase()),
         )}
         listType="Mentors"
+        loading={isLoading}
         onPress={item => selectAndClose(item, false, 'mentor')}
         selectedId={selectedId}
       />
     ),
-    [mentors, searchText, selectedId, selectAndClose],
+    [mentors, searchText, selectedId, selectAndClose, isLoading],
   );
 
   const MenteeList = useCallback(
@@ -193,11 +194,12 @@ const MentorMenteeDrawer = () => {
             p.email?.toLowerCase().includes(searchText.toLowerCase()),
         )}
         listType="Mentees"
+        loading={isLoading}
         onPress={item => selectAndClose(item, false, 'mentee')}
         selectedId={selectedId}
       />
     ),
-    [mentees, searchText, selectedId, selectAndClose],
+    [mentees, searchText, selectedId, selectAndClose, isLoading],
   );
 
   const renderScene = SceneMap({

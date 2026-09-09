@@ -8,6 +8,11 @@ const useMentorMenteeStore = create(set => ({
   selectedUsers: [],
   activeMentee :null,
   activeMentor :null,
+  // MentorMenteeDrawer has always read this to decide between a spinner and
+  // the tabs — it just never existed here, so it was permanently undefined and
+  // the drawer went straight to an empty "No mentees found." while the fetch
+  // was still in flight.
+  isLoading: false,
 
   setMentors: mentors => set({ mentors }),
   setMentees: mentees => set({ mentees }),
@@ -16,6 +21,7 @@ const useMentorMenteeStore = create(set => ({
   setSelectedUsers: items => set({ selectedUsers: items }),
   setActiveMentee: value => set({ activeMentee: value }),
   setActiveMentor: value => set({ activeMentor: value }),
+  setIsLoading: isLoading => set({ isLoading }),
   
 
 
@@ -26,6 +32,7 @@ const useMentorMenteeStore = create(set => ({
       selectedIds: [],
       userSelectionMode: false,
       selectedUsers: [],
+      isLoading: false,
     }),
 }));
 

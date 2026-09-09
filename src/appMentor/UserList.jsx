@@ -1,5 +1,13 @@
 import React, {useState} from 'react';
-import {View, Text, FlatList, StyleSheet, TouchableOpacity} from 'react-native';
+import {
+  ActivityIndicator,
+  FlatList,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
+import UserAvatar from './UserAvatar';
 import useMentorMenteeStore from './useMentorMenteeStore';
 import {useAppState} from '../contexts/AppStateContext';
 import { useSelectionStore } from '../stores/useSelectionStore';
@@ -9,6 +17,7 @@ export default UserList = ({
   users = [],
   refreshing,
   onRefresh,
+  loading = false,
   listType = 'Users',
   onPress,
 }) => {
@@ -98,13 +107,16 @@ const {selectedItems, setSelectedCategory} = useSelectionStore(
           selected && styles.selectedItem,
           isActiveMenteeOrMentor && styles.activeMenteeItem,
         ]}>
-        <View style={{flexDirection: 'row', justifyContent: 'space-between'}}>
-          <View style={{flexDirection: 'column'}}>
+        <View style={styles.row}>
+          <UserAvatar user={item} size={40} />
+          <View style={styles.textColumn}>
             <Text
+              numberOfLines={1}
               style={[styles.name, isActiveMenteeOrMentor && styles.activeMenteeText]}>
               {item.full_name}
             </Text>
             <Text
+              numberOfLines={1}
               style={[styles.email, isActiveMenteeOrMentor && styles.activeMenteeText]}>
               {item.email}
             </Text>
@@ -131,7 +143,18 @@ const {selectedItems, setSelectedCategory} = useSelectionStore(
         onRefresh={onRefresh}
         contentContainerStyle={{paddingBottom: 20}}
         ListEmptyComponent={
-          <Text style={styles.empty}>No {listType.toLowerCase()} found.</Text>
+          // "None" and "not fetched yet" are different answers, and showing the
+          // first while the second is true is what made an in-flight list read
+          // as an empty one.
+          loading ? (
+            <ActivityIndicator
+              size="large"
+              color="#007AFF"
+              style={styles.loader}
+            />
+          ) : (
+            <Text style={styles.empty}>No {listType.toLowerCase()} found.</Text>
+          )
         }
       />
     </View>
@@ -156,6 +179,18 @@ const styles = StyleSheet.create({
   count: {
     color: '#333',
     fontWeight: 'bold',
+  },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  textColumn: {
+    flex: 1,
+    marginLeft: 12,
+    justifyContent: 'center',
+  },
+  loader: {
+    marginTop: 40,
   },
   item: {
     paddingVertical: 12,

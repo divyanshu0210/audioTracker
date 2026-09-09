@@ -14,6 +14,7 @@ import BottomSheet, {
   BottomSheetView,
 } from '@gorhom/bottom-sheet';
 import AntDesign from 'react-native-vector-icons/AntDesign';
+import UserAvatar from './UserAvatar';
 import {useAppState} from '../contexts/AppStateContext';
 import {BASE_URL} from '../appMentorBackend/userMgt';
 import { navigationRef } from '../handlers/navigationRef';
@@ -22,6 +23,9 @@ const MentorshipRequestBottomSheet = forwardRef(({}, ref) => {
   const [email, setEmail] = useState('');
   const [userExists, setUserExists] = useState(false);
   const [userFullName, setUserFullName] = useState('');
+  // The whole matched user, so the result can show who was found rather than
+  // only their name — check-email returns photo_url alongside it.
+  const [foundUser, setFoundUser] = useState(null);
   const [checking, setChecking] = useState(false);
   // Which role is being sent, not just whether something is — the spinner has
   // to go in the button that was actually pressed.
@@ -46,6 +50,7 @@ const MentorshipRequestBottomSheet = forwardRef(({}, ref) => {
       setChecking(false);
       setUserExists(false);
       setUserFullName('');
+      setFoundUser(null);
       return;
     }
 
@@ -69,15 +74,23 @@ const MentorshipRequestBottomSheet = forwardRef(({}, ref) => {
       if (res.ok) {
         setUserExists(true);
         setUserFullName(data.full_name);
+        setFoundUser({
+          id: data.user_id,
+          full_name: data.full_name,
+          email: data.email,
+          photo_url: data.photo_url,
+        });
       } else {
         setUserExists(false);
         setUserFullName('');
+        setFoundUser(null);
       }
     } catch (err) {
       console.error(err);
       if (lookupId !== lookupIdRef.current) return;
       setUserExists(false);
       setUserFullName('');
+      setFoundUser(null);
     }
 
     setChecking(false);
@@ -100,6 +113,7 @@ const MentorshipRequestBottomSheet = forwardRef(({}, ref) => {
         setEmail('');
         setUserExists(false);
         setUserFullName('');
+        setFoundUser(null);
         ref?.current?.close();
         navigationRef.navigate('Notifications');
         Alert.alert('Success', data.message);
@@ -141,6 +155,7 @@ const MentorshipRequestBottomSheet = forwardRef(({}, ref) => {
           setEmail('');
           setUserExists(false);
           setUserFullName('');
+          setFoundUser(null);
           Keyboard.dismiss();
         }
       }}>
@@ -198,13 +213,19 @@ const MentorshipRequestBottomSheet = forwardRef(({}, ref) => {
             {checking ? (
               <ActivityIndicator size="small" color="#007bff" />
             ) : userExists ? (
-              <>
-                <Text style={styles.messageText}>
-                  <Text style={styles.nameText}>{userFullName}</Text> is a
-                  registered user.
-                </Text>
-                <Text style={styles.emailText}>{email}</Text>
-              </>
+              // Showing the face before the request goes out is the point:
+              // this is addressed by typing an email, and an avatar is the only
+              // confirmation that it reached the person who was meant.
+              <View style={styles.foundUserRow}>
+                <UserAvatar user={foundUser} size={44} />
+                <View style={styles.foundUserText}>
+                  <Text style={styles.messageText}>
+                    <Text style={styles.nameText}>{userFullName}</Text> is a
+                    registered user.
+                  </Text>
+                  <Text style={styles.emailText}>{email}</Text>
+                </View>
+              </View>
             ) : (
               <Text style={styles.emptyText}>
                 No user found with this email.
@@ -218,6 +239,14 @@ const MentorshipRequestBottomSheet = forwardRef(({}, ref) => {
 });
 
 const styles = StyleSheet.create({
+  foundUserRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  foundUserText: {
+    flex: 1,
+    marginLeft: 12,
+  },
   sheetBackground: {
     backgroundColor: '#fff',
     borderTopLeftRadius: 20,

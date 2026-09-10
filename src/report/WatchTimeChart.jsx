@@ -336,7 +336,9 @@ const styles = StyleSheet.create({
     padding: 12,
     backgroundColor: 'white',
     borderRadius: 12,
-    marginBottom: 5,
+    // Matches the wrapper's margin, so the gap between these two cards is the
+    // same as the gap around them.
+    marginBottom: 10,
     elevation: 2,
     alignItems: 'center',
   },

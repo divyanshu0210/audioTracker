@@ -14,8 +14,8 @@ const WeeklyReportCard = ({currentWeek}) => {
       style={{
         // flex:1,
         padding: 5,
-        // margin:10,
-        marginTop: 10,
+        // No top margin: the chart card above carries the gap, so the two do
+        // not add up to one bigger than the spacing everywhere else.
         backgroundColor: '#fff',
         borderRadius: 12,
         // marginBottom: 16,

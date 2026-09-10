@@ -546,11 +546,12 @@ const styles = StyleSheet.create({
   disabledDayText: {
     color: '#aaa',
   },
+  // Spacing only. This holds two things that are already cards - the watch
+  // chart and the weekly summary, each with its own white background, radius
+  // and elevation - so giving it those too stacked a white card inside a white
+  // card, with both sets of rounded corners and roughly 22pt of padding a side.
   card: {
-    backgroundColor: 'white',
-    borderRadius: 12,
     margin: 10,
-    padding: 10,
   },
 });
 

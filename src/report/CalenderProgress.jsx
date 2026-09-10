@@ -55,7 +55,18 @@ const CalendarProgress = () => {
     new Date().toISOString().slice(0, 7),
   ); // YYYY-MM
   const [loading, setLoading] = useState(false);
-  const cache = useRef({}); // Cache for storing month data
+  // Month data, bucketed by whose it is: {self: {...}, '<menteeId>': {...}}.
+  //
+  // It used to be keyed by month alone, so a mentee's month could be read back
+  // as the mentor's own. Guarding that by simply not caching a mentor's view
+  // is what made every month change reload from the network — the loader on
+  // each swipe. Bucketing keeps both: no mixing, and travel stays instant once
+  // a month has been seen.
+  const cache = useRef({});
+  const cacheFor = ownerKey => {
+    if (!cache.current[ownerKey]) cache.current[ownerKey] = {};
+    return cache.current[ownerKey];
+  };
   const {settings} = useSettingsStore();
   const settingsRef = useRef(settings);
   useEffect(() => {
@@ -64,6 +75,7 @@ const CalendarProgress = () => {
 
   const prevTargetNewWatchTime = useRef(settings.TARGET_NEW_WATCH_TIME);
   const {activeMentee: mentee} = useMentorMenteeStore();
+  const ownerKey = mentee?.id ?? 'self';
 
   useEffect(() => {
     if (
@@ -92,13 +104,21 @@ const CalendarProgress = () => {
   const isViewingThisMonth =
     currentMonth === new Date().toISOString().slice(0, 7);
 
+  // mentee?.id in the deps, not just the month.
+  //
+  // fetchWatchDataForToday reads `mentee` to decide whose day to ask for, and
+  // this callback was memoized on isViewingThisMonth alone — so it kept the
+  // copy built on whichever render that last changed, along with the mentee of
+  // that moment. Open the screen with nobody selected, pick a mentee, come
+  // back from the day report, and focus fired the old closure: today's cell
+  // was refetched as the mentor's own.
   useFocusEffect(
     useCallback(() => {
       if (isViewingThisMonth) {
-        // console.log('Focus effect running', {currentMonth});
         fetchWatchDataForToday();
       }
-    }, [isViewingThisMonth]),
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [isViewingThisMonth, mentee?.id]),
   );
 
   // A mentee's day keeps moving while their mentor is looking at it, and focus
@@ -119,12 +139,16 @@ const CalendarProgress = () => {
     updateUI = true,
     forceRefresh = false,
   ) => {
-    // Force refresh if mentee exists
-    const isMentorView = !!mentee;
-    const shouldForceFetch = isMentorView || forceRefresh;
+    const owned = cacheFor(ownerKey);
 
-    if (!shouldForceFetch && cache.current[month]) {
-      if (updateUI) setData(cache.current[month]);
+    // No blanket refetch for a mentor any more. A past month cannot change —
+    // those reports were uploaded long ago — and today's cell has its own
+    // refresh on focus and on the mentee poll, so the month around it does not
+    // need re-reading to stay honest. Callers still force it explicitly when
+    // something has actually invalidated it: picking a mentee, or the target
+    // changing.
+    if (!forceRefresh && owned[month]) {
+      if (updateUI) setData(owned[month]);
       return;
     }
 
@@ -142,9 +166,7 @@ const CalendarProgress = () => {
         settingsRef.current.TARGET_NEW_WATCH_TIME,
         mentee?.id, // Pass mentee ID if exists
       );
-      if (!isMentorView) {
-        cache.current[month] = watchData; // Only cache for self
-      }
+      owned[month] = watchData;
       if (updateUI) setData(watchData);
     } catch (error) {
       console.error('Error fetching watch data:', error);
@@ -189,10 +211,8 @@ const CalendarProgress = () => {
       };
 
       const month = today.slice(0, 7);
-      if (!cache.current[month]) {
-        cache.current[month] = {};
-      }
-      cache.current[month][today] = updatedDayData;
+      const owned = cacheFor(ownerKey);
+      owned[month] = {...(owned[month] ?? {}), [today]: updatedDayData};
       // console.log(updatedDayData);
 
       setData(prevData => ({
@@ -222,7 +242,7 @@ const CalendarProgress = () => {
 
     if (newMonth === currentMonth) return;
 
-    cache.current[currentMonth] = data;
+    cacheFor(ownerKey)[currentMonth] = data;
     setCurrentMonth(newMonth);
     fetchWatchData(newMonth, true);
     const previousMonth = getPreviousMonth(newMonth);

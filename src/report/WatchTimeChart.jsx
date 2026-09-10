@@ -1,13 +1,13 @@
-import React, {useState, useEffect, useRef, useCallback} from 'react';
+import React, {useState, useEffect, useRef, useCallback, useMemo} from 'react';
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
-  PanResponder,
   ActivityIndicator,
 } from 'react-native';
 import {BarChart} from 'react-native-gifted-charts';
+import {Gesture, GestureDetector} from 'react-native-gesture-handler';
 
 // A bar chart is rendered at yAxisLabelWidth + initialSpacing + endSpacing +
 // SUM(barWidth + spacing), not at the `width` prop - that is only the viewport
@@ -209,26 +209,39 @@ const WatchTimeChart = ({watchData, newTarget, onWeekChange}) => {
       setCurrentWeekStart(Math.min(weeksData.length - 1, currentWeekStart + 1));
     }
   }, []);
-  const panResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onPanResponderRelease: (evt, gestureState) => {
-        const {currentWeekStart, weeksData} = stateRef.current;
-        const isFirstWeek = currentWeekStart === 0;
-        const isLastWeek =
-          currentWeekStart === Math.max(0, weeksData.length - 1);
 
-        // Check for swipe left (next week)
-        if (gestureState.dx < -50 && !isLastWeek) {
-          handleNextWeek();
-        }
-        // Check for swipe right (previous week)
-        else if (gestureState.dx > 50 && !isFirstWeek) {
-          handlePrevWeek();
-        }
-      },
-    }),
-  ).current;
+  const weekSwipe = useMemo(
+    () =>
+      Gesture.Pan()
+        // Callbacks touch React state, so they belong on the JS thread rather
+        // than in a worklet.
+        .runOnJS(true)
+        .activeOffsetX([-12, 12])
+        .failOffsetY([-8, 8])
+        .onEnd(event => {
+          const {currentWeekStart, weeksData} = stateRef.current;
+          const isFirstWeek = currentWeekStart === 0;
+          const isLastWeek =
+            currentWeekStart === Math.max(0, weeksData.length - 1);
+
+
+          const SWIPE_DISTANCE = 30;
+          const SWIPE_VELOCITY = 300;
+          const swipedLeft =
+            event.translationX < -SWIPE_DISTANCE ||
+            event.velocityX < -SWIPE_VELOCITY;
+          const swipedRight =
+            event.translationX > SWIPE_DISTANCE ||
+            event.velocityX > SWIPE_VELOCITY;
+
+          if (swipedLeft && !isLastWeek) {
+            handleNextWeek();
+          } else if (swipedRight && !isFirstWeek) {
+            handlePrevWeek();
+          }
+        }),
+    [handleNextWeek, handlePrevWeek],
+  );
 
   return (
     <View style={styles.container}>
@@ -257,10 +270,8 @@ const WatchTimeChart = ({watchData, newTarget, onWeekChange}) => {
           </Text>
         </View>
       </View>
-      <View
-        style={styles.gestureArea}
-        {...panResponder.panHandlers} // Add gesture handlers here
-      >
+      <GestureDetector gesture={weekSwipe}>
+        <View style={styles.gestureArea}>
         {/* Waits for the measurement: at 0 the bars floor to their minimum
             and then jump once the real width arrives. */}
         <View
@@ -296,11 +307,12 @@ const WatchTimeChart = ({watchData, newTarget, onWeekChange}) => {
           )}
         </View>
         {loading && (
-    <View style={styles.loaderOverlay}>
-      <ActivityIndicator size="large" color="#3b82f6" />
-    </View>
-  )}
-      </View>
+          <View style={styles.loaderOverlay}>
+            <ActivityIndicator size="large" color="#3b82f6" />
+          </View>
+        )}
+        </View>
+      </GestureDetector>
     </View>
   );
 };

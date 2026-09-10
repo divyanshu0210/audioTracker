@@ -20,9 +20,14 @@ import {useSelectionStore} from '../stores/useSelectionStore';
 import { navigationRef } from '../handlers/navigationRef';
 import useAssignmentStatusStore from './useAssignmentStatusStore';
 import UserAvatar from './UserAvatar';
-import {loadMenteeAssignmentStatus} from '../appMentorBackend/assignmentsMgt';
+import useAssignmentInboxStore from './useAssignmentInboxStore';
+import useSettingsStore from '../Settings/settingsStore';
+import {
+  loadMenteeAssignmentStatus,
+  markAssignmentsSeen,
+} from '../appMentorBackend/assignmentsMgt';
 
-const CustomTabBar = ({navigationState, setIndex}) => {
+const CustomTabBar = ({navigationState, setIndex, onSwap}) => {
   return (
     <View style={styles.customTabBar}>
       {navigationState.routes.map((route, i) => (
@@ -45,12 +50,30 @@ const CustomTabBar = ({navigationState, setIndex}) => {
           {navigationState.index === i && <View style={styles.tabIndicator} />}
         </TouchableOpacity>
       ))}
+
+      {/* Which list matters most depends on whether someone is mostly
+          mentoring or being mentored, and that is not the same for everyone.
+          Put next to the tabs rather than buried in Settings: it is a
+          preference about this control, and it is only worth changing while
+          looking at it. */}
+      <TouchableOpacity
+        style={styles.swapTabs}
+        onPress={onSwap}
+        hitSlop={{top: 8, bottom: 8, left: 8, right: 8}}
+        accessibilityLabel="Swap the order of the mentee and mentor tabs"
+        accessibilityRole="button">
+        <Ionicons name="swap-horizontal" size={18} color="#5f6368" />
+      </TouchableOpacity>
     </View>
   );
 };
 
 const MentorMenteeDrawer = () => {
   const {userInfo} = useAppState();
+  const menteesFirst = useSettingsStore(
+    state => state.settings?.menteesFirst ?? true,
+  );
+  const updateSettings = useSettingsStore(state => state.updateSettings);
   const {
     mentors,
     mentees,
@@ -59,12 +82,13 @@ const MentorMenteeDrawer = () => {
     activeMentor,
     activeMentee,
     isLoading,
+    drawerVisible,
+    setDrawerVisible,
   } = useMentorMenteeStore();
   const setSelectedCategory = useSelectionStore(
     state => state.setSelectedCategory,
   );
 
-  const [drawerVisible, setDrawerVisible] = useState(false);
   const [searchText, setSearchText] = useState('');
   const [selectedName, setSelectedName] = useState('You');
   const [selectedId, setSelectedId] = useState('you');
@@ -74,14 +98,28 @@ const MentorMenteeDrawer = () => {
     {key: 'mentors', title: `Mentors (0)`},
   ]);
 
-  // Update tab counts when mentees or mentors change
+  // Badges are persisted across launches, so they have to be read back before
+  // the drawer can draw them. Safe to call repeatedly - it no-ops once done.
   useEffect(() => {
-    console.log('MentorMenteeStore Data:', {mentors, mentees}); // Debug log
-    setRoutes([
-      {key: 'mentees', title: `Mentees (${mentees?.length || 0})`},
-      {key: 'mentors', title: `Mentors (${mentors?.length || 0})`},
-    ]);
-  }, [mentees, mentors]);
+    useAssignmentInboxStore.getState().hydrate();
+  }, []);
+
+  // Update tab counts when mentees or mentors change, in the order this user
+  // asked for. SceneMap keys scenes by route key, so the order here is purely
+  // presentational and nothing else has to know about it.
+  useEffect(() => {
+    const menteeTab = {key: 'mentees', title: `Mentees (${mentees?.length || 0})`};
+    const mentorTab = {key: 'mentors', title: `Mentors (${mentors?.length || 0})`};
+    setRoutes(menteesFirst ? [menteeTab, mentorTab] : [mentorTab, menteeTab]);
+  }, [mentees, mentors, menteesFirst]);
+
+  // The index is a position, so flipping the order would otherwise switch
+  // which list is on screen. Flipping it too keeps the same tab selected and
+  // makes the swap look like the tabs sliding past each other.
+  const handleSwapTabs = useCallback(() => {
+    setIndex(prev => (prev === 0 ? 1 : 0));
+    updateSettings({menteesFirst: !menteesFirst});
+  }, [menteesFirst, updateSettings]);
 
   // Sync selected state with active mentee
   useEffect(() => {
@@ -97,11 +135,14 @@ const MentorMenteeDrawer = () => {
     }
   }, [activeMentee, activeMentor]);
 
+  // The pill has room for a full first name now, so the cut is only there for
+  // the unusually long ones. It used to trim at 10, which was shorter than the
+  // space actually available.
   const getDisplayName = useCallback(name => {
     if (!name || name === 'You') return 'You';
     const firstName = name.split(' ')[0];
-    return firstName.length > 10
-      ? `${firstName.substring(0, 10)}...`
+    return firstName.length > 14
+      ? `${firstName.substring(0, 14)}…`
       : firstName;
   }, []);
 
@@ -163,6 +204,14 @@ const MentorMenteeDrawer = () => {
           }
         })();
       } else if (userType === 'mentor') {
+        // Opening a mentor is the act of reading what they sent, so the badge
+        // goes now rather than waiting for anything to be played.
+        useAssignmentInboxStore.getState().clearUnread(item.email);
+        // Opening a mentor is a person choosing to look, which is what the
+        // blue tick on the mentor's row claims - unlike the background sync
+        // that merely built the items.
+        markAssignmentsSeen(userInfo?.id, item.id);
+
         navigateToHome();
         setActiveMentor(item);
 
@@ -233,7 +282,7 @@ const MentorMenteeDrawer = () => {
         {activeUser ? (
           <>
             <View style={styles.buttonIcon}>
-              <UserAvatar user={activeUser} size={24} />
+              <UserAvatar user={activeUser} size={32} />
             </View>
             <Text style={styles.buttonText} numberOfLines={1}>
               {getDisplayName(selectedName)}
@@ -242,7 +291,7 @@ const MentorMenteeDrawer = () => {
         ) : (
           <Ionicons
             name="people-outline"
-            size={20}
+            size={26}
             color="#000"
             style={styles.buttonIcon}
           />
@@ -321,7 +370,11 @@ const MentorMenteeDrawer = () => {
                 onIndexChange={setIndex}
                 initialLayout={{width: Dimensions.get('window').width * 0.8}}
                 renderTabBar={props => (
-                  <CustomTabBar {...props} setIndex={setIndex} />
+                  <CustomTabBar
+                    {...props}
+                    setIndex={setIndex}
+                    onSwap={handleSwapTabs}
+                  />
                 )}
                 style={styles.tabView}
               />
@@ -337,8 +390,13 @@ const MentorMenteeDrawer = () => {
 const styles = StyleSheet.create({
   selectionButton: {
     backgroundColor: '#fff',
-    paddingVertical: 10,
-    paddingHorizontal: 12,
+    // The avatar is 32 in a 44-tall pill, so 6 top and bottom is exactly what
+    // is left - any more and the circle has to shrink. Asymmetric across:
+    // the avatar carries its own visual padding on the left, only text and the
+    // chevron need real space on the right.
+    paddingVertical: 6,
+    paddingLeft: 6,
+    paddingRight: 12,
     borderRadius: 24,
     shadowColor: '#000',
     shadowOpacity: 0.15,
@@ -349,13 +407,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     flexShrink: 1,
     minWidth: 0,
-    maxWidth: 140,
+    // 140 left roughly 60px for the label once the avatar, the gap and the
+    // chevron had taken their share - about eight characters, so most first
+    // names were cut. This is sized so a full first name fits instead.
+    maxWidth: 190,
     height: 44,
     borderWidth: 1,
     borderColor: '#e0e0e0',
   },
   buttonIcon: {
-    marginRight: 8,
+    marginRight: 10,
   },
   buttonText: {
     fontSize: 14,
@@ -425,8 +486,14 @@ const styles = StyleSheet.create({
   selectedItemText: {
     color: '#fff',
   },
+  swapTabs: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 8,
+  },
   customTabBar: {
     flexDirection: 'row',
+    alignItems: 'center',
     backgroundColor: '#f1f3f4',
     borderRadius: 12,
     marginBottom: 16,

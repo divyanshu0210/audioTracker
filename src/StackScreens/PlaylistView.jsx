@@ -1,7 +1,7 @@
 import {YOUTUBE_API_KEY} from '@env';
 import {useNavigation, useRoute} from '@react-navigation/native';
 import axios from 'axios';
-import React, {useEffect, useState} from 'react';
+import React, {useCallback, useEffect, useState} from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -20,6 +20,8 @@ import AppHeader from '../components/headers/AppHeader';
 import { useMediaStore } from '../stores/useMediaStore';
 import { useShallow } from 'zustand/react/shallow';
 import SaveToListBar from '../components/SaveToListBar';
+import useMentorMenteeStore from '../appMentor/useMentorMenteeStore';
+import {loadChildProgress} from '../appMentorBackend/assignmentsMgt';
 
 export default function PlaylistView() {
   const route = useRoute();
@@ -32,6 +34,26 @@ const {videos, setVideos} = useMediaStore(
 );
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false); // NEW state for refresh button
+
+  const {userInfo} = useAppState();
+  const activeMentee = useMentorMenteeStore(state => state.activeMentee);
+
+  // The playlist was assigned as one row, so its videos arrive with nothing on
+  // them. This asks what the mentee has watched of each, by id — a no-op
+  // unless a mentor is looking at a mentee and this playlist is one of that
+  // mentee's assignments.
+  const loadMenteeProgress = useCallback(
+    videoList => {
+      if (!activeMentee?.id) return;
+      loadChildProgress(
+        userInfo?.id,
+        activeMentee.id,
+        playListId,
+        videoList.map(v => v.source_id),
+      );
+    },
+    [activeMentee?.id, userInfo?.id, playListId],
+  );
 
   useEffect(() => {
     if (!playListId) return;
@@ -51,6 +73,7 @@ const {videos, setVideos} = useMediaStore(
       let videosFromDB = await getVideosFromDB(playListId);
       if (videosFromDB.length > 0) {
         setVideos(videosFromDB);
+        loadMenteeProgress(videosFromDB);
 
         setLoading(false);
         return;
@@ -58,6 +81,7 @@ const {videos, setVideos} = useMediaStore(
 
       const videosFromAPI = await fetchAndStoreVideos(playListId);
       setVideos(videosFromAPI);
+      loadMenteeProgress(videosFromAPI);
     } catch (error) {
       console.error('Error fetching playlist videos:', error);
       Alert.alert('Error', 'Failed to load playlist videos. Please try again.');

@@ -13,6 +13,10 @@ const useMentorMenteeStore = create(set => ({
   // the drawer went straight to an empty "No mentees found." while the fetch
   // was still in flight.
   isLoading: false,
+  // In the store rather than local to MentorMenteeDrawer because the New
+  // Assignments button opens it: after a sync the mentor list, with its
+  // unread badges, is the only place the new items are visible.
+  drawerVisible: false,
 
   setMentors: mentors => set({ mentors }),
   setMentees: mentees => set({ mentees }),
@@ -22,6 +26,7 @@ const useMentorMenteeStore = create(set => ({
   setActiveMentee: value => set({ activeMentee: value }),
   setActiveMentor: value => set({ activeMentor: value }),
   setIsLoading: isLoading => set({ isLoading }),
+  setDrawerVisible: drawerVisible => set({ drawerVisible }),
   
 
 

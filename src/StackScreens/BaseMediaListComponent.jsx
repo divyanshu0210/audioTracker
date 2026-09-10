@@ -14,6 +14,7 @@ import NewAssignmentsBtn from '../components/buttons/NewAssignmentsBtn';
 import {useSelectionStore} from '../stores/useSelectionStore';
 import {useShallow} from 'zustand/react/shallow';
 import SelectionHeader from './SelectionHeader';
+import {logRender} from '../contexts/renderLog';
 
 export const getItemId = item =>
   item?.rowid || item?.source_id || item?.id?.toString();
@@ -51,10 +52,7 @@ const BaseMediaListComponent = ({
 }) => {
   const renderCount = useRef(0);
   renderCount.current++;
-  console.log(
-    `🎯 -----------------Render BASELIST COMPONENT #${renderCount.current} ---------------------------------------`,
-    type,screen
-  );
+  logRender('BASELIST COMPONENT', renderCount.current, type, screen);
 
   const renderItem = useCallback(
     ({item}) => {

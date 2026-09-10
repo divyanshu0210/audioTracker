@@ -33,8 +33,20 @@ const {setInserting} = useDbStore.getState();
 export const LinkOrigin = {
   APP: 'app', // in-app paste / FAB — deliberate, so it joins the list
   EXTERNAL: 'external', // link or share intent — opens, saves nothing
-  ASSIGNMENT: 'assignment', // mentor-pushed — joins the list, never navigates
+  ASSIGNMENT: 'assignment', // mentor-pushed — filed under the mentor, never navigates
 };
+
+// Whether an arriving item should appear in the mentee's own tabs.
+//
+// External and assignment both mean "someone else put this in front of you",
+// and neither is a decision to add it to your library. An external link shows
+// on the Add bar until accepted; an assignment is filed under the mentor who
+// sent it and shows when that mentor is selected. Either way the row exists so
+// it can play, be watched into history and carry notes - it just is not in the
+// Device/YouTube/Drive lists uninvited. Same reasoning as
+// notes/share/noteMedia.js, which hides shared-note media for the same reason.
+const isUnsolicited = origin =>
+  origin === LinkOrigin.EXTERNAL || origin === LinkOrigin.ASSIGNMENT;
 
 const ALREADY_IN_LIST = {
   youtube_playlist: 'Playlist already in your list',
@@ -198,14 +210,21 @@ export const fetchYTData = async (
         return;
       }
 
-      const updatedItem = await updateItemFields(existingItem.id, {
-        out_show: 1,
-      });
+      // out_show is left alone for an assignment: the mentee may already keep
+      // this video, and being assigned it is no reason to change that - in
+      // either direction. Only the category link below is added.
+      const updatedItem = await updateItemFields(
+        existingItem.id,
+        origin === LinkOrigin.ASSIGNMENT ? {} : {out_show: 1},
+      );
 
-      setItems(prev => {
-        const filtered = prev.filter(item => item.source_id !== id);
-        return [updatedItem, ...filtered];
-      });
+      // An assignment does not reorder a list the mentee curated.
+      if (origin !== LinkOrigin.ASSIGNMENT) {
+        setItems(prev => {
+          const filtered = prev.filter(item => item.source_id !== id);
+          return [updatedItem, ...filtered];
+        });
+      }
 
       await addToSelectedCategory(selectedCategory, updatedItem);
 
@@ -237,10 +256,7 @@ export const fetchYTData = async (
         type: 'youtube_video',
         title: video.title,
         parent_id: null,
-        // Hidden when it came from outside: the row exists so the video can
-        // play, be watched into history and carry notes — it just isn't in
-        // the library until the user says so on the Add bar.
-        out_show: external ? 0 : 1,
+        out_show: isUnsolicited(origin) ? 0 : 1,
       });
 
       const fullItem = await upsertYoutubeMeta({
@@ -254,10 +270,15 @@ export const fetchYTData = async (
         return;
       }
 
-      setItems(prev => {
-        const filtered = prev.filter(item => item.source_id !== id);
-        return [fullItem, ...filtered];
-      });
+      // out_show alone is not enough: these store lists *are* the tabs until
+      // the next reload, so prepending here would show the item anyway and it
+      // would silently vanish on the next refresh.
+      if (!isUnsolicited(origin)) {
+        setItems(prev => {
+          const filtered = prev.filter(item => item.source_id !== id);
+          return [fullItem, ...filtered];
+        });
+      }
 
       await addToSelectedCategory(selectedCategory, fullItem);
 
@@ -286,7 +307,7 @@ export const fetchYTData = async (
         type: 'youtube_playlist',
         title: playlist.title,
         parent_id: null,
-        out_show: external ? 0 : 1,
+        out_show: isUnsolicited(origin) ? 0 : 1,
       });
 
       const fullItem = await upsertYoutubeMeta({
@@ -300,10 +321,15 @@ export const fetchYTData = async (
         return;
       }
 
-      setItems(prev => {
-        const filtered = prev.filter(item => item.source_id !== id);
-        return [fullItem, ...filtered];
-      });
+      // out_show alone is not enough: these store lists *are* the tabs until
+      // the next reload, so prepending here would show the item anyway and it
+      // would silently vanish on the next refresh.
+      if (!isUnsolicited(origin)) {
+        setItems(prev => {
+          const filtered = prev.filter(item => item.source_id !== id);
+          return [fullItem, ...filtered];
+        });
+      }
 
       await addToSelectedCategory(selectedCategory, fullItem);
     }
@@ -356,7 +382,7 @@ export const handleDriveLink = async (
       // the part an external link may not touch.
       const updatedItem = await updateItemFields(
         existingItem.id,
-        external
+        isUnsolicited(origin)
           ? {title: itemName}
           : {
               out_show: 1,
@@ -370,11 +396,14 @@ export const handleDriveLink = async (
         return;
       }
 
-      // Move to top: remove old entry → prepend updated one
-      setDriveLinksList(prev => {
-        const filtered = prev.filter(i => i.source_id !== driveId);
-        return [updatedItem, ...filtered];
-      });
+      // Move to top: remove old entry → prepend updated one. An assignment
+      // does not reorder a list the mentee curated.
+      if (origin !== LinkOrigin.ASSIGNMENT) {
+        setDriveLinksList(prev => {
+          const filtered = prev.filter(i => i.source_id !== driveId);
+          return [updatedItem, ...filtered];
+        });
+      }
 
       if (selectedCategory != null) {
         await addItemToCategory(selectedCategory, updatedItem.source_id, updatedItem.type);
@@ -392,7 +421,7 @@ export const handleDriveLink = async (
         parent_id: null,
         mimeType: mimeType,
         file_path: null, // only relevant for files maybe
-        out_show: external ? 0 : 1,
+        out_show: isUnsolicited(origin) ? 0 : 1,
       });
 
       if (external) {
@@ -400,11 +429,14 @@ export const handleDriveLink = async (
         return;
       }
 
-      // Move to top
-      setDriveLinksList(prev => {
-        const filtered = prev.filter(i => i.source_id !== driveId);
-        return [savedItem, ...filtered];
-      });
+      // Move to top - but not for something the user did not ask for; see
+      // the note on the youtube path above.
+      if (!isUnsolicited(origin)) {
+        setDriveLinksList(prev => {
+          const filtered = prev.filter(i => i.source_id !== driveId);
+          return [savedItem, ...filtered];
+        });
+      }
 
       if (selectedCategory != null) {
         await addItemToCategory(selectedCategory, savedItem.source_id, savedItem.type);

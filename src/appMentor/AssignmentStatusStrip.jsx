@@ -20,8 +20,24 @@ import {StyleSheet, Text, View} from 'react-native';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
 import useAssignmentStatusStore from './useAssignmentStatusStore';
 
-const DELIVERED_COLOR = '#1a73e8';
+// Blue is reserved for the state a person caused. Delivered is the device
+// reporting in, which is worth showing but is not the same claim.
+const SEEN_COLOR = '#1a73e8';
+const DELIVERED_COLOR = '#9aa0a6';
 const PENDING_COLOR = '#9aa0a6';
+
+const describe = status => {
+  if (status === 'seen') {
+    return {icon: 'check-all', color: SEEN_COLOR, label: 'Seen'};
+  }
+  if (status === 'delivered') {
+    return {icon: 'check-all', color: DELIVERED_COLOR, label: 'Delivered'};
+  }
+  return {icon: 'check', color: PENDING_COLOR, label: 'Not received yet'};
+};
+
+// Watch figures only make sense once it has actually reached the device.
+const hasArrived = status => status === 'delivered' || status === 'seen';
 
 /**
  * Delivery state as a subtitle line, sat directly under a file's title.
@@ -35,22 +51,20 @@ const PENDING_COLOR = '#9aa0a6';
  * id. Renders nothing at all unless a mentor has that mentee selected, which
  * is every screen but one.
  */
-export const AssignmentSubtitle = ({sourceId, isContainer = false}) => {
+const AssignmentSubtitleBase = ({sourceId, isContainer = false}) => {
   const assignment = useAssignmentStatusStore(
     state => state.byVideoId[String(sourceId)],
   );
 
   if (!assignment) return null;
-  const delivered = assignment.status === 'delivered';
-  const {percent} = assignment;
+
+  const {status, percent} = assignment;
+  const {icon, color, label} = describe(status);
+  const arrived = hasArrived(status);
 
   return (
     <View style={styles.subtitle}>
-      <MaterialCommunityIcons
-        name={delivered ? 'check-all' : 'check'}
-        size={14}
-        color={delivered ? DELIVERED_COLOR : PENDING_COLOR}
-      />
+      <MaterialCommunityIcons name={icon} size={14} color={color} />
       {/* The tick carries the colour; the words stay the same muted grey in
           both states. Two things shouting the status made the line compete
           with the title above it.
@@ -62,15 +76,15 @@ export const AssignmentSubtitle = ({sourceId, isContainer = false}) => {
           A playlist or a folder is the exception: it has no duration of its
           own, so any figure there would be invented. It gets delivery only. */}
       <Text style={styles.subtitleText}>
-        {!delivered
-          ? 'Not received yet'
-          : isContainer
-          ? 'Delivered'
-          : `Delivered · Watched ${Math.round(percent ?? 0)}%`}
+        {!arrived || isContainer
+          ? label
+          : `${label} · Watched ${Math.round(percent ?? 0)}%`}
       </Text>
     </View>
   );
 };
+
+export const AssignmentSubtitle = React.memo(AssignmentSubtitleBase);
 
 const AssignmentStatusStrip = ({assignment}) => {
   if (!assignment) return null;

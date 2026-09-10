@@ -3,6 +3,7 @@ import {Platform} from 'react-native';
 import {BASE_URL} from '../../appMentorBackend/userMgt';
 import {handleFCMNotifications} from '../notificationsMgt';
 import {askForNotificationsOnce} from '../notificationPermission';
+import {syncAssignmentsOnStartup} from '../../appMentorBackend/assignmentsMgt';
 
 export async function setupFCM(user) {
   const userId = user?.id;
@@ -39,6 +40,20 @@ export async function setupFCM(user) {
   // Foreground notifications
   const unsubscribeOnMessage = messaging().onMessage(async remoteMessage => {
     await handleFCMNotifications(remoteMessage);
+
+    // A mentor assigning something while the mentee has the app open would
+    // otherwise sit unseen until the next launch: the sync runs at startup,
+    // and this session already had its turn. Pulling now is what makes the
+    // count on the pill appear while they are looking at it.
+    //
+    // Deliberately only on this path, not in the shared handler. The
+    // background handler runs headless (see firebase-messaging.js), where the
+    // database and the media stores are not necessarily set up, and a sync
+    // half-finished by a process death is worse than one deferred to the next
+    // open — which is exactly what the startup sync is for.
+    if (remoteMessage?.data?.type === 'assignment') {
+      syncAssignmentsOnStartup(user);
+    }
   });
 
   // When app opened from background state

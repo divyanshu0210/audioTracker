@@ -61,7 +61,10 @@ const DeviceItem = ({item}) => {
   );
 };
 
-export default DeviceItem;
+// Memoized like IskconItem. BaseItem re-renders on selection, on a store
+// change and on every assignment update; without this the whole row visual
+// was rebuilt each time, for every row on screen.
+export default React.memo(DeviceItem);
 
 const styles = StyleSheet.create({
   audioItem: {

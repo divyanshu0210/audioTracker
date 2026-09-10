@@ -7,6 +7,7 @@ import BaseMediaListComponent from './BaseMediaListComponent';
 import {ItemTypes, ScreenTypes} from '../contexts/constants';
 import {useMediaStore} from '../stores/useMediaStore';
 import useLoadingStore from '../stores/useLoadingStore';
+import {logRender} from '../contexts/renderLog';
 
 const DriveFilesView = ({onRefresh}) => {
   const emptyText = 'Press + to Add Files using Drive Link';
@@ -15,9 +16,7 @@ const DriveFilesView = ({onRefresh}) => {
 
       const renderCount = useRef(0);
       renderCount.current++;
-      console.log(
-        `🎯 Render DRIVE FILEView #${renderCount.current}`,data.length
-      );
+      logRender('DRIVE FILEView', renderCount.current, data.length);
   const memoizedData = useMemo(() => data, [data]);
 
   return (

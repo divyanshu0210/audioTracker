@@ -40,6 +40,29 @@ const useAssignmentStatusStore = create(set => ({
       }, {}),
     }),
 
+  /**
+   * Fold in per-video watch progress for children of an assigned container.
+   *
+   * A playlist or folder is assigned as one row, so its videos have no
+   * assignment of their own. Delivery is inherited - if the container arrived,
+   * everything in it arrived - and the watch figures come from the mentee's
+   * reports, fetched by id.
+   *
+   * Existing entries win. A child that happens to be assigned in its own right
+   * has a real row with a real status, and that must not be overwritten by an
+   * inherited one.
+   */
+  mergeChildProgress: (entries, inheritedStatus) =>
+    set(state => {
+      const byVideoId = {...state.byVideoId};
+      for (const entry of entries ?? []) {
+        const key = String(entry.video_id);
+        if (byVideoId[key]) continue;
+        byVideoId[key] = {...entry, status: inheritedStatus};
+      }
+      return {byVideoId};
+    }),
+
   clear: () => set({menteeId: null, byVideoId: {}, isLoading: false}),
 }));
 

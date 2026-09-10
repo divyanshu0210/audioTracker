@@ -18,6 +18,10 @@ const useSettingsStore = create((set, get) => ({
     autoplay: true,
     // Pause the media while a note is being typed, resume once typing stops.
     autoPauseOnTyping: true,
+    // Which tab the mentor/mentee drawer opens on. Whichever side of the
+    // relationship someone mostly uses, that is the list they want first, and
+    // it differs per person rather than having a right answer.
+    menteesFirst: true,
   },
 
   // Initialize the store by loading settings from database
@@ -50,6 +54,7 @@ const useSettingsStore = create((set, get) => ({
       LAST_SPECIAL_BACKUP_KEY: null,
       autoplay: true,
       autoPauseOnTyping: true,
+      menteesFirst: true,
     };
   },
 

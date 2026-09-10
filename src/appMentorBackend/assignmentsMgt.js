@@ -17,8 +17,10 @@ import {addItemToCategory} from '../categories/catDB';
 import {upsertItem} from '../database/C';
 import {saveDriveCopy} from '../database/sharedDriveCopies';
 import {useMediaStore} from '../stores/useMediaStore';
+import {useSelectionStore} from '../stores/useSelectionStore';
 import {getGoogleAccessToken} from '../auth/tokenManager';
 import useAssignmentStatusStore from '../appMentor/useAssignmentStatusStore';
+import useAssignmentInboxStore from '../appMentor/useAssignmentInboxStore';
 
 const {setNewAssignmentsFlag} = useNotificationStore.getState();
 
@@ -36,6 +38,10 @@ export const fetchAssignmentsForMentee = async (
     // Ids of assignments whose items actually got built, collected across
     // every mentor so one acknowledgement covers the whole run.
     const deliveredIds = [];
+    // Summarised after the loop rather than toasted inside it: a mentee with
+    // three mentors got three toasts queued back to back, and the last one was
+    // still showing long after the work finished.
+    const addedByMentor = [];
 
     const response = await fetch(
       `${BASE_URL}/assign/assignments-for-mentee/?mentee_id=${userInfo?.id}`,
@@ -64,6 +70,11 @@ export const fetchAssignmentsForMentee = async (
 
           // Process all videos for this mentor
           const videos = assignmentsByMentor[mentorKey];
+          // Per mentor, and by id rather than a tally: the badge counts ids so
+          // that replaying an interrupted sync cannot count them twice. It also
+          // has to be what actually landed - videos.length included the ones
+          // that threw.
+          const deliveredForMentor = [];
           for (const video of videos) {
             const extracted = {
               id: video.video_id,
@@ -108,6 +119,7 @@ export const fetchAssignmentsForMentee = async (
               // threw stays pending on the server and comes back next time,
               // rather than being silently lost.
               deliveredIds.push(video.id);
+              deliveredForMentor.push(video.id);
             } catch (videoError) {
               console.warn(
                 `Could not build assigned ${extracted.type} ${extracted.id}:`,
@@ -115,12 +127,12 @@ export const fetchAssignmentsForMentee = async (
               );
             }
           }
-          //Create toast here . ..
-          videos.length > 0 &&
-            ToastAndroid.show(
-              `${videos.length} New Assignments Added`,
-              ToastAndroid.SHORT,
-            );
+          if (deliveredForMentor.length > 0) {
+            addedByMentor.push({
+              mentor: mentorKey,
+              ids: deliveredForMentor,
+            });
+          }
         } catch (error) {
           console.warn(
             `❌ Error processing category for ${mentorKey}:`,
@@ -130,6 +142,23 @@ export const fetchAssignmentsForMentee = async (
       }
 
       await acknowledgeAssignments(userInfo?.id, deliveredIds);
+
+      // The badge outlives the toast: it sits on the mentor's row in the
+      // drawer until the mentee opens them.
+      //
+      // Order does not matter against the acknowledge above, which is the
+      // point of counting by id. Whether the network died before the server
+      // was told, or the process died just after, the next sync passes the
+      // same ids and recordDelivered ignores the ones already counted.
+      const {recordDelivered} = useAssignmentInboxStore.getState();
+      const counted = addedByMentor
+        .map(entry => ({
+          mentor: entry.mentor,
+          count: recordDelivered(mentorEmailFromKey(entry.mentor), entry.ids),
+        }))
+        .filter(entry => entry.count > 0);
+
+      announceAssignments(counted);
       console.log('✅ All assignments fetched and categorized');
     } else {
       console.log(
@@ -250,6 +279,39 @@ const acknowledgeAssignments = async (menteeId, assignmentIds) => {
   }
 };
 
+// One toast for the whole sync, naming where the work went.
+//
+// Assigned items no longer join the mentee's own tabs - they are filed under
+// the mentor who sent them (see LinkOrigin.ASSIGNMENT in handleLinkSubmit), so
+// nothing visible changes on the screen the mentee is standing on. This is the
+// only thing telling them where to look, which is why it names the mentor and
+// runs LONG.
+// The server groups by `f"{full_name} ({email})"` and that same string is the
+// category name, so it cannot be changed without moving everyone's categories.
+// The email is pulled back out of it here.
+const mentorEmailFromKey = mentorKey => {
+  const match = /\(([^()]+)\)\s*$/.exec(mentorKey ?? '');
+  return match ? match[1].trim() : null;
+};
+
+const announceAssignments = added => {
+  if (added.length === 0) return;
+
+  const total = added.reduce((sum, entry) => sum + entry.count, 0);
+  const noun = total === 1 ? 'assignment' : 'assignments';
+
+  // The mentor key is "Full Name (email)"; the name alone is enough here.
+  const where =
+    added.length === 1
+      ? `from ${added[0].mentor.replace(/\s*\(.*\)\s*$/, '')}`
+      : `from ${added.length} mentors`;
+
+  ToastAndroid.show(
+    `${total} new ${noun} ${where} — open them from the mentor list`,
+    ToastAndroid.LONG,
+  );
+};
+
 // to display the assignment btn on app start
 export const isAssignmentPending = async () => {
   const count = await pendingAssignmentCount();
@@ -304,5 +366,108 @@ export const loadMenteeAssignmentStatus = async (mentorId, menteeId) => {
       error?.message ?? error,
     );
     clear();
+  }
+};
+
+/**
+ * Watch progress for the videos inside an assigned playlist or Drive folder.
+ *
+ * Called when a mentor opens one with a mentee selected. The assignment row
+ * holds the container's id, so the children carry nothing until this asks
+ * about them by id - the server has never seen what is inside.
+ *
+ * Silent when there is no mentee selected, no container assignment, or nothing
+ * to ask about: this runs off screen navigation, and a mentor browsing their
+ * own folders should pay nothing for it.
+ */
+export const loadChildProgress = async (mentorId, menteeId, containerId, childIds) => {
+  const ids = (childIds ?? []).filter(Boolean).map(String);
+  if (!mentorId || !menteeId || ids.length === 0) return;
+
+  const {byVideoId, mergeChildProgress} = useAssignmentStatusStore.getState();
+  const container = byVideoId[String(containerId)];
+  if (!container) return;
+
+  try {
+    const response = await fetch(
+      `${BASE_URL}/assign/mentee-progress/?mentor_id=${encodeURIComponent(
+        mentorId,
+      )}&mentee_id=${encodeURIComponent(menteeId)}&video_ids=${encodeURIComponent(
+        ids.join(','),
+      )}`,
+    );
+    const data = await response.json();
+
+    if (!response.ok) {
+      console.warn('Could not load child progress:', data?.error);
+      return;
+    }
+
+    mergeChildProgress(data.progress, container.status);
+  } catch (error) {
+    console.warn('Could not load child progress:', error?.message ?? error);
+  }
+};
+
+/**
+ * The mentee opened this mentor, so everything that mentor sent has now
+ * actually been looked at.
+ *
+ * Separate from acknowledgeAssignments, which is this device reporting that it
+ * built the rows during a background sync the mentee may never have noticed.
+ * Only a person choosing to look earns the blue tick, which is the distinction
+ * the mentor's row is there to show.
+ *
+ * Fire-and-forget: it runs while the drawer is closing and the category is
+ * loading, and a failure costs a tick that the next open will set anyway.
+ */
+export const markAssignmentsSeen = async (menteeId, mentorId) => {
+  if (!menteeId || !mentorId) return;
+  try {
+    const response = await fetch(`${BASE_URL}/assign/mark-seen/`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({mentee_id: menteeId, mentor_id: mentorId}),
+    });
+    if (!response.ok) {
+      console.warn('Could not mark assignments seen:', response.status);
+    }
+  } catch (error) {
+    console.warn('Could not mark assignments seen:', error?.message ?? error);
+  }
+};
+
+/**
+ * The startup sync.
+ *
+ * Runs on its own when the app opens rather than waiting for a tap, because
+ * the tap now only opens the drawer - by the time someone looks, the counts
+ * have to already be right. Reads its store setters here instead of taking
+ * them as arguments, so a caller does not need to be a component.
+ *
+ * Hydrates the badge counts first: they are persisted, so a mentee who was
+ * shown "3 waiting" and then killed the app must still see 3 on the next
+ * launch, whether or not this sync finds anything new.
+ */
+export const syncAssignmentsOnStartup = async userInfo => {
+  const inbox = useAssignmentInboxStore.getState();
+  await inbox.hydrate();
+
+  if (!userInfo?.id) return;
+
+  const {setDriveLinksList, setItems} = useMediaStore.getState();
+  const {setCategories, setSelectedCategory} = useSelectionStore.getState();
+
+  inbox.setSyncing(true);
+  try {
+    await fetchAssignmentsForMentee(
+      setDriveLinksList,
+      setItems,
+      setCategories,
+      setSelectedCategory,
+      userInfo,
+    );
+  } finally {
+    useAssignmentInboxStore.getState().setSyncing(false);
   }
 };

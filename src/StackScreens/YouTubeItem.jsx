@@ -4,7 +4,7 @@ import PlaylistThumbnail from '../components/PlaylistThumbnail';
 import {ItemTypes} from '../contexts/constants';
 import {AssignmentSubtitle} from '../appMentor/AssignmentStatusStrip';
 
-export default function YouTubeItem({item}) {
+function YouTubeItem({item}) {
   const isPlaylist = item.type === 'youtube_playlist';
 
   const thumbnailUri = item.thumbnail
@@ -41,6 +41,10 @@ export default function YouTubeItem({item}) {
     </View>
   );
 }
+
+// Memoized like IskconItem - see the note there. This one also renders an
+// Image, so an avoided re-render avoids a source-prop diff too.
+export default React.memo(YouTubeItem);
 
 const styles = StyleSheet.create({
   historyItem: {

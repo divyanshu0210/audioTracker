@@ -164,4 +164,7 @@ const styles = StyleSheet.create({
 });
 
 
-export default DriveItem;
+// Memoized like IskconItem. BaseItem re-renders on selection, on a store
+// change and on every assignment update; without this the whole row visual
+// was rebuilt each time, for every row on screen.
+export default React.memo(DriveItem);

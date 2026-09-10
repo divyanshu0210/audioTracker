@@ -5,6 +5,10 @@ import {
 } from '@react-navigation/native';
 import axios from 'axios';
 import React, {useCallback, useEffect, useRef, useState} from 'react';
+import {useAppState} from '../contexts/AppStateContext';
+import useMentorMenteeStore from '../appMentor/useMentorMenteeStore';
+import {loadChildProgress} from '../appMentorBackend/assignmentsMgt';
+import {logRender} from '../contexts/renderLog';
 import {Alert, Animated, SafeAreaView, StyleSheet} from 'react-native';
 import {useMediaStore} from '../stores/useMediaStore';
 import {getItemBySourceId, upsertItem} from '../database/C';
@@ -147,7 +151,7 @@ const GoogleDriveViewer = () => {
 
   const renderCount = useRef(0);
   renderCount.current++;
-  console.log(`🎯 Render GOOGLE DRIVE VIEWER #${renderCount.current}`);
+  logRender('GOOGLE DRIVE VIEWER', renderCount.current);
 
   // ── State ──────────────────────────────────────────────────────────────────
   const [folderStack, setFolderStack] = useState([
@@ -157,6 +161,9 @@ const GoogleDriveViewer = () => {
   // is visible to DriveItem's file_path selector without prop drilling.
   const currentItems = useMediaStore(state => state.data);
   const setCurrentItems = useMediaStore(state => state.setData);
+  const folderItems = useMediaStore(state => state.data);
+  const {userInfo} = useAppState();
+  const activeMentee = useMentorMenteeStore(state => state.activeMentee);
   const setLoading = useLoadingStore(state => state.setLoading);
   const loading = useLoadingStore(state => state.loading);
 
@@ -206,6 +213,25 @@ const GoogleDriveViewer = () => {
       setLoading,
     );
   }, [currentFolder?.source_id]);
+
+  // The folder was assigned as one row, so the files inside arrive with
+  // nothing on them. This asks what the mentee has watched of each, by id.
+  //
+  // Keyed on the listing rather than hooked into fetchDriveItems: that
+  // function writes the list from four places (cache hit, DB, API, empty) and
+  // openFolder/goBack set it directly too, so watching the result covers every
+  // route into a folder with one effect.
+  useEffect(() => {
+    if (!activeMentee?.id || !currentFolder?.source_id || !folderItems?.length) {
+      return;
+    }
+    loadChildProgress(
+      userInfo?.id,
+      activeMentee.id,
+      currentFolder.source_id,
+      folderItems.map(file => file.source_id),
+    );
+  }, [currentFolder?.source_id, folderItems, activeMentee?.id, userInfo?.id]);
 
   // ── Navigate INTO a sub-folder (called by BaseItem instead of StackActions.push) ──
   // Expose via a ref so BaseItem / DriveItem can call it without prop-drilling.

@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import UserAvatar from './UserAvatar';
 import useMentorMenteeStore from './useMentorMenteeStore';
+import useAssignmentInboxStore from './useAssignmentInboxStore';
 import {useAppState} from '../contexts/AppStateContext';
 import { useSelectionStore } from '../stores/useSelectionStore';
 import { useShallow } from 'zustand/react/shallow';
@@ -35,6 +36,8 @@ export default UserList = ({
     activeMentee,
     activeMentor,
   } = useMentorMenteeStore();
+
+const unreadByMentor = useAssignmentInboxStore(state => state.unreadByMentor);
 
 const {selectedItems, setSelectedCategory} = useSelectionStore(
   useShallow(state => ({
@@ -98,6 +101,10 @@ const {selectedItems, setSelectedCategory} = useSelectionStore(
 
   const renderItem = ({item}) => {
     const id = getUserId(item);
+    // Mentors only: a count here means "this many things they sent that you
+    // have not opened", which has no meaning pointed the other way.
+    const unread =
+      listType === 'Mentors' ? unreadByMentor[item.email] ?? 0 : 0;
     const selected = isSelected(id);
     const isActiveMenteeOrMentor =
       (activeMentee && id === activeMentee.id?.toString()) ||
@@ -126,6 +133,12 @@ const {selectedItems, setSelectedCategory} = useSelectionStore(
               {item.email}
             </Text>
           </View>
+
+          {unread > 0 && (
+            <View style={styles.unreadBadge}>
+              <Text style={styles.unreadText}>{unread > 99 ? '99+' : unread}</Text>
+            </View>
+          )}
         </View>
       </TouchableOpacity>
     );
@@ -202,6 +215,21 @@ const styles = StyleSheet.create({
   },
   loader: {
     marginTop: 40,
+  },
+  unreadBadge: {
+    minWidth: 22,
+    height: 22,
+    borderRadius: 11,
+    paddingHorizontal: 6,
+    backgroundColor: '#1a73e8',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 8,
+  },
+  unreadText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '700',
   },
   item: {
     paddingVertical: 12,

@@ -9,7 +9,7 @@ import {
   fetchNotification,
   updateNotificationCount,
 } from '../appNotification/notificationsMgt';
-import {isAssignmentPending} from '../appMentorBackend/assignmentsMgt';
+import {syncAssignmentsOnStartup} from '../appMentorBackend/assignmentsMgt';
 import {BASE_URL} from '../appMentorBackend/userMgt';
 import HomeTabs from './HomeTabs';
 import {useSelectionStore} from '../stores/useSelectionStore';
@@ -63,7 +63,6 @@ const HomeScreen = () => {
     const loadInitialNotifications = async () => {
       try {
         await fetchNotification();
-        await isAssignmentPending();
         await updateNotificationCount();
       } catch (err) {
         console.error('Failed to load notifications', err);
@@ -74,6 +73,18 @@ const HomeScreen = () => {
     loadInitialNotifications();
     fetchMentorMenteeData();
   }, []);
+
+  // Its own effect, keyed on the user, because this one cannot run without
+  // them: the mount effect above fires before the session is necessarily
+  // restored, and a sync that skipped for a missing id would never retry.
+  //
+  // Not gated on a pending count either. isAssignmentPending used to ask the
+  // server whether anything was waiting so a button could appear; the sync
+  // answers that question itself now, and does the work while it is there.
+  useEffect(() => {
+    if (!userInfo?.id) return;
+    syncAssignmentsOnStartup(userInfo);
+  }, [userInfo?.id]);
 
   const fetchMentorMenteeData = useCallback(async () => {
     // Flagged so the drawer can show a spinner rather than "No mentees found."

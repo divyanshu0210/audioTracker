@@ -23,6 +23,7 @@ import {useNotesStore} from '../stores/useNotesStore';
 import {navigationRef} from '../handlers/navigationRef';
 import {useShallow} from 'zustand/react/shallow';
 import {StackActions, useRoute} from '@react-navigation/core';
+import {logRender} from '../contexts/renderLog';
 
 const BaseItem = ({
   type,
@@ -71,11 +72,7 @@ const BaseItem = ({
 
   const renderCount = useRef(0);
   renderCount.current++;
-  console.log(
-    `🎯 Render BASE ITEM #${renderCount.current}`,
-    item?.type,
-    sourceId,
-  );
+  logRender('BASE ITEM', renderCount.current, item?.type, sourceId);
 
   const selected = useSelectionStore(
     useCallback(

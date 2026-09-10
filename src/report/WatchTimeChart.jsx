@@ -9,8 +9,30 @@ import {
 } from 'react-native';
 import {BarChart} from 'react-native-gifted-charts';
 
+// A bar chart is rendered at yAxisLabelWidth + initialSpacing + endSpacing +
+// SUM(barWidth + spacing), not at the `width` prop - that is only the viewport
+// it scrolls inside. So the bars themselves have to be sized to fit the card,
+// against a width taken from onLayout rather than from the screen.
+// Wide enough for a three-digit tick at fontSize 10 and no wider - this is
+// the chart's whole left inset, so anything spare reads as a gap between the
+// card edge and the first bar. Reclaimed space goes to the bars.
+const Y_AXIS_LABEL_WIDTH = 22;
+const INITIAL_SPACING = 8;
+const Y_AXIS_SECTIONS = 4;
+
 const WatchTimeChart = ({watchData, newTarget, onWeekChange}) => {
   const [barChartData, setBarChartData] = useState([]);
+  const [availableWidth, setAvailableWidth] = useState(0);
+
+  const barCount = barChartData.length || 7;
+  const plotWidth = Math.max(
+    availableWidth - Y_AXIS_LABEL_WIDTH - INITIAL_SPACING,
+    0,
+  );
+  // n bars but n-1 gaps: no spacing is added after the last stack.
+  const barSlot = plotWidth / Math.max(barCount - 0.45, 1);
+  const barWidth = Math.max(6, Math.floor(barSlot * 0.55));
+  const barSpacing = Math.max(4, Math.floor(barSlot * 0.45));
   const [currentWeekStart, setCurrentWeekStart] = useState(0);
   const [weeksData, setWeeksData] = useState([]);
   const [weekTotalTime, setWeekTotalTime] = useState(0);
@@ -164,6 +186,14 @@ const WatchTimeChart = ({watchData, newTarget, onWeekChange}) => {
         )
       : newTarget;
 
+  // Rounded up to a whole multiple of the section count so every tick lands on
+  // an integer; the raw 1.2x headroom rarely divided evenly.
+  const yAxisMax = Math.max(
+    Y_AXIS_SECTIONS,
+    Math.ceil((Math.max(maxWatchTime, newTarget) * 1.2) / Y_AXIS_SECTIONS) *
+      Y_AXIS_SECTIONS,
+  );
+
   const handlePrevWeek = useCallback(() => {
     const {currentWeekStart, weeksData} = stateRef.current;
     if (weeksData.length > 0) {
@@ -228,16 +258,29 @@ const WatchTimeChart = ({watchData, newTarget, onWeekChange}) => {
         </View>
       </View>
       <View
+        style={styles.gestureArea}
         {...panResponder.panHandlers} // Add gesture handlers here
       >
-        <View style={{paddingRight: 40}} pointerEvents="none">
+        {/* Waits for the measurement: at 0 the bars floor to their minimum
+            and then jump once the real width arrives. */}
+        <View
+          style={styles.chartArea}
+          onLayout={e => setAvailableWidth(e.nativeEvent.layout.width)}
+          pointerEvents="none">
+          {availableWidth > 0 && (
           <BarChart
             stackData={barChartData}
             height={140}
-            width={320}
-            noOfSections={4}
-            maxValue={Math.max(maxWatchTime, newTarget) * 1.2}
+            width={plotWidth + INITIAL_SPACING}
+            noOfSections={Y_AXIS_SECTIONS}
+            maxValue={yAxisMax}
+            // Minutes, so a fractional tick means nothing.
+            formatYLabel={value => `${Math.round(Number(value))}`}
             yAxisTextStyle={{fontSize: 10, color: 'gray'}}
+            initialSpacing={INITIAL_SPACING}
+            endSpacing={0}
+            xAxisLength={plotWidth + INITIAL_SPACING}
+            yAxisLabelWidth={Y_AXIS_LABEL_WIDTH}
             showReferenceLine1
             referenceLine1Position={newTarget}
             referenceLine1Config={{
@@ -245,11 +288,12 @@ const WatchTimeChart = ({watchData, newTarget, onWeekChange}) => {
               dashWidth: 2,
               dashGap: 1,
             }}
-            barWidth={22}
-            spacing={20}
+            barWidth={barWidth}
+            spacing={barSpacing}
             barBorderRadius={5}
             disablePress={true}
           />
+          )}
         </View>
         {loading && (
     <View style={styles.loaderOverlay}>
@@ -262,6 +306,20 @@ const WatchTimeChart = ({watchData, newTarget, onWeekChange}) => {
 };
 
 const styles = StyleSheet.create({
+  // stretch, not width: '100%'. The card is alignItems: 'center', so a child
+  // sizes to its own content; a percentage width would resolve against a
+  // parent waiting on that same child, and both measure 0.
+  gestureArea: {
+    alignSelf: 'stretch',
+  },
+  chartArea: {
+    alignSelf: 'stretch',
+    // Pulls the chart back out of the card's 12pt padding, which is otherwise
+    // the whole gap between the card edge and the plot. Only the chart - the
+    // header and legend above keep the card's normal inset. The width comes
+    // from onLayout, so the reclaimed space goes to the bars on its own.
+    marginHorizontal: -6,
+  },
   container: {
     padding: 12,
     backgroundColor: 'white',

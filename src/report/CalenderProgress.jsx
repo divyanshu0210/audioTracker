@@ -9,7 +9,7 @@ import {
 import {Calendar} from 'react-native-calendars';
 import {generateWatchData} from './utils/ProgressDataCollector';
 import {getSumOfWatchTimesByDate} from '../database/R';
-import {useFocusEffect} from '@react-navigation/native';
+import {useFocusEffect, useIsFocused} from '@react-navigation/native';
 import {SafeAreaView} from 'react-native-safe-area-context';
 import WatchTimeChart from './WatchTimeChart';
 import {ScrollView} from 'react-native-gesture-handler';
@@ -25,6 +25,7 @@ import {
   getWatchTimefromBackend,
 } from '../appMentorBackend/reportMgt';
 import { navigationRef } from '../handlers/navigationRef';
+import {useMenteeRefresh} from '../appMentor/useMenteeStatusRefresh';
 
 const ACHIEVEMENT_BANDS = [
   {min: 100, color: '#1B5E20'}, // Goal crushed
@@ -41,28 +42,6 @@ const getAchievementColor = (time, target) => {
 
   const band = ACHIEVEMENT_BANDS.find(b => percentage >= b.min);
   return band?.color ?? null;
-};
-
-const getLegendWithTime = target => {
-  if (!target || target <= 0) return [];
-
-  const getMinutes = percent => Math.floor((percent / 100) * target);
-
-  return ACHIEVEMENT_BANDS.map((band, index) => {
-    const nextBand = ACHIEVEMENT_BANDS[index - 1];
-
-    let label;
-    if (!nextBand) {
-      // Top band (100%+)
-      label = `${getMinutes(band.min)}+ min`;
-    } else {
-      label = `${getMinutes(band.min)}–${getMinutes(nextBand.min - 1)} min`;
-    }
-    return {
-      color: band.color,
-      label,
-    };
-  });
 };
 
 const CalendarProgress = () => {
@@ -84,9 +63,6 @@ const CalendarProgress = () => {
   }, [settings]);
 
   const prevTargetNewWatchTime = useRef(settings.TARGET_NEW_WATCH_TIME);
-  const legendItems = useMemo(() => {
-    return getLegendWithTime(settings.TARGET_NEW_WATCH_TIME);
-  }, [settings.TARGET_NEW_WATCH_TIME]);
   const {activeMentee: mentee} = useMentorMenteeStore();
 
   useEffect(() => {
@@ -113,14 +89,29 @@ const CalendarProgress = () => {
     fetchWatchData(previousMonth, false);
   }, [mentee]);
 
+  const isViewingThisMonth =
+    currentMonth === new Date().toISOString().slice(0, 7);
+
   useFocusEffect(
     useCallback(() => {
-      const currentMonthNow = new Date().toISOString().slice(0, 7);
-      if (currentMonth === currentMonthNow) {
+      if (isViewingThisMonth) {
         // console.log('Focus effect running', {currentMonth});
         fetchWatchDataForToday();
       }
-    }, [currentMonth]),
+    }, [isViewingThisMonth]),
+  );
+
+  // A mentee's day keeps moving while their mentor is looking at it, and focus
+  // alone only catches it on the way in. Today's cell is the only one that can
+  // change under a mentor - every earlier day's reports are long uploaded - so
+  // this asks about that one date rather than re-reading the month.
+  const isFocused = useIsFocused();
+  // Called through a closure, not passed by reference: this sits above where
+  // fetchWatchDataForToday is declared, and naming it here would read it in
+  // its own temporal dead zone.
+  useMenteeRefresh(
+    () => fetchWatchDataForToday(),
+    Boolean(mentee?.id) && isFocused && isViewingThisMonth,
   );
 
   const fetchWatchData = async (
@@ -243,14 +234,10 @@ const CalendarProgress = () => {
     if (day.dateString > today) return;
 
     setSelectedDate(day.dateString);
-    const dayData = data[day.dateString] || {
-      totalWatchTime: 0,
-      totalNewWatchTime: 0,
-      totalUnfltrdWatchTime: 0,
-    };
+    // No totals passed along any more: DayReport sums the rows it fetches, so
+    // a snapshot taken here could only ever disagree with them.
     navigationRef.navigate('DayReport', {
       date: day.dateString,
-      watchData: dayData,
       mentee: mentee,
     });
   };
@@ -441,24 +428,6 @@ const CalendarProgress = () => {
             );
           }}
         />
-        <View style={styles.legendContainer}>
-          {legendItems.map((item, index) => (
-            <View key={index} style={styles.legendItem}>
-              <View
-                style={[
-                  styles.legendColor,
-                  {backgroundColor: item.color || 'transparent'},
-                  item.borderColor && {
-                    borderColor: item.borderColor,
-                    borderWidth: item.borderWidth || 1,
-                  },
-                ]}
-              />
-              <Text style={styles.legendText}>{item.label}</Text>
-            </View>
-          ))}
-        </View>
-
         {Object.keys(data).length === 0 ? (
           <View style={styles.container}>
             <Text
@@ -562,30 +531,6 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     margin: 10,
     padding: 10,
-  },
-  legendContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'center',
-    // paddingTop: 5,
-    // marginHorizontal: 10,
-    backgroundColor: '#fff',
-  },
-  legendItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginRight: 15,
-    marginBottom: 8,
-  },
-  legendColor: {
-    width: 10,
-    height: 10,
-    marginRight: 3,
-    borderRadius: 4,
-  },
-  legendText: {
-    fontSize: 11,
-    color: '#333',
   },
 });
 

@@ -71,6 +71,37 @@ export const getWatchTimefromBackend = async (userId, startDate, endDate) => {
   }
 };
 
+// The report API names the video's fields for itself — the name arrives as
+// videoNameInfo and the kind as source_type — while every report component is
+// written against a local watch-history row, which carries title/type/source_id
+// off the items table. Mapping it here, once, is what makes a mentee's day read
+// like the user's own; without it each row fell through to 'Untitled Video' and
+// the generic file icon.
+// The stored rows were moved onto the app's item types by report migration
+// 0003, so a family word now only reaches us from an older build still
+// uploading one — its next report would put 'drive' back on a device file.
+const LEGACY_TYPE_TO_ITEM_TYPE = {
+  youtube: 'youtube_video',
+  drive: 'drive_file',
+  device: 'device_file',
+  iskcon: 'iskcon_file',
+};
+
+// An app type always carries its family and its kind ('drive_file'), which is
+// what tells it apart from a legacy family word.
+const toItemType = sourceType =>
+  sourceType?.includes('_') ? sourceType : LEGACY_TYPE_TO_ITEM_TYPE[sourceType];
+
+const toWatchHistoryRow = record => ({
+  ...record,
+  title: record.videoNameInfo || record.title,
+  source_id: record.videoId,
+  // Falls back to the mime type so an unrecognised source still gets an
+  // audio/video icon rather than a blank sheet of paper.
+  type: toItemType(record.source_type) || record.mimetype || record.source_type,
+  duration: Number(record.duration || 0),
+});
+
 export const fetchWatchHistoryByDatefromBackend = async (date, userId) => {
   if (!date || !userId) {
     console.log('Both date and userId are required.');
@@ -83,7 +114,7 @@ export const fetchWatchHistoryByDatefromBackend = async (date, userId) => {
         params: {date, userId},
       },
     );
-    return response.data; // this will be an array of flat records
+    return (response.data || []).map(toWatchHistoryRow);
   } catch (error) {
     console.error('Error fetching watch history:', error);
     throw error;
@@ -91,13 +122,18 @@ export const fetchWatchHistoryByDatefromBackend = async (date, userId) => {
 };
 
 function prepareVideoReportPayload(videoItem, watchData, userId) {
-  const isYouTube = videoItem.type.startsWith("youtube");
+  const isYouTube = videoItem.type?.startsWith('youtube');
 
   const videoPayload = {
     videoId: videoItem.source_id || videoItem.id?.toString(),
-    name:  videoItem.title ,
+    name: videoItem.title,
     duration: Number(videoItem.duration || 0),
-    type: isYouTube ? 'youtube' : 'drive',
+    // The app's own type, not a family word. Everything that wasn't YouTube
+    // used to upload as 'drive', so a mentor watching a mentee's device or
+    // ISKCON file saw a Drive icon on it; the backend takes the full set now
+    // (see report.models.VIDEO_TYPES) and toItemType below reads it straight
+    // back out.
+    type: videoItem.type || 'drive_file',
     mimetype: isYouTube
       ? 'video/mp4'
       : videoItem.mimeType || 'application/octet-stream',

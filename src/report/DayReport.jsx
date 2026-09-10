@@ -1,4 +1,4 @@
-import React, {useState, useEffect, useRef, useMemo} from 'react';
+import React, {useState, useRef, useMemo, useCallback} from 'react';
 import {
   View,
   Text,
@@ -20,10 +20,12 @@ import VideoReportItem from './VideoReportItem';
 import SummaryCard from './SummaryCard';
 import { useNotesStore } from '../stores/useNotesStore';
 import { useShallow } from 'zustand/react/shallow';
+import {useFocusEffect, useIsFocused} from '@react-navigation/native';
+import {useMenteeRefresh} from '../appMentor/useMenteeStatusRefresh';
 
 const DayReport = ({route, navigation}) => {
   const [isLoading, setIsLoading] = useState(true);
-  const {date, watchData, mentee} = route.params;
+  const {date, mentee} = route.params;
   const [videos, setVideos] = useState([]);
 const {notesList, setNotesList} = useNotesStore(
   useShallow(state => ({
@@ -36,16 +38,21 @@ const {notesList, setNotesList} = useNotesStore(
 
   const viewShotRef = useRef();
 
-  useEffect(() => {
-    fetchData();
-  }, [date]);
+  // A mentee's day is assembled on their phone and only reaches the server when
+  // their player closes, so what is on screen here goes out of date without
+  // anything on this device knowing. Re-read it on every focus - coming back
+  // from the player is the likeliest moment for it to have moved - rather than
+  // only when the screen is first built.
+  const loadVideos = useCallback(async () => {
+    const videoList = mentee
+      ? await fetchWatchHistoryByDatefromBackend(date, mentee.id)
+      : await getWatchHistoryByDate(date);
+    setVideos(videoList || []);
+  }, [date, mentee?.id]);
 
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     try {
-      const videoList = mentee
-        ? await fetchWatchHistoryByDatefromBackend(date, mentee.id)
-        : await getWatchHistoryByDate(date);
-      setVideos(videoList || []);
+      await loadVideos();
 
       const notes = await fetchNotes({date: date});
       setNotesList(notes || []);
@@ -54,7 +61,26 @@ const {notesList, setNotesList} = useNotesStore(
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [loadVideos, date, setNotesList]);
+
+  useFocusEffect(
+    useCallback(() => {
+      fetchData();
+    }, [fetchData]),
+  );
+
+  // And while the mentor simply sits here reading it. Videos only - the notes
+  // below are this device's own and cannot change while nobody is typing.
+  // Quiet: a failed poll leaves the list that is already on screen.
+  const isFocused = useIsFocused();
+  useMenteeRefresh(
+    useCallback(() => {
+      loadVideos().catch(error =>
+        console.warn('Could not refresh the day report:', error?.message ?? error),
+      );
+    }, [loadVideos]),
+    Boolean(mentee?.id) && isFocused,
+  );
 
   // Sort videos by new watch time (descending)
   const sortedVideos = useMemo(() => {
@@ -68,10 +94,25 @@ const {notesList, setNotesList} = useNotesStore(
   //   return Math.max(...sortedVideos.map(v => v.unfltrdWatchTimePerDay || 0), 0);
   // }, [sortedVideos]);
 
-  // Calculate summary times (convert minutes to seconds)
-  const totalUnfiltered = (watchData?.totalUnfltrdWatchTime || 0) * 60;
-  const totalNew = (watchData?.totalNewWatchTime || 0) * 60;
-  const totalWatch = (watchData?.totalWatchTime || 0) * 60;
+  // Summed from the rows on screen rather than read from route.params, which
+  // is a snapshot the calendar took at the moment it pushed this screen. The
+  // list underneath refreshes; the card was left stating the totals from
+  // whenever the mentor tapped the day, and the two could disagree in front of
+  // them. Same figures either way - the calendar's totals are these per-video
+  // fields summed by the server - only these cannot go stale.
+  const {totalUnfiltered, totalNew, totalWatch} = useMemo(
+    () =>
+      videos.reduce(
+        (totals, video) => ({
+          totalUnfiltered:
+            totals.totalUnfiltered + (video.unfltrdWatchTimePerDay || 0),
+          totalNew: totals.totalNew + (video.newWatchTimePerDay || 0),
+          totalWatch: totals.totalWatch + (video.watchTimePerDay || 0),
+        }),
+        {totalUnfiltered: 0, totalNew: 0, totalWatch: 0},
+      ),
+    [videos],
+  );
 
   // The fixed scale for all progress bars (max time)
   const progressBarScale = totalUnfiltered;

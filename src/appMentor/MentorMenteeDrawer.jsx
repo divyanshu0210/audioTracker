@@ -294,7 +294,7 @@ const MentorMenteeDrawer = () => {
         ) : (
           <Ionicons
             name="people-outline"
-            size={26}
+            size={22}
             color="#000"
             style={styles.buttonIcon}
           />

@@ -332,11 +332,48 @@ export const pendingAssignmentCount = async () => {
   return 0;
 };
 
+// The last container a mentor opened with a mentee selected, so a refresh can
+// ask about its children again. Without it a poll would answer for the
+// assigned rows and quietly strip the folder or playlist the mentor is
+// actually looking at: setForMentee replaces the map wholesale, and the
+// children only ever existed as entries merged in on top of it.
+let lastChildQuery = null;
+
+// True while `menteeId` is still the mentee on screen. Every load here is an
+// answer about one particular person, and switching mentee mid-flight used to
+// let the outgoing one's reply land on the incoming one's rows.
+const isStillSelected = menteeId =>
+  String(useMentorMenteeStore.getState().activeMentee?.id) === String(menteeId);
+
+const fetchMenteeAssignments = async (mentorId, menteeId) => {
+  const response = await fetch(
+    `${BASE_URL}/assign/mentee-assignments/?mentor_id=${encodeURIComponent(
+      mentorId,
+    )}&mentee_id=${encodeURIComponent(menteeId)}`,
+  );
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(data?.error ?? `HTTP ${response.status}`);
+  }
+
+  return data.assignments ?? [];
+};
+
 // What a mentor assigned to one mentee, with delivery state and watch
 // progress. Fills the store the item rows read from; a mentee with nothing
 // assigned still writes an empty map, so the rows explicitly show nothing
 // rather than keeping the previous mentee's ticks.
-export const loadMenteeAssignmentStatus = async (mentorId, menteeId) => {
+//
+// `silent` is for the repeat visits: no loading flag, and a failure leaves the
+// rows showing the last answer instead of blanking them. A mentor watching a
+// list should not see every tick on it vanish because one poll went out while
+// the train was in a tunnel.
+export const loadMenteeAssignmentStatus = async (
+  mentorId,
+  menteeId,
+  {silent = false} = {},
+) => {
   const {setLoading, setForMentee, clear} = useAssignmentStatusStore.getState();
 
   if (!mentorId || !menteeId) {
@@ -344,29 +381,89 @@ export const loadMenteeAssignmentStatus = async (mentorId, menteeId) => {
     return;
   }
 
-  setLoading(true);
+  if (!silent) setLoading(true);
   try {
-    const response = await fetch(
-      `${BASE_URL}/assign/mentee-assignments/?mentor_id=${encodeURIComponent(
-        mentorId,
-      )}&mentee_id=${encodeURIComponent(menteeId)}`,
-    );
-    const data = await response.json();
-
-    if (!response.ok) {
-      console.warn('Could not load assignment status:', data?.error);
-      clear();
-      return;
-    }
-
-    setForMentee(menteeId, data.assignments);
+    const assignments = await fetchMenteeAssignments(mentorId, menteeId);
+    if (!isStillSelected(menteeId)) return;
+    setForMentee(menteeId, assignments);
   } catch (error) {
     console.warn(
       'Could not load assignment status:',
       error?.message ?? error,
     );
-    clear();
+    if (!silent) clear();
   }
+};
+
+/**
+ * Ask again for everything on screen about this mentee.
+ *
+ * Delivery, seen and watch progress are all things that happen on the mentee's
+ * phone. The mentor's copy of them was fetched once, when the mentee was
+ * picked in the drawer, and nothing since then could move it - a mentee could
+ * receive an assignment and watch half of it while the mentor sat looking at a
+ * single tick.
+ *
+ * Silent by design: it runs on a timer behind whatever the mentor is reading,
+ * so a failed attempt leaves the last good answer on the rows rather than
+ * emptying them.
+ */
+export const refreshMenteeStatus = async (mentorId, menteeId) => {
+  if (!mentorId || !menteeId) return;
+
+  const query =
+    lastChildQuery && String(lastChildQuery.menteeId) === String(menteeId)
+      ? lastChildQuery
+      : null;
+
+  try {
+    // Both in flight at once, and both written after they have landed. Asking
+    // in sequence would leave a gap where the assignment list had replaced the
+    // map but the children were still coming: every row inside an open folder
+    // would drop its subtitle and pick it up again, once every poll.
+    const [assignments, progress] = await Promise.all([
+      fetchMenteeAssignments(mentorId, menteeId),
+      query
+        ? fetchChildProgress(mentorId, menteeId, query.childIds)
+        : Promise.resolve(null),
+    ]);
+
+    if (!isStillSelected(menteeId)) return;
+
+    const {setForMentee, mergeChildProgress} =
+      useAssignmentStatusStore.getState();
+    setForMentee(menteeId, assignments);
+
+    if (progress) {
+      // The container's own status comes from the list that just landed - it
+      // is what the children inherit, and it may be what changed.
+      const container = assignments.find(
+        assignment =>
+          String(assignment.video_id) === String(query.containerId) ||
+          String(assignment.origin_video_id) === String(query.containerId),
+      );
+      if (container) mergeChildProgress(progress, container.status);
+    }
+  } catch (error) {
+    console.warn('Could not refresh mentee status:', error?.message ?? error);
+  }
+};
+
+const fetchChildProgress = async (mentorId, menteeId, ids) => {
+  const response = await fetch(
+    `${BASE_URL}/assign/mentee-progress/?mentor_id=${encodeURIComponent(
+      mentorId,
+    )}&mentee_id=${encodeURIComponent(menteeId)}&video_ids=${encodeURIComponent(
+      ids.join(','),
+    )}`,
+  );
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(data?.error ?? `HTTP ${response.status}`);
+  }
+
+  return data.progress ?? [];
 };
 
 /**
@@ -388,22 +485,14 @@ export const loadChildProgress = async (mentorId, menteeId, containerId, childId
   const container = byVideoId[String(containerId)];
   if (!container) return;
 
+  // Remembered before the request rather than after it, so a refresh replays
+  // the container even if this attempt is the one that failed.
+  lastChildQuery = {mentorId, menteeId, containerId, childIds: ids};
+
   try {
-    const response = await fetch(
-      `${BASE_URL}/assign/mentee-progress/?mentor_id=${encodeURIComponent(
-        mentorId,
-      )}&mentee_id=${encodeURIComponent(menteeId)}&video_ids=${encodeURIComponent(
-        ids.join(','),
-      )}`,
-    );
-    const data = await response.json();
-
-    if (!response.ok) {
-      console.warn('Could not load child progress:', data?.error);
-      return;
-    }
-
-    mergeChildProgress(data.progress, container.status);
+    const progress = await fetchChildProgress(mentorId, menteeId, ids);
+    if (!isStillSelected(menteeId)) return;
+    mergeChildProgress(progress, container.status);
   } catch (error) {
     console.warn('Could not load child progress:', error?.message ?? error);
   }

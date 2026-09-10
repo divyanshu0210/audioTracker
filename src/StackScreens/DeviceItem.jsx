@@ -7,6 +7,7 @@ import {
   SharedLinkChip,
   SharedLinkLocalChip,
 } from '../contexts/fileIconHelper';
+import {AssignmentSubtitle} from '../appMentor/AssignmentStatusStrip';
 import {useMediaStore} from '../stores/useMediaStore';
 
 const DeviceItem = ({item}) => {
@@ -53,6 +54,8 @@ const DeviceItem = ({item}) => {
             isMissing && <MissingFileChip />
           )}
         </View>
+
+        <AssignmentSubtitle sourceId={item.source_id} />
       </View>
     </View>
   );

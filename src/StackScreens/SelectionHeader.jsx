@@ -57,6 +57,25 @@ const SelectionHeader = ({type, screen, allItemsInThisList}) => {
     [selectedItems],
   );
 
+  // Assign sends an id and a type to the mentee's device to rebuild from, so
+  // it only means anything for media that exists somewhere both people can
+  // reach. A note or a notebook is the user's own writing and a category is a
+  // local label — none of them is fetchable by an id.
+  //
+  // An allowlist rather than hiding the three: the button used to be shown for
+  // every selection, and assigning one of those quietly created a row the
+  // mentee's app had no branch for. It stayed pending forever while the mentor
+  // watched a single tick that would never become two. Anything added later is
+  // excluded until it is deliberately included.
+  const ASSIGNABLE_TYPES = useMemo(
+    () => new Set([ItemTypes.YOUTUBE, ItemTypes.DRIVE, ItemTypes.DEVICE, ItemTypes.ISKCON]),
+    [],
+  );
+  const hasAssignableSelection = useMemo(
+    () => selectedItems.some(i => ASSIGNABLE_TYPES.has(i.type)),
+    [selectedItems, ASSIGNABLE_TYPES],
+  );
+
   // Every list but one holds a single type, and "the items this header is
   // responsible for" was simply everything of that type. The Downloads screen
   // mixes drive, device and iskcon rows and so passes no type at all, which
@@ -261,9 +280,11 @@ ${describeFailures(failed)}`,
             <Ionicons name="pricetag-outline" size={21} color="#007AFF" />
           </TouchableOpacity>
 
-          <TouchableOpacity onPress={handleForward} disabled={busy}>
-            <Fontisto name="share-a" size={20} color="#007AFF" />
-          </TouchableOpacity>
+          {hasAssignableSelection && (
+            <TouchableOpacity onPress={handleForward} disabled={busy}>
+              <Fontisto name="share-a" size={20} color="#007AFF" />
+            </TouchableOpacity>
+          )}
 
           <TouchableOpacity
             onPress={() => setConfirmVisible(true)}

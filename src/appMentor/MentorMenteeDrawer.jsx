@@ -18,6 +18,9 @@ import {TabView, SceneMap} from 'react-native-tab-view';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import {useSelectionStore} from '../stores/useSelectionStore';
 import { navigationRef } from '../handlers/navigationRef';
+import useAssignmentStatusStore from './useAssignmentStatusStore';
+import UserAvatar from './UserAvatar';
+import {loadMenteeAssignmentStatus} from '../appMentorBackend/assignmentsMgt';
 
 const CustomTabBar = ({navigationState, setIndex}) => {
   return (
@@ -47,6 +50,7 @@ const CustomTabBar = ({navigationState, setIndex}) => {
 };
 
 const MentorMenteeDrawer = () => {
+  const {userInfo} = useAppState();
   const {
     mentors,
     mentees,
@@ -101,6 +105,10 @@ const MentorMenteeDrawer = () => {
       : firstName;
   }, []);
 
+  // Null whenever the list is unfiltered - selectAndClose clears both for
+  // "You" - which is exactly when the button should not show a face.
+  const activeUser = activeMentee ?? activeMentor ?? null;
+
   const navigateToHome = () => {
     // Navigate immediately so UI feels responsive
     navigationRef.navigate('MainApp', {
@@ -108,7 +116,7 @@ const MentorMenteeDrawer = () => {
       params: {
         screen: 'HomeScreen', // Target the HomeScreen in HomeStack
         params: {
-          screen: 'YouTube', // Target the YouTube tab in HomeTabs
+          screen: 'IDT',
         },
       },
     });
@@ -118,6 +126,10 @@ const MentorMenteeDrawer = () => {
       setDrawerVisible(false);
       setActiveMentee(null);
       setActiveMentor(null);
+
+      // Ticks and progress belong to one mentee's assignments; anyone else's
+      // list must not inherit them.
+      useAssignmentStatusStore.getState().clear();
 
       if (isYou) {
         setSelectedName('You');
@@ -136,6 +148,10 @@ const MentorMenteeDrawer = () => {
         // === mentee-specific logic ===
         setActiveMentee(item);
 
+        // Not awaited: the drawer closes immediately and the rows fill in
+        // their ticks when the answer arrives.
+        loadMenteeAssignmentStatus(userInfo?.id, item.id);
+
         // Async category creation
         (async () => {
           try {
@@ -147,7 +163,6 @@ const MentorMenteeDrawer = () => {
           }
         })();
       } else if (userType === 'mentor') {
-        navigateToHome();
         navigateToHome();
         setActiveMentor(item);
 
@@ -163,7 +178,7 @@ const MentorMenteeDrawer = () => {
         })();
       }
     },
-    [setActiveMentee, setSelectedCategory],
+    [setActiveMentee, setSelectedCategory, userInfo?.id],
   );
 
   const MentorList = useCallback(
@@ -215,15 +230,23 @@ const MentorMenteeDrawer = () => {
           setSearchText('');
           setDrawerVisible(true);
         }}>
-        <Ionicons
-          name="people-outline"
-          size={20}
-          color="#000"
-          style={styles.buttonIcon}
-        />
-        <Text style={styles.buttonText} numberOfLines={1}>
-          {getDisplayName(selectedName)}
-        </Text>
+        {activeUser ? (
+          <>
+            <View style={styles.buttonIcon}>
+              <UserAvatar user={activeUser} size={24} />
+            </View>
+            <Text style={styles.buttonText} numberOfLines={1}>
+              {getDisplayName(selectedName)}
+            </Text>
+          </>
+        ) : (
+          <Ionicons
+            name="people-outline"
+            size={20}
+            color="#000"
+            style={styles.buttonIcon}
+          />
+        )}
         <Ionicons name="chevron-down" size={16} color="#000" />
       </TouchableOpacity>
 
@@ -252,12 +275,13 @@ const MentorMenteeDrawer = () => {
                 onPress={() => selectAndClose(null, true)}
                 accessibilityLabel="Select You"
                 accessibilityRole="button">
-                <Ionicons
-                  name="person-circle-outline"
-                  size={24}
-                  color={selectedId === 'you' ? '#fff' : '#333'}
-                  style={styles.youIcon}
-                />
+                {/* Your own face belongs here, where it sits alongside the
+                    mentors and mentees as one more thing to pick. It was only
+                    a duplicate out on the trigger button, which shows whoever
+                    is currently selected next to the account button. */}
+                <View style={styles.youIcon}>
+                  <UserAvatar user={userInfo} size={28} />
+                </View>
                 <Text
                   style={[
                     styles.youText,
@@ -324,7 +348,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     flexShrink: 1,
-    minWidth: 80,
+    minWidth: 0,
     maxWidth: 140,
     height: 44,
     borderWidth: 1,

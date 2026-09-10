@@ -13,6 +13,12 @@ import {useAppState} from '../contexts/AppStateContext';
 import { useSelectionStore } from '../stores/useSelectionStore';
 import { useShallow } from 'zustand/react/shallow';
 
+// Exported so anything building selection entries by hand — AssignScreen's
+// Select all — derives the id the same way this list does. A mismatch here
+// would be invisible in the bar at the bottom and wrong in the list: the
+// entries would exist, but isSelected would match none of the rows.
+export const getUserId = item => item.id?.toString() ?? item.email;
+
 export default UserList = ({
   users = [],
   refreshing,
@@ -36,7 +42,6 @@ const {selectedItems, setSelectedCategory} = useSelectionStore(
     setSelectedCategory: state.setSelectedCategory,
   })),
 );
-  const getUserId = item => item.id?.toString() ?? item.email;
 
   const isSelected = id => {
     // console.log(selectedUsers);
@@ -166,19 +171,25 @@ const styles = StyleSheet.create({
   selectionHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 10,
-    paddingVertical: 5,
-
+    // Matches the rows' paddingHorizontal below. Without it "Cancel" and the
+    // count sat hard against the screen edges while every row was inset 15,
+    // so the header read as belonging to something else.
+    paddingHorizontal: 15,
+    paddingVertical: 10,
+    marginBottom: 6,
+    alignItems: 'center',
     borderBottomWidth: 1,
-    borderColor: '#ccc',
+    borderColor: '#e5e7eb',
   },
   cancel: {
     color: '#007AFF',
-    fontWeight: 'bold',
+    fontSize: 15,
+    fontWeight: '600',
   },
   count: {
-    color: '#333',
-    fontWeight: 'bold',
+    color: '#111827',
+    fontSize: 15,
+    fontWeight: '600',
   },
   row: {
     flexDirection: 'row',

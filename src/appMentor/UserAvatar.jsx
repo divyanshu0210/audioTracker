@@ -46,6 +46,9 @@ const UserAvatar = ({user, size = 40}) => {
   // Image renders nothing on failure.
   const [failed, setFailed] = useState(false);
 
+  // Two shapes reach this: rows from our backend (full_name/photo_url) and
+  // the Google sign-in payload for the signed-in user (name/photo). Accepting
+  // both here keeps every caller from having to reshape one into the other.
   const uri = user?.photo_url || user?.photo || null;
   const box = {width: size, height: size, borderRadius: size / 2};
 
@@ -59,12 +62,13 @@ const UserAvatar = ({user, size = 40}) => {
     );
   }
 
-  const key = user?.email || user?.id?.toString() || user?.full_name || '';
+  const key =
+    user?.email || user?.id?.toString() || user?.full_name || user?.name || '';
 
   return (
     <View style={[styles.fallback, box, {backgroundColor: colorFor(key)}]}>
       <Text style={[styles.initials, {fontSize: size * 0.4}]}>
-        {initialsOf(user?.full_name, user?.email)}
+        {initialsOf(user?.full_name || user?.name, user?.email)}
       </Text>
     </View>
   );

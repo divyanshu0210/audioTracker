@@ -4,6 +4,7 @@ import RNFS from 'react-native-fs';
 import {useShallow} from 'zustand/react/shallow';
 import {DownloadProgressIndicator} from '../components/buttons/DownloadProgressIndicator';
 import BaseMenu from '../components/menu/BaseMenu';
+import {AssignmentSubtitle} from '../appMentor/AssignmentStatusStrip';
 import {ItemTypes} from '../contexts/constants';
 import {useAppState} from '../contexts/AppStateContext';
 import {DownloadedBadge, getFileIcon} from '../contexts/fileIconHelper';
@@ -90,6 +91,8 @@ const DriveItem = ({item, screen}) => {
           numberOfLines={1} >
           {item.title ? item.title : 'Google Drive Folder'}
         </Text>
+
+        <AssignmentSubtitle sourceId={item.source_id} isContainer={isFolder} />
 
         {!isFolder && item?.source && (
           <Text style={styles.meta} numberOfLines={1}>

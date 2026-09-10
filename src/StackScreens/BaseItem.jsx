@@ -2,6 +2,8 @@ import {StyleSheet, View, Pressable, Alert, ToastAndroid} from 'react-native';
 import React, {useCallback, useMemo, useRef} from 'react';
 import {isAudioOrVideo} from '../Linking/utils/handleLinkSubmit';
 import {enqueueDriveDownload} from '../components/buttons/Download';
+import AssignmentStatusStrip from '../appMentor/AssignmentStatusStrip';
+import useAssignmentStatusStore from '../appMentor/useAssignmentStatusStore';
 import YouTubeItem from './YouTubeItem';
 import DeviceItem from './DeviceItem';
 import DriveItem from './DriveItem';
@@ -360,6 +362,20 @@ const BaseItem = ({
     });
   }, [item, toggleSelection, isIskconFolder]);
 
+  // Only ever populated while a mentor has a mentee selected, and keyed on the
+  // same id the assignment was created with — so for every other list, and for
+  // any row that was never assigned, this is undefined and the row below is
+  // exactly what it always was.
+  const assignment = useAssignmentStatusStore(
+    state => state.byVideoId[String(sourceId)],
+  );
+
+  // A playlist or a folder is a container, not something with a runtime, so
+  // there is no progress to plot along its foot.
+  const isContainer =
+    item?.type === 'youtube_playlist' ||
+    item?.mimeType === 'application/vnd.google-apps.folder';
+
   const renderItem = () => {
     // itemComponent wins when a list supplies its own row visual — the rest
     // of this component (press dispatch, selection, menu) is unchanged, so
@@ -392,7 +408,12 @@ const BaseItem = ({
     [ItemTypes.DEVICE]: {
       Component: DeviceItem,
       onPress: handleDevicePress,
-      showMenu: item => !!item.file_path,
+      // A copy in Drive counts as much as bytes on disk. Gating on file_path
+      // alone made sense when a pathless device file was simply broken, but an
+      // assigned one arrives that way by design — the row exists so the mentee
+      // can fetch it — and the menu is where Download and Delete live. Hiding
+      // it left the row with a tap and nothing else.
+      showMenu: item => !!item.file_path || !!item.drive_file_id,
     },
     // Same arrangement as DRIVE below: the type's own row visual renders its
     // own BaseMenu — IskconItem has to, because it swaps that menu for a
@@ -434,13 +455,25 @@ const BaseItem = ({
       delayLongPress={400}
       activeOpacity={0.5}
       android_ripple={{color: '#eee'}}
-      style={[styles.wrapper, selected && styles.selected]}>
+      style={[
+        styles.wrapper,
+        selected && styles.selected,
+        // Only when the bar is actually there, so no other list gains height.
+        assignment && !isContainer && styles.rowWithStatusBar,
+      ]}>
+      {/* Wrapped in a column only when there is something to add underneath.
+          The wrapper is a row, and every row visual is built for being its
+          direct child — leaving that untouched in the ordinary case keeps this
+          out of the layout of every list in the app. */}
       {renderItem()}
       <View style={styles.menuWrapper}>
         {renderBaseMenu() && (
           <BaseMenu item={item} type={type} screen={screen} />
         )}
       </View>
+      {/* Absolutely positioned along the row's foot, so it adds no height and
+          the row keeps the layout every list already expects. */}
+      {!isContainer && <AssignmentStatusStrip assignment={assignment} />}
     </Pressable>
   );
 };
@@ -463,5 +496,11 @@ const styles = StyleSheet.create({
   },
   selected: {
     backgroundColor: '#d6e8ff',
+  },
+  // The bar is absolute at the row's foot, so it would otherwise sit hard
+  // against the content above it. Extra bottom padding is what opens the gap:
+  // a margin on the bar itself does nothing when it is anchored to bottom: 0.
+  rowWithStatusBar: {
+    paddingBottom: 12,
   },
 });

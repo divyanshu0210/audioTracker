@@ -234,12 +234,15 @@ export const getCategoryData = (categoryId, types) => {
           selectFields = `
             t.*,
             youtube_meta.channel_title,
-            youtube_meta.thumbnail
+            youtube_meta.thumbnail,
+            shared_drive_copies.drive_file_id
           `;
 
           extraJoins = `
             LEFT JOIN youtube_meta
               ON youtube_meta.item_id = t.id
+            LEFT JOIN shared_drive_copies
+              ON shared_drive_copies.item_id = t.id
           `;
         }
 

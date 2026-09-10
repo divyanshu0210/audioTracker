@@ -33,6 +33,7 @@ import RNFS from 'react-native-fs';
 
 import {DownloadedBadge, getFileIcon} from '../contexts/fileIconHelper';
 import BaseMenu from '../components/menu/BaseMenu';
+import {AssignmentSubtitle} from '../appMentor/AssignmentStatusStrip';
 import {DownloadProgressIndicator} from '../components/buttons/DownloadProgressIndicator';
 import {ItemTypes} from '../contexts/constants';
 import {useMediaStore} from '../stores/useMediaStore';
@@ -132,6 +133,8 @@ const IskconItem = ({item: entry, screen}) => {
         <Text style={styles.title} numberOfLines={2}>
           {entry.title}
         </Text>
+
+        <AssignmentSubtitle sourceId={entry.source_id} />
         {breadcrumb && (
           <Text style={styles.breadcrumb} numberOfLines={1}>
             {breadcrumb}

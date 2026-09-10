@@ -2,6 +2,7 @@ import React from 'react';
 import {Image, StyleSheet, Text, View} from 'react-native';
 import PlaylistThumbnail from '../components/PlaylistThumbnail';
 import {ItemTypes} from '../contexts/constants';
+import {AssignmentSubtitle} from '../appMentor/AssignmentStatusStrip';
 
 export default function YouTubeItem({item}) {
   const isPlaylist = item.type === 'youtube_playlist';
@@ -22,6 +23,7 @@ export default function YouTubeItem({item}) {
         <Text style={styles.title} numberOfLines={2}>
           {item.title}
         </Text>
+
         {(item.channel_title ?? item.channelTitle) && (
           <>
             <Text style={styles.channelText}>
@@ -32,6 +34,8 @@ export default function YouTubeItem({item}) {
             )}
           </>
         )}
+
+        <AssignmentSubtitle sourceId={item.source_id} isContainer={isPlaylist} />
       </View>
       {/* <BaseMenu item={item} screen={screenType} type={ItemTypes.YOUTUBE}/> */}
     </View>

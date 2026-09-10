@@ -84,6 +84,7 @@ const MentorMenteeDrawer = () => {
     isLoading,
     drawerVisible,
     setDrawerVisible,
+    setActiveCategoryId,
   } = useMentorMenteeStore();
   const setSelectedCategory = useSelectionStore(
     state => state.setSelectedCategory,
@@ -177,6 +178,7 @@ const MentorMenteeDrawer = () => {
         setSelectedId('you');
         setActiveMentee(null);
         setSelectedCategory(null);
+        setActiveCategoryId(null);
         return;
       }
 
@@ -199,6 +201,7 @@ const MentorMenteeDrawer = () => {
             const menteeKey = `[MENTEE_CAT_Filter] ${item.full_name} (${item.email}) [MENTEE_CAT_Filter]`;
             const categoryId = await addCategory(menteeKey, defaultColor);
             setSelectedCategory(categoryId);
+            setActiveCategoryId(categoryId);
           } catch (error) {
             console.error('Error adding mentee category:', error);
           }
@@ -219,15 +222,15 @@ const MentorMenteeDrawer = () => {
           try {
             const mentorKey = `${item.full_name} (${item.email})`;
             const categoryId = await addCategory(mentorKey, defaultColor);
-            console.log('selectedCat', categoryId);
             setSelectedCategory(categoryId);
+            setActiveCategoryId(categoryId);
           } catch (error) {
             console.error('Error adding mentor category:', error);
           }
         })();
       }
     },
-    [setActiveMentee, setSelectedCategory, userInfo?.id],
+    [setActiveMentee, setSelectedCategory, setActiveCategoryId, userInfo?.id],
   );
 
   const MentorList = useCallback(

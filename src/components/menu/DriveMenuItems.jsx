@@ -11,8 +11,9 @@ import { useShallow } from 'zustand/react/shallow';
 import { navigationRef } from '../../handlers/navigationRef';
 import useDownloadStore from '../../stores/useDownloadStore';
 import {enqueueDriveDownload} from '../buttons/Download';
+import useInMenteeCategory from '../../appMentor/useInMenteeCategory';
 import {
-  offerSharedCopyDownload,
+  downloadSharedCopy,
   removeSharedCopy,
 } from '../../share/shareDeviceFile';
 
@@ -55,6 +56,11 @@ const {
   // everything else — and the row keeps its menu instead of swapping it for a
   // button.
   const isDriveFile = !isFolder && !isDevice;
+
+  // Hidden while a mentor is inside a mentee's category: there Delete looks
+  // like "unassign" and instead removes the item from the mentor's own
+  // library. See useInMenteeCategory.
+  const inMenteeCategory = useInMenteeCategory();
 
   // The path outlives the file: Android can reclaim the app's files directory
   // and a file manager can delete out of it, so this asks the filesystem
@@ -231,7 +237,13 @@ const {
         <MenuItem
           onPress={() => {
             hideMenu();
-            offerSharedCopyDownload(item);
+            // Straight to the download, no confirmation. That alert exists
+            // for a *tap on the row* that could not play — it explains why and
+            // offers the fetch. Reaching this entry is already the decision,
+            // and the alert's "File not on this device" no longer fits either:
+            // the file plays now, streamed from the same Drive copy this
+            // downloads.
+            downloadSharedCopy(item);
           }}>
           <Text style={styles.menuItemText}>Download</Text>
         </MenuItem>
@@ -251,7 +263,11 @@ const {
           so with nothing downloaded there is nothing for it to do. It used to
           be unreachable in that state anyway — the row showed a download
           button instead of this menu. */}
-      {!(isDriveFile && !downloaded && screen === 'in') && (
+      {/* screen === 'out' as well: inside a Drive folder this entry reads
+          "Remove Download", which is useful and not misleading, and the
+          category filter does not apply there anyway. */}
+      {!(inMenteeCategory && screen === 'out') &&
+        !(isDriveFile && !downloaded && screen === 'in') && (
         <MenuItem
           onPress={() => {
             hideMenu();

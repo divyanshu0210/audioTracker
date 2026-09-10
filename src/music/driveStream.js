@@ -67,8 +67,23 @@ const isOffline = async () => {
  * file_path empty, which is what makes the player show MediaUnavailable with
  * its download offer instead of a stream that cannot load.
  */
+/**
+ * The Drive file id a row's bytes can be streamed from, or null.
+ *
+ * A drive_file is its own address. A device_file is not — it is bytes on
+ * someone's phone — but once a copy has been uploaded to Drive it has an id
+ * like any other, and that copy is exactly what an assignment or a shared note
+ * hands over. Streaming it needs nothing the row does not already carry.
+ */
+const streamableDriveId = item => {
+  if (item?.type === 'drive_file') return item.source_id ?? null;
+  if (item?.type === 'device_file') return item.drive_file_id ?? null;
+  return null;
+};
+
 export const resolveDrivePlaybackPath = async item => {
-  if (!item || item.type !== 'drive_file' || !item.source_id) {
+  const driveId = streamableDriveId(item);
+  if (!driveId) {
     return item?.file_path ?? null;
   }
 
@@ -85,7 +100,7 @@ export const resolveDrivePlaybackPath = async item => {
   if (await isOffline()) return null;
 
   try {
-    return await getDriveStreamUrl(item.source_id);
+    return await getDriveStreamUrl(driveId);
   } catch (error) {
     console.error('Could not start the Drive stream proxy:', error);
     return null;

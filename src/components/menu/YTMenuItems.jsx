@@ -3,10 +3,15 @@ import {Alert, StyleSheet, Text, View} from 'react-native';
 import {MenuDivider, MenuItem} from 'react-native-material-menu';
 import {useAppState} from '../../contexts/AppStateContext';
 import {deleteYTItemFromDB, softDeleteItem} from '../../database/D';
+import useInMenteeCategory from '../../appMentor/useInMenteeCategory';
 import { useShallow } from 'zustand/react/shallow';
 import { useMediaStore } from '../../stores/useMediaStore';
 
 const YTMenuItems = ({item, screen, hideMenu}) => {
+  // Hidden while a mentor is inside a mentee's category: there Delete looks
+  // like "unassign" and instead removes the item from the mentor's own
+  // library. See useInMenteeCategory.
+  const inMenteeCategory = useInMenteeCategory();
   const {setItems, items} = useMediaStore(
   useShallow(state => ({
     setItems: state.setItems,
@@ -45,7 +50,11 @@ const YTMenuItems = ({item, screen, hideMenu}) => {
     }
   };
 
-  const renderDelete = () => (
+  // screen === 'out' as well as the category check: the category filter only
+  // applies on the Home tabs, so anywhere else the selected category is just
+  // whatever was left selected and this would hide Delete for no reason.
+  const renderDelete = () =>
+    inMenteeCategory && screen === 'out' ? null : (
     <MenuItem
       onPress={() => {
         hideMenu();

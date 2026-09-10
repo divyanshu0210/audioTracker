@@ -213,10 +213,15 @@ export const fetchYTData = async (
       // out_show is left alone for an assignment: the mentee may already keep
       // this video, and being assigned it is no reason to change that - in
       // either direction. Only the category link below is added.
-      const updatedItem = await updateItemFields(
-        existingItem.id,
-        origin === LinkOrigin.ASSIGNMENT ? {} : {out_show: 1},
-      );
+      //
+      // The existing row is reused rather than asking for an empty update:
+      // updateItemFields resolves to null when handed no fields, which left
+      // updatedItem null and silently skipped the category link below - the
+      // one thing an assignment for an already-held video has to do.
+      const updatedItem =
+        origin === LinkOrigin.ASSIGNMENT
+          ? existingItem
+          : await updateItemFields(existingItem.id, {out_show: 1});
 
       // An assignment does not reorder a list the mentee curated.
       if (origin !== LinkOrigin.ASSIGNMENT) {

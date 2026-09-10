@@ -9,8 +9,15 @@ import {
 } from '../contexts/fileIconHelper';
 import {AssignmentSubtitle} from '../appMentor/AssignmentStatusStrip';
 import {useMediaStore} from '../stores/useMediaStore';
+import useDownloadStore from '../stores/useDownloadStore';
+import {DownloadProgressIndicator} from '../components/buttons/DownloadProgressIndicator';
+import {cancelDownload} from '../backgroundService/backgroundDownloadService';
 
 const DeviceItem = ({item}) => {
+  const download = useDownloadStore(state => state.downloads[item.source_id]);
+  const isDownloading =
+    download?.status === 'queued' || download?.status === 'downloading';
+
   // Joined onto the row by getChildrenByParent. Only device files ever have
   // one — every other type builds its link from its own source_id and needs
   // nothing uploaded — so it is simply absent on the iskcon rows that also
@@ -57,6 +64,17 @@ const DeviceItem = ({item}) => {
 
         <AssignmentSubtitle sourceId={item.source_id} />
       </View>
+
+      {/* The same ring an Iskcon or Drive row shows, in the same place — beside
+          the menu BaseItem renders. A device file fetching its Drive copy is
+          the same transfer through the same queue, and it used to be the only
+          one of the three with nothing on screen while it ran. */}
+      {isDownloading && (
+        <DownloadProgressIndicator
+          progress={download.progress}
+          onCancel={() => cancelDownload(item.source_id)}
+        />
+      )}
     </View>
   );
 };

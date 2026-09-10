@@ -63,7 +63,18 @@ const IskconMenuItems = ({item, hideMenu}) => {
       Alert.alert('Already downloaded', 'File is already saved locally.');
       return;
     }
-    const dbItem = await ensureDbItem(item);
+    // `url` only exists on a scraped browse entry. A row reached through a
+    // category — which is every mentor/mentee view — comes from the items
+    // table, which has no such column, and the download was going out with an
+    // undefined address and failing. Reconstructed from source_id, the same
+    // fallback handleRemove already uses.
+    const url = item.url ?? iskconUrlFromSourceId(item.source_id);
+    if (!url) {
+      Alert.alert('Cannot download', 'This file has no address to fetch from.');
+      return;
+    }
+
+    const dbItem = await ensureDbItem({...item, url});
     if (dbItem.id !== item.id) {
       patchIskconFile(item.source_id, {id: dbItem.id});
     }
@@ -71,7 +82,7 @@ const IskconMenuItems = ({item, hideMenu}) => {
       id: dbItem.id,
       sourceId: item.source_id,
       title: item.title,
-      url: item.url,
+      url,
       localPath,
       type: 'iskcon_file',
       mimeType: 'audio/mpeg',

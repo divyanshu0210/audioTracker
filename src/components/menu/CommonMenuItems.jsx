@@ -11,6 +11,7 @@ import { useMediaStore } from '../../stores/useMediaStore';
 import { useNotesStore } from '../../stores/useNotesStore';
 import { navigationRef } from '../../handlers/navigationRef';
 import { ScreenTypes } from '../../contexts/constants';
+import useMentorMenteeStore from '../../appMentor/useMentorMenteeStore';
 
 
 export const filterAndSet = (type, id) => {
@@ -55,6 +56,10 @@ const {
     setCategoryModalBulkItems(null);
     setAddToCategoryModalVisible(true);
   };
+
+  const activeCategoryId = useMentorMenteeStore(
+    state => state.activeCategoryId,
+  );
 
   const confirmRemove = () => {
     Alert.alert(
@@ -145,7 +150,17 @@ const {
           from it there acts on a category the user isn't looking at.
           ScreenTypes.MAIN is what every Home tab passes, explicitly or by
           BaseMediaListComponent's default. */}
-      {selectedCategory && screen === ScreenTypes.MAIN && showRemove && (
+      {/* And not inside a mentor's or mentee's category, where membership is
+          not the user's to edit. It mirrors what was assigned: on the mentor's
+          side removing an item does not unassign it, so the list would just
+          stop agreeing with what the mentee actually has. On the mentee's side
+          it is worse - assigned items are deliberately kept out of the ordinary
+          tabs, so this category is the only place they appear, and the sync
+          will not put a delivered one back. Removing it there loses it. */}
+      {selectedCategory &&
+        selectedCategory !== activeCategoryId &&
+        screen === ScreenTypes.MAIN &&
+        showRemove && (
         <>
           <MenuDivider />
           <MenuItem onPress={hideMenu}>

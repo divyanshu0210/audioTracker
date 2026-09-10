@@ -161,17 +161,35 @@ const BaseItem = ({
     const present = validDeviceFiles.some(
       f => f.source_id === item.source_id,
     );
+    const playable = isAudioOrVideo(item.mimeType);
+
     if (!present) {
-      // One alert for both cases — it decides for itself whether there is a
-      // Drive copy to offer, and either way it can clear the row from the list.
+      // A Drive copy is an address like any other, so this plays straight from
+      // it rather than insisting on a download first — the same streaming path
+      // a drive_file takes. Downloading is still offered from the row's menu
+      // for anyone who wants it offline.
+      if (playable && item.drive_file_id) {
+        navigationRef.navigate('BacePlayer', {item});
+        return;
+      }
+      // No copy to stream, or not something this app plays. One alert for both
+      // cases — it decides for itself whether there is a Drive copy to offer,
+      // and either way it can clear the row from the list.
       offerSharedCopyDownload(item);
       return;
     }
 
-    if (item.file_path && isAudioOrVideo(item.mimeType)) {
+    if (item.file_path && playable) {
       const startingIndex = validDeviceFiles.findIndex(
         f => f.source_id === item.source_id,
       );
+      // validDeviceFiles holds only files with bytes on disk, so a row can be
+      // absent from it and still be playable — start the player on the item
+      // itself rather than at index -1, which plays nothing.
+      if (startingIndex < 0) {
+        navigationRef.navigate('BacePlayer', {item});
+        return;
+      }
       navigationRef.navigate('BacePlayer', {
         items: validDeviceFiles,
         currentIndex: startingIndex,

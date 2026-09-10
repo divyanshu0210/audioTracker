@@ -28,21 +28,33 @@ export const fetchNotification = async () => {
   await handleAssignmentNotifications(data);
 };
 
+// No AppState guard.
+//
+// This runs from the background FCM handler too, and refusing to act there was
+// what left a new mentorship invisible: the approval arrives while the app is
+// in the background, the pipeline fetches the notification, sees the
+// 'approved' entry - and then did nothing with it. HomeScreen's mount effect
+// could not recover it either, because the screen never unmounted, so the list
+// stayed stale until the process was killed.
+//
+// Backgrounded-but-alive runs in the same JS context, so these store writes
+// land on the live store and the drawer is right the moment the user returns.
+// If the process was killed the headless context is thrown away instead, which
+// costs nothing: relaunching mounts HomeScreen, which fetches both of these
+// anyway.
 const handleAssignmentNotifications = async notifications => {
-  if (AppState.currentState === 'active') {
-    const {setNewAssignmentsFlag} = useNotificationStore.getState();
-    const notifArray = Array.isArray(notifications)
-      ? notifications
-      : [notifications];
+  const {setNewAssignmentsFlag} = useNotificationStore.getState();
+  const notifArray = Array.isArray(notifications)
+    ? notifications
+    : [notifications];
 
-    const hasAssignment = notifArray.some(n => n?.type === 'assignment');
-    if (hasAssignment) {
-      setNewAssignmentsFlag(true);
-    }
-    const hasNewConnections = notifArray.some(n => n?.type === 'approved');
-    if (hasNewConnections) {
-      await fetchNewConnections();
-    }
+  const hasAssignment = notifArray.some(n => n?.type === 'assignment');
+  if (hasAssignment) {
+    setNewAssignmentsFlag(true);
+  }
+  const hasNewConnections = notifArray.some(n => n?.type === 'approved');
+  if (hasNewConnections) {
+    await fetchNewConnections();
   }
 };
 

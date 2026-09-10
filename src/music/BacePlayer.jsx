@@ -129,7 +129,12 @@ const BacePlayer = () => {
   const [isResolvingSource, setIsResolvingSource] = useState(false);
   const currentSourceId = currentItem?.source_id;
   useEffect(() => {
-    if (!currentItem || currentItem.type !== 'drive_file') {
+    // device_file too: one with a Drive copy streams from that copy, so it no
+    // longer has to be downloaded before it will play.
+    const streamable =
+      currentItem?.type === 'drive_file' ||
+      (currentItem?.type === 'device_file' && !!currentItem?.drive_file_id);
+    if (!streamable) {
       setIsResolvingSource(false);
       return;
     }

@@ -27,9 +27,11 @@ import {
   View,
 } from 'react-native';
 import Ionicons from 'react-native-vector-icons/Ionicons';
+import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
 
 import {saveItemToList} from '../Linking/saveToList';
 import {useMediaStore} from '../stores/useMediaStore';
+import useIskconPinsStore from '../stores/useIskconPinsStore';
 
 // Which of the store's lists would hold this item once it is added. Reading
 // the list back is how the bar knows it is done: saveItemToList prepends the
@@ -46,6 +48,17 @@ const listFor = (state, type) => {
 
 const SaveToListBar = ({item}) => {
   const [busy, setBusy] = useState(false);
+
+  // An Iskcon file has no list to join - the IDT tab is a live listing of the
+  // site, not a library - so for one of those this bar pins instead. Pinning
+  // is the app's existing way of keeping an Iskcon thing to hand, and it was
+  // offered for folders only; a file heard once and wanted again had nowhere
+  // to be kept.
+  const isIskcon = item?.type === 'iskcon_file';
+  const pinnedFiles = useIskconPinsStore(state => state.pinnedFiles);
+  const togglePinFile = useIskconPinsStore(state => state.togglePinFile);
+  const isPinned =
+    isIskcon && pinnedFiles.some(f => f.source_id === item.source_id);
 
   const inList = useMediaStore(
     useCallback(
@@ -81,6 +94,29 @@ const SaveToListBar = ({item}) => {
   // inside a playlist and a file inside a Drive folder are both stored at
   // out_show 0 by design, and they belong to their container, not loose in the
   // root list.
+  // Never for an Iskcon file. There is no list for one to join: the IDT tab is
+  // a live listing of the site, not a library the user builds, and a row only
+  // exists at all because the file was played or downloaded. It was offering
+  // to add every one of them, and would have added it to `items` — the
+  // YouTube list — because that is what listFor falls through to.
+  // Gone once pinned, exactly as the add bar goes once an item is in the list.
+  // The bar is an offer to keep something, not a toggle - undoing it belongs
+  // with the pinned row itself, on the IDT screen.
+  if (isIskcon) {
+    if (isPinned) return null;
+
+    return (
+      <View style={styles.bar}>
+        <TouchableOpacity
+          style={styles.addButton}
+          onPress={() => togglePinFile(item)}>
+          <MaterialCommunityIcons name="pin-outline" size={18} color="#fff" />
+          <Text style={styles.addButtonText}>Pin</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
   if (!item || item.out_show === 1 || item.parent_id || inList) return null;
 
   return (

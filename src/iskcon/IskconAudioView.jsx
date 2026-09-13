@@ -40,6 +40,7 @@ const IskconAudioView = ({categoryId, onRefresh}) => {
   const loading = useLoadingStore(state => state.loadingStates.iskcon);
 
   const pinnedFolders = useIskconPinsStore(state => state.pinnedFolders);
+  const pinnedFiles = useIskconPinsStore(state => state.pinnedFiles);
   const loadPins = useIskconPinsStore(state => state.loadPins);
 
   useEffect(() => {
@@ -61,22 +62,33 @@ const IskconAudioView = ({categoryId, onRefresh}) => {
       e => !(e.kind === 'folder' && pinnedPaths.has(e.encodedPath)),
     );
 
-    if (!pinnedFolders.length) {
+    // Pinned files sit with the pinned folders rather than in a section of
+    // their own: they are the same act - "keep this where I can reach it" -
+    // and two Pinned headers would be two names for one idea. Folders first,
+    // so the list reads widest-to-narrowest.
+    const pinned = [
+      ...pinnedFolders.map(f => ({
+        kind: 'folder',
+        source_id: f.encodedPath,
+        ...f,
+      })),
+      ...pinnedFiles.map(f => ({
+        kind: 'file',
+        source_id: f.source_id,
+        title: f.title,
+        url: f.url,
+      })),
+    ];
+
+    if (!pinned.length) {
       return rest.length ? [{title: 'All', data: rest}] : [];
     }
 
     return [
-      {
-        title: 'Pinned',
-        data: pinnedFolders.map(f => ({
-          kind: 'folder',
-          source_id: f.encodedPath,
-          ...f,
-        })),
-      },
+      {title: 'Pinned', data: pinned},
       ...(rest.length ? [{title: 'All', data: rest}] : []),
     ];
-  }, [categoryId, entries, pinnedFolders]);
+  }, [categoryId, entries, pinnedFolders, pinnedFiles]);
 
   // With nothing pinned there is only ever the one group, and a lone "All"
   // header says nothing the list doesn't.

@@ -71,9 +71,10 @@ const IskconItem = ({item: entry, screen}) => {
   const isPinned = useIskconPinsStore(state =>
     isFolder
       ? state.pinnedFolders.some(f => f.encodedPath === entry.encodedPath)
-      : false,
+      : state.pinnedFiles.some(f => f.source_id === entry.source_id),
   );
   const togglePin = useIskconPinsStore(state => state.togglePin);
+  const togglePinFile = useIskconPinsStore(state => state.togglePinFile);
 
   // Re-read from the store (not the item prop) so id/file_path stay fresh
   // after a download completes or the menu deletes the file — same pattern
@@ -156,6 +157,20 @@ const IskconItem = ({item: entry, screen}) => {
         </>
       ) : (
         <View style={styles.actionWrapper}>
+          {/* Only once pinned, and so only ever an unpin. Pinning a file is
+              offered from the player, where you have just heard it and know
+              whether you want it again - a pin icon on every browse row would
+              be a third control competing with the menu and the download ring
+              for the same corner. A folder keeps its always-on toggle: there
+              is nowhere else to pin one from. */}
+          {isPinned && (
+            <TouchableOpacity
+              onPress={() => togglePinFile(mergedEntry)}
+              hitSlop={{top: 8, bottom: 8, left: 8, right: 8}}
+              accessibilityLabel={`Unpin ${entry.title}`}>
+              <MaterialCommunityIcons name="pin" size={20} color="#2196F3" />
+            </TouchableOpacity>
+          )}
           {isDownloading && (
             <DownloadProgressIndicator
               progress={download.progress}

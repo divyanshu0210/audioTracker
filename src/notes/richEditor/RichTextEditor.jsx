@@ -13,6 +13,7 @@ import {
   StyleSheet,
   TextInput,
   TouchableOpacity,
+  View,
   Keyboard,
   ToastAndroid,
   SafeAreaView,
@@ -21,7 +22,13 @@ import {
 import {RichEditor} from 'react-native-pell-rich-editor';
 import RichTextToolbar from './RichTextToolbar.jsx';
 import ImageZoomModal from './ImageZoomModal.jsx';
-import {deleteUnusedImages, getImagesForNote, getNoteById} from '../richDB.js';
+import QuadCropperModal from '../imageCrop/QuadCropperModal.jsx';
+import {
+  deleteUnusedImages,
+  getImageById,
+  getImagesForNote,
+  getNoteById,
+} from '../richDB.js';
 import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
 import {seekVideoTo} from '../../music/progressTrackingUtils.js';
 import {generateId, useNoteController} from '../useNoteController.jsx';
@@ -94,10 +101,60 @@ const IMAGE_TAP_JS = `
       e.preventDefault();
       e.stopPropagation();
       window.ReactNativeWebView.postMessage(
-        JSON.stringify({type: 'IMAGE_TAP', data: target.src})
+        JSON.stringify({
+          type: 'IMAGE_TAP',
+          data: target.src,
+          imageId: target.getAttribute('data-image-id') || null
+        })
       );
     }
   }, true);
+})();
+true;
+`;
+
+// pell reports the caret's position from node.offsetTop (see UPDATE_OFFSET_Y in
+// editor.js), and that measurement gives up in exactly the cases that matter
+// here: a text or empty node has no offsetTop, and a legitimate 0 is thrown away
+// by its own falsy check, so no OFFSET_Y is posted and the ScrollView never
+// follows. Measuring the caret's own box instead always yields something. The
+// WebView never scrolls internally — its height tracks its content — so a
+// viewport rect is already an offset into the note.
+const SCROLL_TO_CARET_JS = `
+(function(){
+  var measure = function(){
+    var sel = window.getSelection();
+    if (!sel || !sel.rangeCount || !window.ReactNativeWebView) return;
+    var node = sel.anchorNode;
+    var el = node && (node.nodeType === 1 ? node : node.parentNode);
+    if (!el || !el.getBoundingClientRect) return;
+    window.ReactNativeWebView.postMessage(
+      JSON.stringify({type: 'CARET_Y', data: el.getBoundingClientRect().top})
+    );
+  };
+  // Two frames: one for the insert to lay out, one for the image's reserved box.
+  requestAnimationFrame(function(){ requestAnimationFrame(measure); });
+})();
+true;
+`;
+
+// Turning on edit mode should leave you where you would carry on writing — the
+// end of the note. pell's focusCurrent() instead restores the last selection it
+// saw, which is wherever you were last reading, so the caret has to be placed
+// deliberately.
+const FOCUS_END_JS = `
+(function(){
+  var content = document.getElementById('content');
+  if (!content) return true;
+  content.focus();
+  try {
+    var range = document.createRange();
+    range.selectNodeContents(content);
+    range.collapse(false);
+    var sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+  } catch (e) {}
 })();
 true;
 `;
@@ -152,6 +209,75 @@ function processHtmlContent(html) {
   return {processedHtml, imageIdsInContent: Array.from(imageIdsInContent)};
 }
 
+// One <img> tag, built identically whether the image is being inserted or
+// swapped in by a re-crop. Undo restores whatever string was in the DOM before,
+// so both paths have to agree on the markup exactly.
+function buildImageTag({imageId, src, width, height}) {
+  return `<img
+            src="${src}"
+            style="max-width: 100%; height: auto; display: block;"
+            alt="image"
+            data-image-id="${imageId}"
+            data-image-width="${width || ''}"
+            data-image-height="${height || ''}"
+            ${width && height ? `width="${width}" height="${height}"` : ''}
+          />`;
+}
+
+// Swapping the image through execCommand rather than assigning .src is the
+// whole reason the toolbar's undo can revert a crop: the browser only records
+// edits it performed itself. What gets replaced is the wrapper, not the <img>.
+//
+// The catch is that execCommand's delete step skips anything that isn't
+// editable — so the contenteditable="false" wrapper (and the timestamp button
+// inside it) survives the insert and the note ends up showing both images. The
+// attribute is therefore stripped for the duration, which makes the old block
+// ordinary editable content that delete will take.
+//
+// Nothing puts the attribute back afterwards, and that is deliberate: undo
+// restores the stripped form, and re-marking it non-editable would make redo's
+// delete skip the block again — the same duplicate, one step later. An undone
+// image therefore sits in a plain div until the note is reopened; it still
+// renders, still opens the viewer on tap, and its timestamp still seeks.
+const replaceImageJs = (oldImageId, newImageId, newTagHtml) => `
+(function(){
+  var content = document.getElementById('content');
+  var img = content && content.querySelector('img[data-image-id="${oldImageId}"]');
+  if (!img) return true;
+  var wrap = img.closest('div[contenteditable="false"]') || img;
+  var btn = wrap === img ? null : wrap.querySelector('button');
+  var inner = ${JSON.stringify(newTagHtml)} + (btn ? btn.outerHTML : '');
+  var html = wrap === img
+    ? inner
+    : '<div contenteditable="false" style="' + (wrap.getAttribute('style') || '') + '">'
+      + inner + '</div>';
+
+  var stripped = [wrap].concat([].slice.call(wrap.querySelectorAll('[contenteditable]')));
+  stripped.forEach(function(el){ el.removeAttribute('contenteditable'); });
+
+  content.focus();
+  var range = document.createRange();
+  range.selectNode(wrap);
+  var sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(range);
+  document.execCommand('insertHTML', false, html);
+
+  // If the editor still refused the delete, drop the old block by hand: showing
+  // the image twice is worse than losing undo for this one edit.
+  var forced = false;
+  var stale = content.querySelector('img[data-image-id="${oldImageId}"]');
+  if (stale && !wrap.querySelector('img[data-image-id="${newImageId}"]')) {
+    forced = true;
+    wrap.parentNode && wrap.parentNode.removeChild(wrap);
+  }
+  window.ReactNativeWebView && window.ReactNativeWebView.postMessage(
+    JSON.stringify({type: 'RECROP_SWAP', data: forced ? 'forced' : 'clean'})
+  );
+})();
+true;
+`;
+
 // How long after a programmatic insert (timestamp, screenshot, image) to keep
 // treating editor onChange events as echoes of that insert rather than typing.
 // A window rather than a one-shot flag because a single insert can produce
@@ -186,6 +312,15 @@ const RichTextEditor = forwardRef(
     });
     const richText = useRef(null);
     const scrollRef = useRef(null);
+    // Distance from the top of the scrollable content down to the editor — the
+    // title box, and the loading bar while it is up. The editor measures the
+    // caret from its own top, so this is what turns that into a scroll target.
+    const editorTopRef = useRef(0);
+    // Set when the pencil is tapped, so the focus lands only on that path and a
+    // note that opens editable on its own still leaves the title free to type.
+    const focusOnEditRef = useRef(false);
+    // While set, every content-size change re-pins the view to the end.
+    const stickToEndRef = useRef(false);
     const titleInputRef = useRef(null);
     const editorReadyRef = useRef(false);
     const pendingContentRef = useRef(null);
@@ -217,6 +352,9 @@ const RichTextEditor = forwardRef(
     // Set when an image inside the note is tapped (see IMAGE_TAP_JS) — the
     // tapped <img>'s current src, or null when the zoom viewer is closed.
     const [zoomImageUri, setZoomImageUri] = useState(null);
+    const [zoomImageId, setZoomImageId] = useState(null);
+    // The image being re-cropped from the viewer: {dataUri, imageId}.
+    const [recropTarget, setRecropTarget] = useState(null);
 
     // Keep shadow refs in sync with state/props
     useEffect(() => { noteIdRef.current = noteId; }, [noteId]);
@@ -387,6 +525,20 @@ const RichTextEditor = forwardRef(
 
     // ── Save ──────────────────────────────────────────────────────────────────
 
+    // Only ever call this while the editor is editable: pell answers postHtml
+    // through postAction, which drops the message unless content.contentEditable
+    // is 'true' (see editor.js), so in view mode it can only reject with
+    // 'timeout' 5s later. The catch keeps that from becoming an unhandled
+    // rejection that also skips toggleEditMode's mode switch.
+    const getEditorHtml = useCallback(async () => {
+      try {
+        return await richText.current?.getContentHtml();
+      } catch (error) {
+        console.log('🟠 getContentHtml failed:', error);
+        return latestHtmlContentRef.current;
+      }
+    }, []);
+
     const handleSaveNote = useCallback(async (content, forceSave = false) => {
       const id = noteIdRef.current;
       if (!id) return;
@@ -440,7 +592,8 @@ const RichTextEditor = forwardRef(
         } else {
           // Process the base64 → placeholders ONCE and reuse it for both the DB
           // save and the in-memory list (avoids a second full base64 scan).
-          const {processedHtml} = processHtmlContent(currentContent);
+          const {processedHtml, imageIdsInContent} =
+            processHtmlContent(currentContent);
           const textContent = stripHtml(processedHtml, latestTitleRef.current);
 
           // Persist only if editable and actually changed (same guards as save).
@@ -452,6 +605,14 @@ const RichTextEditor = forwardRef(
               console.error('🔵 save on close failed:', error);
             }
           }
+
+          // Reclaim images the note no longer references — replaced by a crop,
+          // or undone away — here rather than on the next open. This screen is
+          // going away, and with it the undo stack that was the only reason to
+          // keep those bytes. NOT on save: autosave runs 500ms after a crop,
+          // while undo is still live, and nulling the row there would leave an
+          // undone image as a permanent grey placeholder.
+          deleteUnusedImages(id, imageIdsInContent.map(Number));
 
           // Store placeholders in the list, never base64 → keeps list state small.
           updateNoteInState(id, {
@@ -527,15 +688,7 @@ const RichTextEditor = forwardRef(
         let html = `
         <div><br></div>
         <div contenteditable="false" style="position: relative; display: block; max-width: 100%;">
-          <img
-            src="${domSrc}"
-            style="max-width: 100%; height: auto; display: block;"
-            alt="image"
-            data-image-id="${imageId}"
-            data-image-width="${width || ''}"
-            data-image-height="${height || ''}"
-            ${width && height ? `width="${width}" height="${height}"` : ''}
-          />`;
+          ${buildImageTag({imageId, src: domSrc, width, height})}`;
         if (timestamp) {
           html += `
           <button
@@ -553,16 +706,69 @@ const RichTextEditor = forwardRef(
 
         suppressTypingSignal();
         await richText.current?.insertHTML(html);
-        suppressTypingSignal();
-        richText.current?.insertHTML(
-          `<button contenteditable="false" style="background:transparent;border:none;padding:0;font-size:1px;color:transparent;">.</button><div><br></div>`,
-        );
+        // Was: an invisible 1px "." button inserted here purely so pell had a
+        // node with a usable offsetTop to scroll to. It shipped in every note's
+        // HTML and into every export; SCROLL_TO_CARET_JS measures instead.
+        richText.current?.injectJavascript(SCROLL_TO_CARET_JS);
         saveImageInBackground(noteIdRef.current, base64Image, imageId);
       } catch (error) {
         console.error('🔴 handleImagePickerResult error:', error);
         Alert.alert('Error', 'Something went wrong while handling the image.');
       }
     }, [saveImageInBackground, webViewRef, playerRef, suppressTypingSignal]);
+
+    // ── Re-cropping an image already in the note ──────────────────────────────
+
+    // The viewer shows a cache file, and canvas can't read a file:// image back
+    // out (it taints), so the cropper is handed the base64 the DB holds.
+    const handleEditZoomedImage = useCallback(async () => {
+      if (!zoomImageId || !isEditableRef.current) return;
+      try {
+        const dataUri = await getImageById(zoomImageId);
+        if (!dataUri) {
+          Alert.alert('Error', 'Could not load this image for editing.');
+          return;
+        }
+        setZoomImageUri(null);
+        setRecropTarget({dataUri, imageId: zoomImageId});
+      } catch (error) {
+        console.error('🔴 handleEditZoomedImage failed:', error);
+        Alert.alert('Error', 'Could not load this image for editing.');
+      }
+    }, [zoomImageId]);
+
+    // A crop writes a NEW image id and leaves the original row and cache file
+    // untouched: undo puts the old <img> tag back, and that tag's bytes have to
+    // still be there for it to show anything. The orphan is reclaimed when the
+    // note is closed (see handleCloseNote), by which point the undo stack that
+    // needed it is gone too.
+    const handleRecropDone = useCallback(async result => {
+      const target = recropTarget;
+      setRecropTarget(null);
+      if (!target || !result?.data) return;
+      try {
+        const dataUri = `data:${result.mime || 'image/jpeg'};base64,${result.data}`;
+        const newId = generateId();
+        const fileUri = await cacheImageFile(newId, dataUri);
+        const tag = buildImageTag({
+          imageId: newId,
+          src: fileUri || dataUri,
+          width: result.width,
+          height: result.height,
+        });
+
+        suppressTypingSignal();
+        richText.current?.injectJavascript(
+          replaceImageJs(target.imageId, newId, tag),
+        );
+        saveImageInBackground(noteIdRef.current, dataUri, newId);
+        // No explicit save here: an execCommand edit fires input → pell's
+        // onChange → debouncedSaveNote, the same path typing takes.
+      } catch (error) {
+        console.error('🔴 handleRecropDone failed:', error);
+        Alert.alert('Error', 'Could not save the cropped image.');
+      }
+    }, [recropTarget, saveImageInBackground, suppressTypingSignal]);
 
     // ── Timestamps ────────────────────────────────────────────────────────────
 
@@ -601,32 +807,70 @@ const RichTextEditor = forwardRef(
       showPlayerMinimized();
     }, [source_type, webViewRef, showPlayerMinimized]);
 
+    useEffect(() => {
+      if (!isEditable || !focusOnEditRef.current) return;
+      focusOnEditRef.current = false;
+      richText.current?.focusContentEditor();
+      richText.current?.injectJavascript(FOCUS_END_JS);
+
+      // Turning on edit mode relays out three times over: the toolbar mounts,
+      // the gutter appears, the keyboard resizes the window. Scrolling once per
+      // change is what you see as jumping. Staying pinned to the end through all
+      // of them means the note is simply already at the bottom when the editor
+      // appears — there is no movement left to watch.
+      stickToEndRef.current = true;
+      scrollRef.current?.scrollToEnd({animated: false});
+      const sub = Keyboard.addListener('keyboardDidShow', () => {
+        scrollRef.current?.scrollToEnd({animated: false});
+        stickToEndRef.current = false;
+        sub.remove();
+      });
+      return () => {
+        stickToEndRef.current = false;
+        sub.remove();
+      };
+    }, [isEditable]);
+
+    const handleCursorPosition = useCallback(scrollY => {
+      scrollRef.current?.scrollTo({
+        y: editorTopRef.current + scrollY - 30,
+        animated: true,
+      });
+    }, []);
+
     const handleMessage = useCallback(message => {
       const type = message.type;
       if (typeof type === 'string' && type.startsWith('TIMESTAMP_')) {
         seekToTimestamp(parseFloat(type.replace('TIMESTAMP_', '')));
+      } else if (type === 'CARET_Y') {
+        handleCursorPosition(message.data);
+      } else if (type === 'RECROP_SWAP') {
+        // 'forced' means execCommand left the old block behind and it had to be
+        // removed by hand — undo won't revert that crop.
+        console.log('🟠 re-crop swap:', message.data);
       } else if (type === 'IMAGE_TAP') {
         setZoomImageUri(message.data);
+        setZoomImageId(message.imageId || null);
       }
-    }, [seekToTimestamp]);
+    }, [seekToTimestamp, handleCursorPosition]);
 
     // ── Edit mode ─────────────────────────────────────────────────────────────
 
     const toggleEditMode = useCallback(async () => {
       if (!isEditableRef.current) {
-        richText.current?.focusContentEditor();
+        // Focusing here would be undone a moment later: flipping `disabled`
+        // makes pell run setDisable, which calls blur() before it turns
+        // contentEditable back on (editor.js). So ask for the focus and let the
+        // effect below apply it once the editor is actually editable.
+        focusOnEditRef.current = true;
       } else {
-        const currentContent = await richText.current?.getContentHtml();
+        const currentContent = await getEditorHtml();
         latestHtmlContentRef.current = currentContent;
         handleSaveNote(currentContent);
         Keyboard.dismiss();
       }
       setIsEditable(prev => !prev);
-    }, [handleSaveNote]);
-
-    const handleCursorPosition = useCallback(scrollY => {
-      scrollRef.current?.scrollTo({y: scrollY - 30, animated: true});
-    }, []);
+    }, [handleSaveNote, getEditorHtml]);
 
     // ── RichEditor onChange ───────────────────────────────────────────────────
 
@@ -699,6 +943,14 @@ const RichTextEditor = forwardRef(
           removeClippedSubviews={true}
           keyboardDismissMode="none"
           nestedScrollEnabled={true}
+          onContentSizeChange={() => {
+            if (stickToEndRef.current) {
+              scrollRef.current?.scrollToEnd({animated: false});
+            }
+          }}
+          onScrollBeginDrag={() => {
+            stickToEndRef.current = false;
+          }}
           scrollEventThrottle={20}
           maximumZoomScale={3}
           minimumZoomScale={1}
@@ -712,6 +964,13 @@ const RichTextEditor = forwardRef(
             ]}
             placeholder="Title"
             placeholderTextColor="#888"
+            // The editor reports the caret from its own top; scrollTo counts
+            // from the top of the ScrollView. The title is what sits between
+            // them, so its bottom edge is the offset between the two.
+            onLayout={e => {
+              const {y, height} = e.nativeEvent.layout;
+              editorTopRef.current = y + height;
+            }}
             value={title}
             editable={isEditable}
             onChangeText={handleTitleChange}
@@ -763,7 +1022,20 @@ const RichTextEditor = forwardRef(
         <ImageZoomModal
           visible={!!zoomImageUri}
           uri={zoomImageUri}
-          onClose={() => setZoomImageUri(null)}
+          onCrop={isEditable && zoomImageId ? handleEditZoomedImage : undefined}
+          onClose={() => {
+            setZoomImageUri(null);
+            setZoomImageId(null);
+          }}
+        />
+
+        <QuadCropperModal
+          visible={!!recropTarget}
+          image={recropTarget}
+          index={0}
+          total={1}
+          onDone={handleRecropDone}
+          onCancel={() => setRecropTarget(null)}
         />
       </SafeAreaView>
     );
@@ -777,21 +1049,6 @@ const styles = StyleSheet.create({
   scrollContent: {
     flexGrow: 1,
     backgroundColor: '#fff',
-  },
-  titleInput: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    paddingBottom: 10,
-    borderBottomWidth: 2,
-    borderBottomColor: '#eee',
-    color: '#000',
-  },
-  titleInputFocused: {
-    borderBottomColor: '#007AFF',
-    borderBottomWidth: 2,
-  },
-  titleMargin: {
-    marginBottom: 10,
   },
   richEditor: {
     flex: 1,

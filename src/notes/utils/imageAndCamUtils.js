@@ -80,7 +80,9 @@ const requestStoragePermission = async () => {
 //     });
 //   });
 // };
-// Open Camera with Cropping
+// Open Camera. Cropping is deliberately off here: the picker's own cropper is
+// rectangle-only, and the shot goes through QuadCropperModal instead, which can
+// take any four-sided selection.
 export const openCamera = async () => {
   const hasPermission = await requestCameraPermission();
   if (!hasPermission) {
@@ -90,11 +92,12 @@ export const openCamera = async () => {
 
   try {
     const image = await ImagePicker.openCamera({
-      // width: 3000,
-      // height: 4000,
-      cropping: true,
-      cropperCircleOverlay: false,
-      compressImageQuality: 0.7,
+      cropping: false,
+      compressImageQuality: 0.8,
+      // Matches the cropper's own working cap, so a 12MP shot doesn't cross
+      // the bridge as several MB of base64 only to be scaled down anyway.
+      compressImageMaxWidth: 2600,
+      compressImageMaxHeight: 2600,
       mediaType: 'photo',
       includeBase64: true,
     });
@@ -142,7 +145,8 @@ export const openCamera = async () => {
 //     });
 //   });
 // };
-// Pick Image from Gallery with Cropping
+// Pick Images from Gallery. Same as above - the images come back untouched and
+// are cropped afterwards in QuadCropperModal.
 export const pickImage = async () => {
   const hasPermission = await requestStoragePermission();
   if (!hasPermission) {
@@ -152,11 +156,12 @@ export const pickImage = async () => {
 
   try {
     const images = await ImagePicker.openPicker({
-      // width: 800,
-      // height: 800,
-      cropping: true,
-      cropperCircleOverlay: false,
-      compressImageQuality: 0.7,
+      cropping: false,
+      compressImageQuality: 0.8,
+      // Matches the cropper's own working cap, so a 12MP shot doesn't cross
+      // the bridge as several MB of base64 only to be scaled down anyway.
+      compressImageMaxWidth: 2600,
+      compressImageMaxHeight: 2600,
       mediaType: 'photo',
       multiple: true,
       maxFiles: 10,

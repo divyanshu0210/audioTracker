@@ -5,6 +5,7 @@ import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityI
 import Feather from 'react-native-vector-icons/Feather';
 import {actions, RichToolbar} from 'react-native-pell-rich-editor';
 import {openCamera, pickImage} from '../utils/imageAndCamUtils';
+import QuadCropperModal from '../imageCrop/QuadCropperModal';
 import {getCurrentVideoTime} from '../../music/progressTrackingUtils';
 
 const HIGHLIGHT_COLORS = [
@@ -108,26 +109,54 @@ const RichTextToolbar = ({
     }
   }, []);
 
+  // Picked images queue up here and are cropped one at a time; only what comes
+  // back out of the cropper reaches the editor.
+  const [cropItems, setCropItems] = useState([]);
+  const [cropIndex, setCropIndex] = useState(0);
+  const cropTarget = cropItems[cropIndex] || null;
+
+  const advanceCrop = useCallback(() => {
+    const next = cropIndex + 1;
+    if (next >= cropItems.length) {
+      setCropItems([]);
+      setCropIndex(0);
+    } else {
+      setCropIndex(next);
+    }
+  }, [cropIndex, cropItems.length]);
+
+  const startCropping = useCallback(images => {
+    const list = (Array.isArray(images) ? images : [images]).filter(Boolean);
+    if (!list.length) return;
+    setCropIndex(0);
+    setCropItems(list);
+  }, []);
+
+  const handleCropDone = useCallback(
+    result => {
+      advanceCrop();
+      handleImagePickerResult(result);
+    },
+    [advanceCrop, handleImagePickerResult],
+  );
+
   const handleCamera = useCallback(async () => {
     try {
       const image = await openCamera();
-      if (image) handleImagePickerResult(image);
+      if (image) startCropping(image);
     } catch (error) {
       console.error('Error opening camera:', error);
     }
-  }, [handleImagePickerResult]);
+  }, [startCropping]);
 
   const handleImage = useCallback(async () => {
     try {
       const images = await pickImage();
-      if (images) {
-        console.log('Captured Image:', images);
-        for (const image of images) handleImagePickerResult(image);
-      }
+      if (images) startCropping(images);
     } catch (error) {
       console.error('Error opening photo:', error);
     }
-  }, [handleImagePickerResult]);
+  }, [startCropping]);
 
   const handleCategoryPress = useCallback(categoryId => {
     if (categoryId === 'highlight') {
@@ -328,6 +357,15 @@ const RichTextToolbar = ({
           style={styles.mainToolbar}
         />
       </View>
+
+      <QuadCropperModal
+        visible={!!cropTarget}
+        image={cropTarget}
+        index={cropIndex}
+        total={cropItems.length}
+        onDone={handleCropDone}
+        onCancel={advanceCrop}
+      />
     </>
   );
 };

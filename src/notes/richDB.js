@@ -153,6 +153,24 @@ export const purgeNoteRow = noteRowId => {
   });
 };
 
+export const getImageById = imageId => {
+  const fastdb = getDb();
+  return new Promise((resolve, reject) => {
+    fastdb.transaction(tx => {
+      tx.executeSql(
+        'SELECT image_data FROM images WHERE id = ? AND deleted_at IS NULL;',
+        [imageId],
+        (_, { rows: { _array } }) => resolve(_array?.[0]?.image_data || null),
+        (_, error) => {
+          console.error('Error fetching image:', error);
+          reject(error);
+          return false;
+        }
+      );
+    });
+  });
+};
+
 export const getImagesForNote = noteRowId => {
   const fastdb = getDb();
   return new Promise((resolve, reject) => {

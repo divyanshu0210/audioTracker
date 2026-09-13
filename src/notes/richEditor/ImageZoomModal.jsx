@@ -6,7 +6,7 @@
 // file:// URI, since note images are cached locally.
 
 import React, {useEffect} from 'react';
-import {Modal, StyleSheet, TouchableOpacity, View} from 'react-native';
+import {Modal, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
 import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
 import Animated, {
   useAnimatedStyle,
@@ -22,7 +22,7 @@ import {
 const MIN_SCALE = 1;
 const MAX_SCALE = 4;
 
-const ImageZoomModal = ({visible, uri, onClose}) => {
+const ImageZoomModal = ({visible, uri, onClose, onCrop}) => {
   const scale = useSharedValue(1);
   const savedScale = useSharedValue(1);
   const translateX = useSharedValue(0);
@@ -96,6 +96,18 @@ const ImageZoomModal = ({visible, uri, onClose}) => {
             <MaterialIcons name="close" size={28} color="#fff" />
           </TouchableOpacity>
 
+          {/* Only for images the note owns — re-cropping needs the id that ties
+              the picture to its row. */}
+          {!!onCrop && (
+            <TouchableOpacity
+              style={styles.cropButton}
+              onPress={onCrop}
+              hitSlop={{top: 12, bottom: 12, left: 12, right: 12}}>
+              <MaterialIcons name="crop" size={24} color="#fff" />
+              <Text style={styles.cropLabel}>Crop</Text>
+            </TouchableOpacity>
+          )}
+
           {uri && (
             <GestureDetector gesture={composedGesture}>
               <Animated.Image
@@ -128,6 +140,19 @@ const styles = StyleSheet.create({
     zIndex: 10,
     padding: 8,
   },
+  cropButton: {
+    position: 'absolute',
+    bottom: 36,
+    alignSelf: 'center',
+    zIndex: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.14)',
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    borderRadius: 24,
+  },
+  cropLabel: {color: '#fff', fontSize: 15, fontWeight: '600', marginLeft: 8},
   image: {
     width: '100%',
     height: '100%',

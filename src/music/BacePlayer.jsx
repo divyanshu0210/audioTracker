@@ -61,7 +61,7 @@ const PROGRESS_CHECKPOINT_SECONDS = 120;
 const TYPING_RESUME_DELAY_MS = 700;
 
 const NoteSection = React.memo(
-  ({editorRef, source_type, playerRef, captureVLCScreenshot, showPlayerMinimized, isHidden, onTypingActivity}) => {
+  ({editorRef, source_type, playerRef, captureVLCScreenshot, showPlayerMinimized, isHidden, onTypingActivity, onImageOverlayChange}) => {
     const activeNoteId = useNotesStore(state => state.activeNoteId);
 
     // playerRef.current is still null while this renders — the player mounts
@@ -100,6 +100,7 @@ const NoteSection = React.memo(
           webViewRef={source_type === 'youtube_video' ? playerWebViewRef : null}
           isHidden={isHidden}
           onTypingActivity={onTypingActivity}
+          onImageOverlayChange={onImageOverlayChange}
         />
       </View>
     );
@@ -194,6 +195,8 @@ const BacePlayer = () => {
 
   // Refs
   const captureRef = useRef(null);
+  // Whether the pause currently in effect is ours (see handleImageOverlayChange).
+  const pausedByOverlayRef = useRef(false);
   const startFrom = useRef(null);
   const notesSectionRef = useRef(null);
   const tracker = useRef(null);
@@ -645,6 +648,29 @@ const BacePlayer = () => {
    *
    * Stable by design — see autoPauseOnTypingRef.
    */
+  /**
+   * Called when a full-screen image overlay opens or closes in the note — the
+   * zoom viewer, and the cropper it leads into.
+   *
+   * Same bargain as typing: the video is behind a modal nobody can see, so it
+   * shouldn't run on. Ownership is tracked the same way too — a video already
+   * paused when the overlay opens was paused by the user (or by their typing),
+   * and is left alone in both directions.
+   */
+  const handleImageOverlayChange = useCallback(open => {
+    if (!autoPauseOnTypingRef.current) return;
+    if (!playerRef.current) return;
+
+    if (open) {
+      if (isPausedRef.current) return;
+      playerRef.current.togglePlayPause();
+      pausedByOverlayRef.current = true;
+    } else if (pausedByOverlayRef.current) {
+      pausedByOverlayRef.current = false;
+      if (isPausedRef.current) playerRef.current.togglePlayPause();
+    }
+  }, []);
+
   const handleTypingActivity = useCallback(() => {
     if (!autoPauseOnTypingRef.current) return;
     if (!playerRef.current) return;
@@ -1072,6 +1098,7 @@ const BacePlayer = () => {
               showPlayerMinimized={showPlayerMinimized}
               isHidden={isHidden}
               onTypingActivity={handleTypingActivity}
+              onImageOverlayChange={handleImageOverlayChange}
             />
           )}
 

@@ -299,6 +299,7 @@ const RichTextEditor = forwardRef(
       showPlayerMinimized,
       playerRef,
       onTypingActivity,
+      onImageOverlayChange,
     },
     ref,
   ) => {
@@ -830,6 +831,13 @@ const RichTextEditor = forwardRef(
         sub.remove();
       };
     }, [isEditable]);
+
+    // The zoom viewer and the cropper both cover the player completely; tell
+    // the host so the media can pause for as long as one of them is up.
+    const imageOverlayOpen = !!zoomImageUri || !!recropTarget;
+    useEffect(() => {
+      onImageOverlayChange?.(imageOverlayOpen);
+    }, [imageOverlayOpen, onImageOverlayChange]);
 
     const handleCursorPosition = useCallback(scrollY => {
       scrollRef.current?.scrollTo({

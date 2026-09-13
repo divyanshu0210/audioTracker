@@ -8,6 +8,20 @@ export const startTrackingTime = webViewRef => {
             const video = document.querySelector('video');
             if (!video) return;
 
+            // Play state, polled for the same reason ended is (see below): the
+            // play/pause listeners further down are bound to whichever <video>
+            // existed at injection, and YouTube recreating that element leaves
+            // them attached to a corpse — pauses get reported, the resume never
+            // does, and the app is left believing playback is still stopped.
+            // Re-querying each tick always sees the live element. Same {state}
+            // message the listeners send, so nothing downstream changes.
+            if (video.lastPausedSent !== video.paused) {
+              video.lastPausedSent = video.paused;
+              window.ReactNativeWebView.postMessage(JSON.stringify({
+                state: video.paused ? "PAUSED" : "PLAYING"
+              }));
+            }
+
             if (!video.paused || video.lastSentTime !== video.currentTime) {
               // Send time if playing or if currentTime has changed (seeking)
               window.ReactNativeWebView.postMessage(JSON.stringify({

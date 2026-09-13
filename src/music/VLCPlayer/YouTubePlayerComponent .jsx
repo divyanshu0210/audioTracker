@@ -197,6 +197,14 @@ const YouTubePlayerComponent = forwardRef(
                 console.log(`Valid range: 0 to ${data.max} seconds`);
               }
               break;
+            // A pause we asked for is still a pause the rest of the app has to
+            // know about: without this, auto-pause while typing left the host
+            // believing playback was still running, so its own resume was
+            // skipped as unnecessary. Reports the state read back after the
+            // toggle, not the state we assumed.
+            case 'TOGGLE_SUCCESS':
+              onIsPausedChange(!data.isPlaying);
+              break;
             default:
               console.log('Unknown seek status:', data.status);
           }

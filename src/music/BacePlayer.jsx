@@ -1,5 +1,5 @@
 import { useRoute} from '@react-navigation/native';
-import React, {useCallback, useEffect, useRef, useState} from 'react';
+import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
   ActivityIndicator,
   Animated,
@@ -63,6 +63,25 @@ const TYPING_RESUME_DELAY_MS = 700;
 const NoteSection = React.memo(
   ({editorRef, source_type, playerRef, captureVLCScreenshot, showPlayerMinimized, isHidden, onTypingActivity}) => {
     const activeNoteId = useNotesStore(state => state.activeNoteId);
+
+    // playerRef.current is still null while this renders — the player mounts
+    // after — and React.memo means this may never render again, so resolving
+    // the player's pieces here freezes them as null: timestamps seek nothing
+    // and the screenshot button has no handler, until some unrelated prop
+    // change happens to re-render this. Hand down accessors that read the ref
+    // at the moment they are used instead.
+    const playerWebViewRef = useMemo(
+      () => ({
+        get current() {
+          return playerRef.current?.webViewRef?.current || null;
+        },
+      }),
+      [playerRef],
+    );
+    const captureYouTubeScreenshot = useCallback(
+      () => playerRef.current?.captureScreenshot?.(),
+      [playerRef],
+    );
     console.log('🔄 NoteSection RENDERING', new Date().toISOString());
     return (
       <View style={{flex: 1, marginTop: isHidden ? 5 : 50}}>
@@ -72,13 +91,13 @@ const NoteSection = React.memo(
           key={activeNoteId || 'new-note'}
           captureScreenshot={
             source_type === 'youtube_video'
-              ? playerRef.current?.captureScreenshot
+              ? captureYouTubeScreenshot
               : captureVLCScreenshot
           }
           showPlayerMinimized={showPlayerMinimized}
           playerRef={playerRef}
           source_type={source_type}
-          webViewRef={source_type === 'youtube_video' ? playerRef.current?.webViewRef : null}
+          webViewRef={source_type === 'youtube_video' ? playerWebViewRef : null}
           isHidden={isHidden}
           onTypingActivity={onTypingActivity}
         />

@@ -49,8 +49,28 @@ export const resetDatabase = async () => {
 };
 
 // Initialize the database (create table if it doesn't exist)
-export const initDatabase = async () => {
-  const fastdb = getDb();
+//
+// Resolves when the schema is on disk, not when the statements have been
+// queued. It used to be the second one - the transaction was fired and the
+// async function returned - so `await initDatabase()` was over before the
+// first CREATE had run, and every read behind that await was racing the table
+// it needed. dbStore waits on this before it publishes the db, so awaiting it
+// is the whole guarantee that `db` means a database with tables in it.
+//
+// Takes the db rather than reading the store, because the one case that
+// matters is the one where the store has not been given it yet.
+//
+// Never rejects. A statement nobody handled aborts the batch, and whatever did
+// get created is what the app has to work with - not being able to sign in at
+// all is the worse end of that trade.
+export const initDatabase = (db = null) => {
+  const fastdb = db || getDb();
+
+  let schemaDone;
+  const ready = new Promise(resolve => {
+    schemaDone = resolve;
+  });
+
   fastdb.transaction(tx => {
     tx.executeSql('PRAGMA database_list;', [], (_, result) => {
       const dbPath = result.rows.item(0).file;
@@ -346,6 +366,7 @@ export const initDatabase = async () => {
           watchTimePerDay INTEGER NOT NULL DEFAULT 0, -- Total watch time in seconds per day
           newWatchTimePerDay INTEGER NOT NULL DEFAULT 0, -- Total new watch time in seconds per day
           unfltrdWatchTimePerDay INTEGER NOT NULL DEFAULT 0, -- Total infltrd watch time in seconds per day
+          clockIntervals TEXT NOT NULL DEFAULT '[]',
           UNIQUE(videoId, date) -- ✅ Ensures uniqueness for ON CONFLICT to work
       );`,
       [],
@@ -434,5 +455,12 @@ export const initDatabase = async () => {
       () => console.log('category_items updated_at trigger created successfully'),
       error => console.error('Error creating category_items updated_at trigger:', error),
     );
-  });
+  },
+  error => {
+    console.error('Error initializing database:', error);
+    schemaDone();
+  },
+  schemaDone);
+
+  return ready;
 };

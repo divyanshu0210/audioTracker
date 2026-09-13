@@ -356,6 +356,7 @@ export const saveWatchProgress = async (
   todayNewWatchTime,
   lastWatchTime,
   unfltrdWatchTime,
+  clockIntervals = [],
 ) => {
   const fastdb = getDb();
   // Use UTC date for consistency across time zones
@@ -363,15 +364,16 @@ export const saveWatchProgress = async (
 
   fastdb.transaction(tx => {
     tx.executeSql(
-      `INSERT INTO video_watch_history (videoId, watchedIntervals,todayIntervals, date, watchTimePerDay,newWatchTimePerDay,lastWatchTime,unfltrdWatchTimePerDay)
-         VALUES (?, ?, ?, ?,?,?,?,?)
+      `INSERT INTO video_watch_history (videoId, watchedIntervals,todayIntervals, date, watchTimePerDay,newWatchTimePerDay,lastWatchTime,unfltrdWatchTimePerDay,clockIntervals)
+         VALUES (?, ?, ?, ?,?,?,?,?,?)
          ON CONFLICT(videoId, date) DO UPDATE SET
           watchedIntervals = excluded.watchedIntervals,
           todayIntervals = excluded.todayIntervals,
           watchTimePerDay = excluded.watchTimePerDay,
           newWatchTimePerDay = excluded.newWatchTimePerDay,
           lastWatchTime = excluded.lastWatchTime,
-          unfltrdWatchTimePerDay = excluded.unfltrdWatchTimePerDay`,
+          unfltrdWatchTimePerDay = excluded.unfltrdWatchTimePerDay,
+          clockIntervals = excluded.clockIntervals`,
       [
         videoId,
         JSON.stringify(mergedIntervals || []),
@@ -381,6 +383,7 @@ export const saveWatchProgress = async (
         todayNewWatchTime,
         lastWatchTime,
         unfltrdWatchTime,
+        JSON.stringify(clockIntervals || []),
       ],
       () => {
         console.log(`Watch progress saved for ${videoId} on ${todayDate}`);

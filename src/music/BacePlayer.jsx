@@ -388,6 +388,7 @@ const BacePlayer = () => {
             data.lastWatchTime,
             data.unfltrdWatchTimePerDay,
             currentItem.duration,
+            data.clockIntervals,
           )
         : new VideoTracker(videoId);
 

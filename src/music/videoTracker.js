@@ -2,8 +2,17 @@ import { saveWatchProgress } from "../database/C";
 import { updateWatchTimestampIfExists } from "../database/U";
 
 class VideoTracker {
-    constructor(videoId, watchTimes,intervals = [],allIntervals=[],lastWatchTime,unfltrdWatchTime =0,duration) {
+    constructor(videoId, watchTimes,intervals = [],allIntervals=[],lastWatchTime,unfltrdWatchTime =0,duration,clockIntervals=[]) {
         this.currentStart = null;
+        // When, by the clock, rather than where in the video.
+        //
+        // intervals/allIntervals are positions inside the media - "seconds 120
+        // to 300 of this lecture" - which says nothing about whether that
+        // happened at breakfast or at midnight. These are wall-clock epoch ms
+        // for the same sessions, and they are what the time-of-day view reads.
+        this.clockIntervals = clockIntervals || [];
+        this.sessionClockIntervals = [];
+        this.currentClockStart = null;
         this.videoId = videoId;
         this.watchTimes = watchTimes || []; // Ensure watchTimes is always an array
         this.intervals = intervals || []; // Ensure intervals is always an array
@@ -23,6 +32,7 @@ class VideoTracker {
 
     onPlay(currTime) {
         this.currentStart = currTime;
+        this.currentClockStart = Date.now();
         console.log('start',this.currentStart)
     }
 
@@ -32,6 +42,11 @@ class VideoTracker {
             let duration = currTime - this.currentStart;
             if (duration >= 10) {
                 this.sessionIntervals.push([this.currentStart, currTime]);
+                // Recorded against the same 10s bar as the media interval, so
+                // the two can never disagree about whether a session counted.
+                if (this.currentClockStart !== null) {
+                    this.sessionClockIntervals.push([this.currentClockStart, Date.now()]);
+                }
                 console.log('new interval',this.sessionIntervals)
                 // this.intervals.push([this.currentStart, currTime]);
                 // console.log('new interval',this.intervals)
@@ -39,6 +54,7 @@ class VideoTracker {
                 this.lastWatchTime = currTime; // Store the last time user paused
             }
             this.currentStart = null; // Reset start time
+            this.currentClockStart = null;
             
         }
     }
@@ -106,6 +122,13 @@ class VideoTracker {
         this.intervals = [...this.intervals, ...this.sessionIntervals];
         this.sessionIntervals = []; // clear after merging
 
+        // Appended, never merged: two sessions an hour apart are two facts
+        // about the day, and collapsing them would lose exactly what this is
+        // for. Ordered by start so a reader can walk them.
+        this.clockIntervals = [...this.clockIntervals, ...this.sessionClockIntervals]
+            .sort((a, b) => a[0] - b[0]);
+        this.sessionClockIntervals = [];
+
         const mergedTodayIntervals = this.mergeOverlappingIntervals(this.intervals);
         this.intervals = mergedTodayIntervals;
         console.log('Merged Today Intervals:', mergedTodayIntervals); 
@@ -128,7 +151,7 @@ class VideoTracker {
         try {
 
             console.log('Saving initiated by VTracker for VideoId : ',this.videoId);
-            await saveWatchProgress(this.videoId, mergedAllIntervals,mergedTodayIntervals,todayTotalWatchTime, todayNewWatchTime, Math.floor(this.lastWatchTime), this.unfltrdWatchTime);
+            await saveWatchProgress(this.videoId, mergedAllIntervals,mergedTodayIntervals,todayTotalWatchTime, todayNewWatchTime, Math.floor(this.lastWatchTime), this.unfltrdWatchTime, this.clockIntervals);
             console.log('Watch progress saved successfully.');
         } catch (error) {
             console.error('Error saving watch progress:', error);

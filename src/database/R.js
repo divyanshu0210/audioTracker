@@ -1,6 +1,7 @@
 import {ITEM_TYPES_THAT_USE_ITEMS_TABLE} from '../contexts/constants';
 import {SHARED_NOTES_CATEGORY} from '../categories/catDB';
 import {getDb} from './database';
+import {buildHourlyMap, lastNDays} from '../report/utils/hourlyMap';
 
 // drive_file_id rides along the same way channel_title and thumbnail do: the
 // id of a device file's shared copy on Drive, or null. Joining it here rather
@@ -459,7 +460,7 @@ export const fetchLatestWatchData = async videoId => {
 
     fastdb.transaction(tx => {
       tx.executeSql(
-        `SELECT watchedIntervals, todayIntervals, date, lastWatchTime,unfltrdWatchTimePerDay
+        `SELECT watchedIntervals, todayIntervals, date, lastWatchTime,unfltrdWatchTimePerDay,clockIntervals
          FROM video_watch_history 
          WHERE videoId = ? 
          ORDER BY date DESC 
@@ -492,6 +493,13 @@ export const fetchLatestWatchData = async videoId => {
                   todayIntervals:
                     latestDate === today
                       ? JSON.parse(latestEntry.todayIntervals)
+                      : [],
+                  // Today's only. A session at 9pm yesterday says nothing
+                  // about today's row, and carrying it forward would write
+                  // yesterday's clock times onto today's date.
+                  clockIntervals:
+                    latestDate === today
+                      ? JSON.parse(latestEntry.clockIntervals || '[]')
                       : [],
                   latestDate,
                   lastWatchTime: latestEntry.lastWatchTime,
@@ -852,3 +860,48 @@ function mergeTimeIntervals(intervals) {
 
   return merged;
 }
+
+/**
+ * The user's own clock intervals for the last `days` days, bucketed by hour.
+ *
+ * The bucketing itself lives in report/hourlyMap so the mentee view, which
+ * gets the same rows from the API, cannot drift from this one.
+ */
+export const getHourlyWatchMap = async (dates = lastNDays(7)) => {
+  const fastdb = getDb();
+
+  if (!dates?.length) return [];
+
+  // A day either side of the range asked for. `date` is a UTC day while the
+  // buckets are local, so the edges of a local day can sit under a
+  // neighbouring UTC date and a tight filter would drop them. The instants
+  // decide placement, so a surplus row costs nothing.
+  const sorted = [...dates].sort();
+  const shift = (key, days) => {
+    const date = new Date(`${key}T00:00:00`);
+    date.setDate(date.getDate() + days);
+    return date.toISOString().split('T')[0];
+  };
+
+  return new Promise((resolve, reject) => {
+    fastdb.transaction(tx => {
+      tx.executeSql(
+        `SELECT date, clockIntervals FROM video_watch_history
+         WHERE date >= ? AND date <= ?`,
+        [shift(sorted[0], -1), shift(sorted[sorted.length - 1], 1)],
+        (_, {rows}) => {
+          const records = [];
+          for (let i = 0; i < rows.length; i++) {
+            records.push(rows.item(i));
+          }
+          resolve(buildHourlyMap(records, dates));
+        },
+        (_, error) => {
+          console.error('Error building the hourly watch map:', error);
+          reject(error);
+          return false;
+        },
+      );
+    });
+  });
+};

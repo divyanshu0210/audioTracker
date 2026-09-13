@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import {BASE_URL} from '../appMentorBackend/userMgt';
 import {fetchLatestWatchDataAllFields} from '../database/R';
 import axios from 'axios';
+import {buildHourlyMap, lastNDays} from '../report/utils/hourlyMap';
 
 export async function uploadVideoReport(data) {
   try {
@@ -151,6 +152,7 @@ function prepareVideoReportPayload(videoItem, watchData, userId) {
     user: userId,
     watchedIntervals: parseJsonArray(watchData.watchedIntervals),
     todayIntervals: parseJsonArray(watchData.todayIntervals),
+    clockIntervals: parseJsonArray(watchData.clockIntervals),
     date: watchData.date,
     lastWatchedAt: new Date(watchData.lastWatchedAt).toISOString(),
     lastWatchTime: parseFloat(watchData.lastWatchTime || 0),
@@ -164,3 +166,52 @@ function prepareVideoReportPayload(videoItem, watchData, userId) {
     report: reportPayload,
   };
 }
+
+/**
+ * A mentee's hourly watch map, for the mentor's copy of the heat grid.
+ *
+ * The server returns the raw intervals rather than hour buckets: they are
+ * absolute instants, and turning them into hours of the day needs a timezone
+ * the server does not have. buildHourlyMap - the same function the local map
+ * uses - does that against this device's clock.
+ */
+export const fetchHourlyWatchMapFromBackend = async (
+  mentorId,
+  menteeId,
+  dates = lastNDays(7),
+) => {
+  if (!mentorId || !menteeId || !dates?.length) return [];
+  const sorted = [...dates].sort();
+  try {
+    const response = await axios.get(`${BASE_URL}/report/hourly-watch-map/`, {
+      params: {
+        mentor_id: mentorId,
+        userId: menteeId,
+        from: sorted[0],
+        to: sorted[sorted.length - 1],
+      },
+    });
+    return buildHourlyMap(response.data?.records ?? [], dates);
+  } catch (error) {
+    // A mentee the server has no sessions for comes back as a 500 rather than
+    // an empty list, and that is not a failure to show the mentor - it is the
+    // answer. An empty week, built the same way the local path builds one for
+    // a device with nothing recorded, so the grid says "nothing here" instead
+    // of vanishing.
+    //
+    // The cost of reading it that way is that a real server fault in this
+    // range looks identical, which is why it still says so in the log.
+    if (error.response?.status === 500) {
+      console.log('No hourly watch data for this mentee yet - empty grid');
+      return buildHourlyMap([], dates);
+    }
+
+    // Anything else - offline, a bad range, auth - is genuinely not knowing.
+    // No rows means no grid, which is the honest thing to draw.
+    console.error(
+      'Error fetching the hourly watch map:',
+      error.response?.data || error.message,
+    );
+    return [];
+  }
+};

@@ -46,9 +46,9 @@ import {wasExternalLaunch} from '../handlers/navigationIntent';
 // wants it.
 const RECENT_COUNT = 5;
 
-// Never rejects: it is started without anyone awaiting it, and a first launch
-// can hit it before the history table exists. An empty shelf and a failed read
-// mean the same thing here - nothing to carry on with, so no sheet.
+// Never rejects: it is started without anyone awaiting it. An empty shelf and
+// a failed read mean the same thing here - nothing to carry on with, so no
+// sheet.
 const loadRecent = () =>
   getRecentlyWatchedVideos().catch(error => {
     console.error('Could not load what to continue watching:', error);
@@ -79,6 +79,11 @@ const ContinueWatchingSheet = forwardRef((props, ref) => {
   // So it still reads the moment the db exists, into a promise nobody is
   // waiting on yet. By the time HomeScreen asks, the answer is already there
   // and expand is a setState.
+  //
+  // Reading that early is only safe because dbStore holds the db back until
+  // its tables are made (initDb), which it did not always do - this read went
+  // out into an open but empty file and lost the shelf for that launch to
+  // `no such table: video_watch_history`.
   const db = useDbStore(state => state.db);
   const recentPromiseRef = useRef(null);
 

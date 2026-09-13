@@ -18,7 +18,6 @@ import useSettingsStore from '../Settings/settingsStore';
 import {syncUserToBackend} from '../appMentorBackend/userMgt';
 import {useAppState} from '../contexts/AppStateContext';
 import {initUserDatabase} from '../database/UserDatabaseInstance';
-import {initDatabase} from '../database/database';
 import useDbStore from '../database/dbStore';
 import {setupFCM} from '../appNotification/appFCMNotification/fcmNotificationService';
 import {getOrCreateDefaultNotebookId} from '../database/C';
@@ -115,8 +114,9 @@ const GoogleLoginScreen = ({navigation}) => {
     await AsyncStorage.setItem('userId', userInfo.user.id);
     await useBackupStore.getState().setNativePreference('userId', userInfo.user.id);
     try {
-      initDb(userInfo.user.id);
-      await initDatabase();
+      // Awaited: initDb builds the schema before it hands the db over, and
+      // everything below this line reads from it.
+      await initDb(userInfo.user.id);
       await initUserDatabase(userInfo.user.id);
 
       setUserInfo(userInfo.user);

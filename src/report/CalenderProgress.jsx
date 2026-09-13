@@ -8,10 +8,12 @@ import {
 } from 'react-native';
 import {Calendar} from 'react-native-calendars';
 import {generateWatchData} from './utils/ProgressDataCollector';
-import {getSumOfWatchTimesByDate} from '../database/R';
+import {getHourlyWatchMap, getSumOfWatchTimesByDate} from '../database/R';
+import {lastNDays} from './utils/hourlyMap';
 import {useFocusEffect, useIsFocused} from '@react-navigation/native';
 import {SafeAreaView} from 'react-native-safe-area-context';
 import WatchTimeChart from './WatchTimeChart';
+import WatchTimeHeatGrid from './WatchTimeHeatGrid';
 import {ScrollView} from 'react-native-gesture-handler';
 import StreakInfo from './StreakInfo';
 import useSettingsStore from '../Settings/settingsStore';
@@ -21,9 +23,11 @@ import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
 import WeeklyReportCard from './WeeklyReportCard';
 import useMentorMenteeStore from '../appMentor/useMentorMenteeStore';
 import {
+  fetchHourlyWatchMapFromBackend,
   getMonthlyWatchTimefromBackend,
   getWatchTimefromBackend,
 } from '../appMentorBackend/reportMgt';
+import {useAppState} from '../contexts/AppStateContext';
 import { navigationRef } from '../handlers/navigationRef';
 import {useMenteeRefresh} from '../appMentor/useMenteeStatusRefresh';
 
@@ -76,6 +80,27 @@ const CalendarProgress = () => {
   const prevTargetNewWatchTime = useRef(settings.TARGET_NEW_WATCH_TIME);
   const {activeMentee: mentee} = useMentorMenteeStore();
   const ownerKey = mentee?.id ?? 'self';
+  const {userInfo} = useAppState();
+
+  // Whichever week the bar chart is showing, so swiping it moves both. Falls
+  // back to the last seven days until the chart has reported a week.
+  const refreshHourlyMap = useCallback(() => {
+    const dates = currentWeek?.length ? currentWeek : lastNDays(7);
+    const load = mentee
+      ? fetchHourlyWatchMapFromBackend(userInfo?.id, mentee.id, dates)
+      : getHourlyWatchMap(dates);
+
+    load.then(setHourlyMap).catch(error => {
+      console.error('Could not build the hourly watch map:', error);
+    });
+  }, [currentWeek, mentee, userInfo?.id]);
+
+  // Rebuilt whenever the week changes, and on focus - coming back from the
+  // player is exactly when a session has just been recorded.
+  useEffect(() => {
+    refreshHourlyMap();
+  }, [refreshHourlyMap]);
+  const [hourlyMap, setHourlyMap] = useState([]);
 
   useEffect(() => {
     if (
@@ -117,6 +142,7 @@ const CalendarProgress = () => {
       if (isViewingThisMonth) {
         fetchWatchDataForToday();
       }
+      refreshHourlyMap();
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [isViewingThisMonth, mentee?.id]),
   );
@@ -467,6 +493,8 @@ const CalendarProgress = () => {
               newTarget={settings.TARGET_NEW_WATCH_TIME}
               onWeekChange={onWeekChange}
             />
+
+            <WatchTimeHeatGrid data={hourlyMap} mentee={mentee} />
 
             {currentWeek && !mentee && (
               <WeeklyReportCard currentWeek={currentWeek} />

@@ -1,6 +1,7 @@
 // stores/dbStore.js
 import {create} from 'zustand';
 import SQLite from 'react-native-sqlite-2';
+import {initDatabase} from './database';
 
 const useDbStore = create((set, get) => ({
   db: null,
@@ -32,6 +33,13 @@ const useDbStore = create((set, get) => ({
       error =>
         console.error(`Error opening database for user ${userId}:`, error),
     );
+
+    // The schema before the handle, so that `db` in this store never means a
+    // file with no tables in it. An open database and a usable one are ~800ms
+    // apart on a fresh install, and anything that reads the moment the handle
+    // appears - ContinueWatchingSheet does - spent that gap compiling against
+    // an empty file and failing with `no such table`.
+    await initDatabase(db);
 
     set({db, currentUserId: userId});
     return db;

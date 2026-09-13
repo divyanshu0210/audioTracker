@@ -25,7 +25,8 @@ const {
 );
 
 const {userInfo} = useAppState();
-  const {activeMentee, activeMentor} = useMentorMenteeStore();
+  const activeMentee = useMentorMenteeStore(state => state.activeMentee);
+  const activeMentor = useMentorMenteeStore(state => state.activeMentor);
   const isActive = activeMentee || activeMentor;
 
   return (

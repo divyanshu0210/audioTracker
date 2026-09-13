@@ -35,7 +35,16 @@ export default UserList = ({
     setUserSelectionMode,
     activeMentee,
     activeMentor,
-  } = useMentorMenteeStore();
+  } = useMentorMenteeStore(
+    useShallow(state => ({
+      selectedUsers: state.selectedUsers,
+      setSelectedUsers: state.setSelectedUsers,
+      userSelectionMode: state.userSelectionMode,
+      setUserSelectionMode: state.setUserSelectionMode,
+      activeMentee: state.activeMentee,
+      activeMentor: state.activeMentor,
+    })),
+  );
 
 const unreadByMentor = useAssignmentInboxStore(state => state.unreadByMentor);
 

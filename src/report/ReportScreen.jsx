@@ -8,7 +8,8 @@ import useMentorMenteeStore from '../appMentor/useMentorMenteeStore';
 const ReportScreen = () => {
   // const {params} = useRoute();
   // const mentee = params?.mentee;
-  const {activeMentee: mentee,activeMentor} = useMentorMenteeStore();
+  const mentee = useMentorMenteeStore(state => state.activeMentee);
+  const activeMentor = useMentorMenteeStore(state => state.activeMentor);
     // If mentor is active, mentees can't see mentor's report
   if (activeMentor) {
     return (

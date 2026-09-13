@@ -78,7 +78,7 @@ const CalendarProgress = () => {
   }, [settings]);
 
   const prevTargetNewWatchTime = useRef(settings.TARGET_NEW_WATCH_TIME);
-  const {activeMentee: mentee} = useMentorMenteeStore();
+  const mentee = useMentorMenteeStore(state => state.activeMentee);
   const ownerKey = mentee?.id ?? 'self';
   const {userInfo} = useAppState();
 

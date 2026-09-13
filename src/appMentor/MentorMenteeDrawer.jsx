@@ -22,6 +22,7 @@ import useAssignmentStatusStore from './useAssignmentStatusStore';
 import UserAvatar from './UserAvatar';
 import useAssignmentInboxStore from './useAssignmentInboxStore';
 import useSettingsStore from '../Settings/settingsStore';
+import {useShallow} from 'zustand/react/shallow';
 import {
   loadMenteeAssignmentStatus,
   markAssignmentsSeen,
@@ -85,7 +86,20 @@ const MentorMenteeDrawer = () => {
     drawerVisible,
     setDrawerVisible,
     setActiveCategoryId,
-  } = useMentorMenteeStore();
+  } = useMentorMenteeStore(
+    useShallow(state => ({
+      mentors: state.mentors,
+      mentees: state.mentees,
+      setActiveMentee: state.setActiveMentee,
+      setActiveMentor: state.setActiveMentor,
+      activeMentor: state.activeMentor,
+      activeMentee: state.activeMentee,
+      isLoading: state.isLoading,
+      drawerVisible: state.drawerVisible,
+      setDrawerVisible: state.setDrawerVisible,
+      setActiveCategoryId: state.setActiveCategoryId,
+    })),
+  );
   const setSelectedCategory = useSelectionStore(
     state => state.setSelectedCategory,
   );

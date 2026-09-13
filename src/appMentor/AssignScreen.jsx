@@ -35,7 +35,14 @@ const {selectedItems, setSelectedItems, setSelectionMode} =
 
 const {userInfo} = useAppState();
   const {mentees, selectedUsers, setSelectedUsers, setUserSelectionMode} =
-    useMentorMenteeStore();
+    useMentorMenteeStore(
+      useShallow(state => ({
+        mentees: state.mentees,
+        selectedUsers: state.selectedUsers,
+        setSelectedUsers: state.setSelectedUsers,
+        setUserSelectionMode: state.setUserSelectionMode,
+      })),
+    );
 
   useFocusEffect(
     useCallback(() => {

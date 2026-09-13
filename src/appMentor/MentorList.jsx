@@ -4,7 +4,8 @@ import useMentorMenteeStore from './useMentorMenteeStore';
 import UserList from './UserList';
 
 const MentorList = ({refreshing, onRefresh}) => {
-  const {mentors, isLoading} = useMentorMenteeStore();
+  const mentors = useMentorMenteeStore(state => state.mentors);
+  const isLoading = useMentorMenteeStore(state => state.isLoading);
 
   return (
     <UserList

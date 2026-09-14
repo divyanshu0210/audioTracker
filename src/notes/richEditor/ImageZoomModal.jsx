@@ -5,9 +5,10 @@
 // whatever the tapped <img> element's current `src` is — usually a local
 // file:// URI, since note images are cached locally.
 
-import React, {useEffect} from 'react';
+import React, {useCallback, useEffect} from 'react';
 import {Modal, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
 import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
+import Share from 'react-native-share';
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
@@ -42,6 +43,23 @@ const ImageZoomModal = ({visible, uri, onClose, onCrop}) => {
     savedTranslateX.value = 0;
     savedTranslateY.value = 0;
   }, [visible, uri]);
+
+  // The picture on screen is the cache file, which is a real path on disk, so
+  // it can go straight to the share sheet — same shape as every other share in
+  // the app, cancel included (Share.open rejects on a plain dismissal).
+  const handleShare = useCallback(async () => {
+    if (!uri) return;
+    try {
+      await Share.open({
+        url: uri,
+        type: uri.toLowerCase().includes('.png') ? 'image/png' : 'image/jpeg',
+        filename: 'note-image',
+        failOnCancel: false,
+      });
+    } catch (error) {
+      console.log('Share image cancelled or failed:', error);
+    }
+  }, [uri]);
 
   const pinchGesture = Gesture.Pinch()
     .onUpdate(e => {
@@ -96,17 +114,27 @@ const ImageZoomModal = ({visible, uri, onClose, onCrop}) => {
             <MaterialIcons name="close" size={28} color="#fff" />
           </TouchableOpacity>
 
-          {/* Only for images the note owns — re-cropping needs the id that ties
-              the picture to its row. */}
-          {!!onCrop && (
+          <View style={styles.actions}>
             <TouchableOpacity
-              style={styles.cropButton}
-              onPress={onCrop}
+              style={styles.actionButton}
+              onPress={handleShare}
               hitSlop={{top: 12, bottom: 12, left: 12, right: 12}}>
-              <MaterialIcons name="crop" size={24} color="#fff" />
-              <Text style={styles.cropLabel}>Crop</Text>
+              <MaterialIcons name="share" size={22} color="#fff" />
+              <Text style={styles.actionLabel}>Share</Text>
             </TouchableOpacity>
-          )}
+
+            {/* Only for images the note owns — re-cropping needs the id that
+                ties the picture to its row. */}
+            {!!onCrop && (
+              <TouchableOpacity
+                style={styles.actionButton}
+                onPress={onCrop}
+                hitSlop={{top: 12, bottom: 12, left: 12, right: 12}}>
+                <MaterialIcons name="crop" size={22} color="#fff" />
+                <Text style={styles.actionLabel}>Crop</Text>
+              </TouchableOpacity>
+            )}
+          </View>
 
           {uri && (
             <GestureDetector gesture={composedGesture}>
@@ -140,11 +168,15 @@ const styles = StyleSheet.create({
     zIndex: 10,
     padding: 8,
   },
-  cropButton: {
+  actions: {
     position: 'absolute',
     bottom: 36,
     alignSelf: 'center',
     zIndex: 10,
+    flexDirection: 'row',
+    gap: 12,
+  },
+  actionButton: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: 'rgba(255,255,255,0.14)',
@@ -152,7 +184,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderRadius: 24,
   },
-  cropLabel: {color: '#fff', fontSize: 15, fontWeight: '600', marginLeft: 8},
+  actionLabel: {color: '#fff', fontSize: 15, fontWeight: '600', marginLeft: 8},
   image: {
     width: '100%',
     height: '100%',

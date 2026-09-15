@@ -75,7 +75,6 @@ const GoogleLoginScreen = ({navigation}) => {
 
       if (response?.data.user) {
         await handleUserSession(response?.data, 'signIn');
-        syncUserToBackend(response?.data.user);
       }
     } catch (error) {
       setIsLoading(false);
@@ -109,7 +108,7 @@ const GoogleLoginScreen = ({navigation}) => {
     }
   };
 
-  const handleUserSession = async userInfo => {
+  const handleUserSession = async (userInfo, mode) => {
     if (!userInfo) return;
     await AsyncStorage.setItem('userId', userInfo.user.id);
     await useBackupStore.getState().setNativePreference('userId', userInfo.user.id);
@@ -120,7 +119,9 @@ const GoogleLoginScreen = ({navigation}) => {
       await initUserDatabase(userInfo.user.id);
 
       setUserInfo(userInfo.user);
-      setupFCM(userInfo.user);
+      mode === 'signIn'
+        ? syncUserToBackend(userInfo.user).then(() => setupFCM(userInfo.user))
+        : setupFCM(userInfo.user);
 
       await checkAndPromptRestore(userInfo, navigateToMain);
     } catch (error) {

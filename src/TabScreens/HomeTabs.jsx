@@ -1,5 +1,5 @@
 import React, {useEffect, useRef, useCallback, useState} from 'react';
-import {Animated, Image, StyleSheet, View} from 'react-native';
+import {Animated, Image, StyleSheet, Text, View} from 'react-native';
 import {createMaterialTopTabNavigator} from '@react-navigation/material-top-tabs';
 import {Provider} from 'react-native-paper';
 import {getCategoryData} from '../categories/catDB';
@@ -223,19 +223,23 @@ const HomeTabs = ({categoryId}) => {
               through left this one without a loader - and IDT is the tab a
               cold start lands on, so an import kicked off by a share had one
               nowhere on screen. */}
+          {/* The label is a custom row rather than a tabBarIcon: material top
+              tabs stack the icon above the label, and we want the mark and
+              the name side by side. */}
           <Tab.Screen
             name="IDT"
-            // options={{
-            //   tabBarLabel: () => null,
-            //   tabBarIcon: () => (
-            //     <Image
-            //       source={require('../assets/idt_logo.jpg')}
-            //       style={styles.iskconTabIcon}
-            //       resizeMode="contain"
-            //     />
-            //   ),
-            // }}
-          >
+            options={{
+              tabBarLabel: ({color}) => (
+                <View style={styles.iskconTabLabel}>
+                  <Image
+                    source={require('../assets/idt_logo.jpg')}
+                    style={styles.iskconTabIcon}
+                    resizeMode="contain"
+                  />
+                  <Text style={[styles.iskconTabText, {color}]}>IDT</Text>
+                </View>
+              ),
+            }}>
             {() =>
               renderTabContent(IskconAudioView, {
                 categoryId,
@@ -291,8 +295,20 @@ const HomeTabs = ({categoryId}) => {
 export default track(HomeTabs);
 
 const styles = StyleSheet.create({
+  iskconTabLabel: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    // Matches the negative margin screenOptions puts on every other label, so
+    // this tab keeps the same width as its neighbours.
+    marginHorizontal: -15,
+  },
   iskconTabIcon: {
-    width: 100,
-    height: 26,
+    width: 20,
+    height: 20,
+    marginRight: 1,
+  },
+  iskconTabText: {
+    fontWeight: 'bold',
+    fontSize: 12,
   },
 });

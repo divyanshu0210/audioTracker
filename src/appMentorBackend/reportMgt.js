@@ -3,6 +3,8 @@ import {BASE_URL} from '../appMentorBackend/userMgt';
 import {fetchLatestWatchDataAllFields} from '../database/R';
 import axios from 'axios';
 import {buildHourlyMap, lastNDays} from '../report/utils/hourlyMap';
+import {getDriveCopyId} from '../database/sharedDriveCopies';
+import {iskconUrlFromSourceId} from '../iskcon/iskconAudioApi';
 
 export async function uploadVideoReport(data) {
   try {
@@ -42,7 +44,21 @@ export const saveDatatoBackend = async item => {
       return;
     }
 
-    const payload = prepareVideoReportPayload(item, data, userId);
+    // Looked up here because prepareVideoReportPayload is synchronous, and
+    // preferred off the item when it is already there — the player resolves it
+    // to stream from, so a device file being watched usually carries it.
+    let driveCopyId = item.drive_file_id ?? null;
+    if (!driveCopyId && item.type === 'device_file' && item.id != null) {
+      try {
+        driveCopyId = await getDriveCopyId(item.id);
+      } catch (error) {
+        // A report without it is the report we have always sent. Losing the
+        // whole upload over a missing playback hint would be the wrong trade.
+        console.warn('Could not read the shared copy id:', error?.message);
+      }
+    }
+
+    const payload = prepareVideoReportPayload(item, data, userId, driveCopyId);
     console.log('Payload to send to backend:', payload);
 
     await uploadVideoReport(payload);
@@ -93,15 +109,32 @@ const LEGACY_TYPE_TO_ITEM_TYPE = {
 const toItemType = sourceType =>
   sourceType?.includes('_') ? sourceType : LEGACY_TYPE_TO_ITEM_TYPE[sourceType];
 
-const toWatchHistoryRow = record => ({
-  ...record,
-  title: record.videoNameInfo || record.title,
-  source_id: record.videoId,
-  // Falls back to the mime type so an unrecognised source still gets an
-  // audio/video icon rather than a blank sheet of paper.
-  type: toItemType(record.source_type) || record.mimetype || record.source_type,
-  duration: Number(record.duration || 0),
-});
+// Everything the player needs, so a mentee's row plays the moment the report
+// loads rather than waiting on any other sync. Three of the four types are
+// reachable from the id alone; a device file needs the id of its uploaded
+// copy, which is why the report carries one.
+const toWatchHistoryRow = record => {
+  const type =
+    toItemType(record.source_type) || record.mimetype || record.source_type;
+
+  return {
+    ...record,
+    title: record.videoNameInfo || record.title,
+    source_id: record.videoId,
+    // Falls back to the mime type so an unrecognised source still gets an
+    // audio/video icon rather than a blank sheet of paper.
+    type,
+    duration: Number(record.duration || 0),
+    // Rebuilt here rather than carried: an iskcon source_id is the site path,
+    // so the url is derivable and a stored copy could only drift from it.
+    // file_path is the field the player reads for a streamable url.
+    file_path:
+      type === 'iskcon_file' ? iskconUrlFromSourceId(record.videoId) : null,
+    // Empty string for every type but a shared device file. Normalised to null
+    // so `!!item.drive_file_id` in the player's streamable check reads right.
+    drive_file_id: record.drive_file_id || null,
+  };
+};
 
 export const fetchWatchHistoryByDatefromBackend = async (date, userId) => {
   if (!date || !userId) {
@@ -122,7 +155,7 @@ export const fetchWatchHistoryByDatefromBackend = async (date, userId) => {
   }
 };
 
-function prepareVideoReportPayload(videoItem, watchData, userId) {
+function prepareVideoReportPayload(videoItem, watchData, userId, driveCopyId) {
   const isYouTube = videoItem.type?.startsWith('youtube');
 
   const videoPayload = {
@@ -138,6 +171,11 @@ function prepareVideoReportPayload(videoItem, watchData, userId) {
     mimetype: isYouTube
       ? 'video/mp4'
       : videoItem.mimeType || 'application/octet-stream',
+    // Device files only, and only once a copy exists. Sent as '' rather than
+    // omitted-when-absent would be: the server keeps whatever it has unless
+    // this is truthy, so a file shared later fills it in and one that never is
+    // simply never sets it.
+    drive_file_id: driveCopyId || '',
   };
 
   const parseJsonArray = str => {

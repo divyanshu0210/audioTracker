@@ -321,7 +321,11 @@ const BaseItem = ({
     } else if (
       currentRoute === 'Notes' ||
       currentRoute === 'All Notes' ||
-      currentRoute === 'NotesListScreen'
+      currentRoute === 'NotesListScreen' ||
+      // Navigate, not replace: a mentor taps a note in the day report to read
+      // it against the lecture, and replacing threw the day away with no way
+      // back to it.
+      currentRoute === 'DayReport'
     ) {
       navigationRef.navigate(targetScreen, {
         item: item.relatedItem,

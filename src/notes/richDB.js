@@ -1,4 +1,5 @@
 import { Alert } from "react-native";
+import {parseNoteRef} from './noteRef';
 import { getDb } from "../database/database";
 
 export const createNewNote = (noteId, sourceId, sourceType ) => {
@@ -74,16 +75,26 @@ export const saveImage = (imageId, noteRowId, imageData) => {
 };
 
 
-export const getNoteById = noteRowId => {
+/**
+ * Takes a note reference — a plain rowid for this user's own, or one that
+ * names a mentee (see noteRef). Same columns either way, so every caller is
+ * unchanged and none of them has to know which kind it is holding.
+ */
+export const getNoteById = ref => {
   const fastdb = getDb();
+  const {rowid: noteRowId, menteeId} = parseNoteRef(ref);
   return new Promise((resolve, reject) => {
     fastdb.transaction(tx => {
       tx.executeSql(
         // source_id/source_type ride along for sharing: a bundle carries the
         // media a note was taken against, and this is the only read that has
         // the note row in hand.
-        'SELECT source_id, source_type, title, content, text_content FROM notes WHERE rowid = ? AND deleted_at IS NULL;',
-        [noteRowId],
+        menteeId
+          ? `SELECT source_id, source_type, title, content, text_content
+               FROM mentee_notes
+              WHERE mentee_id = ? AND note_rowid = ? AND deleted_at IS NULL;`
+          : 'SELECT source_id, source_type, title, content, text_content FROM notes WHERE rowid = ? AND deleted_at IS NULL;',
+        menteeId ? [menteeId, noteRowId] : [noteRowId],
         (_, { rows: { _array } }) => resolve(_array[0] || {}),
         (_, error) => {
           console.error('Error fetching note:', error);
@@ -171,13 +182,18 @@ export const getImageById = imageId => {
   });
 };
 
-export const getImagesForNote = noteRowId => {
+export const getImagesForNote = ref => {
   const fastdb = getDb();
+  const {rowid: noteRowId, menteeId} = parseNoteRef(ref);
   return new Promise((resolve, reject) => {
     fastdb.transaction(tx => {
       tx.executeSql(
-        'SELECT id, image_data FROM images WHERE note_rowid = ? AND deleted_at IS NULL;',
-        [noteRowId],
+        menteeId
+          ? `SELECT image_id AS id, image_data
+               FROM mentee_note_images
+              WHERE mentee_id = ? AND note_rowid = ? AND deleted_at IS NULL;`
+          : 'SELECT id, image_data FROM images WHERE note_rowid = ? AND deleted_at IS NULL;',
+        menteeId ? [menteeId, noteRowId] : [noteRowId],
         (_, { rows: { _array } }) => resolve(_array),
         (_, error) => {
           console.error('Error fetching images:', error);

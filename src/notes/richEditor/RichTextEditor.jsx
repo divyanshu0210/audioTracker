@@ -6,6 +6,7 @@ import React, {
   useImperativeHandle,
   useCallback,
 } from 'react';
+import {isMenteeNoteRef} from '../noteRef';
 import {
   Alert,
   Image,
@@ -865,6 +866,10 @@ const RichTextEditor = forwardRef(
     // ── Edit mode ─────────────────────────────────────────────────────────────
 
     const toggleEditMode = useCallback(async () => {
+      // A mentee's note is read-only. There is no row in this user's notes
+      // table to save into, and editing someone else's words would be wrong
+      // even if there were. The id says which it is.
+      if (isMenteeNoteRef(noteIdRef.current)) return;
       if (!isEditableRef.current) {
         // Focusing here would be undone a moment later: flipping `disabled`
         // makes pell run setDisable, which calls blur() before it turns

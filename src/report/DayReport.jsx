@@ -1,5 +1,6 @@
-import React, {useState, useRef, useMemo, useCallback} from 'react';
+import React, {useState, useRef, useMemo, useCallback, useEffect} from 'react';
 import {
+  ActivityIndicator,
   View,
   Text,
   StyleSheet,
@@ -22,11 +23,17 @@ import { useNotesStore } from '../stores/useNotesStore';
 import { useShallow } from 'zustand/react/shallow';
 import {useFocusEffect, useIsFocused} from '@react-navigation/native';
 import {useMenteeRefresh} from '../appMentor/useMenteeStatusRefresh';
+import {fetchMenteeNotes} from '../database/menteeNotesDB';
+import {
+  useMenteeNotesStore,
+  useMenteeNotesSync,
+} from '../appMentor/menteeNotesSync';
 
 const DayReport = ({route, navigation}) => {
   const [isLoading, setIsLoading] = useState(true);
   const {date, mentee} = route.params;
   const [videos, setVideos] = useState([]);
+  const [menteeNotes, setMenteeNotes] = useState([]);
 const {notesList, setNotesList} = useNotesStore(
   useShallow(state => ({
     notesList: state.notesList,
@@ -54,14 +61,27 @@ const {notesList, setNotesList} = useNotesStore(
     try {
       await loadVideos();
 
-      const notes = await fetchNotes({date: date});
-      setNotesList(notes || []);
+      if (mentee?.id) {
+        // Read out of mentee_notes, never the shared notesList store: that one
+        // also backs the player's notes panel, and BacePlayer clears it on
+        // mount. A mentee's notes landing there would surface in the mentor's
+        // own player.
+        const theirs = await fetchMenteeNotes({
+          menteeId: mentee.id,
+          date,
+          limit: 200,
+        });
+        setMenteeNotes(theirs || []);
+      } else {
+        const notes = await fetchNotes({date: date});
+        setNotesList(notes || []);
+      }
     } catch (error) {
       console.error('Error fetching data:', error);
     } finally {
       setIsLoading(false);
     }
-  }, [loadVideos, date, setNotesList]);
+  }, [loadVideos, date, setNotesList, mentee?.id]);
 
   useFocusEffect(
     useCallback(() => {
@@ -72,6 +92,25 @@ const {notesList, setNotesList} = useNotesStore(
   // And while the mentor simply sits here reading it. Videos only - the notes
   // below are this device's own and cannot change while nobody is typing.
   // Quiet: a failed poll leaves the list that is already on screen.
+  // Asks the native worker for this mentee's notes, and hears when it has
+  // them. Picking the mentee in the drawer already asked once; this covers
+  // coming back to the app, and live pushes while their day is on screen.
+  useMenteeNotesSync(mentee);
+
+  // The sync lands asynchronously and usually after this screen has already
+  // drawn, so the rows have to be re-read when it finishes rather than only
+  // on focus.
+  const notesSyncedAt = useMenteeNotesStore(state => state.syncedAt);
+  const notesSyncing = useMenteeNotesStore(state => state.syncing);
+  useEffect(() => {
+    if (!mentee?.id || !notesSyncedAt) return;
+    fetchMenteeNotes({menteeId: mentee.id, date, limit: 200})
+      .then(rows => setMenteeNotes(rows || []))
+      .catch(error =>
+        console.warn('Could not read the mentee notes:', error?.message),
+      );
+  }, [notesSyncedAt, mentee?.id, date]);
+
   const isFocused = useIsFocused();
   useMenteeRefresh(
     useCallback(() => {
@@ -113,6 +152,10 @@ const {notesList, setNotesList} = useNotesStore(
       ),
     [videos],
   );
+
+  // Whichever list this day's card is showing, so the count in its header and
+  // the rows under it can never disagree.
+  const dayNotes = mentee ? menteeNotes : notesList;
 
   // The fixed scale for all progress bars (max time)
   const progressBarScale = totalUnfiltered;
@@ -217,20 +260,34 @@ const {notesList, setNotesList} = useNotesStore(
           </View>
         </ViewShot>
 
-        {/* Notes Card */}
-        {!mentee && (
+        {/* Notes Card — the mentor's own notes, or the mentee's read off
+            their Drive. Same card, same rows: a note is a note, and the only
+            difference is which table it came out of and that someone else's
+            cannot be deleted from here. */}
+        {(
           <View style={styles.card}>
             <TouchableOpacity
               onPress={() => setShowNotes(!showNotes)}
               style={styles.cardHeader}>
               <View style={{flexDirection: 'row', alignItems: 'center'}}>
-                <Text style={styles.cardTitle}>Notes ({notesList.length})</Text>
+                <Text style={styles.cardTitle}>Notes ({dayNotes.length})</Text>
                 <MaterialIcons
                   name={showNotes ? 'arrow-drop-down' : 'arrow-right'}
                   size={30}
                   color="#000"
                   style={{marginTop: 1}}
                 />
+                {/* Only for a mentee's, and only while the worker is
+                    actually running. An empty card during a first sync reads
+                    as "they have written nothing", which is a different and
+                    wrong answer. */}
+                {mentee && notesSyncing && (
+                  <ActivityIndicator
+                    size="small"
+                    color="#007AFF"
+                    style={{marginLeft: 8}}
+                  />
+                )}
               </View>
             </TouchableOpacity>
             {showNotes && (
@@ -238,7 +295,11 @@ const {notesList, setNotesList} = useNotesStore(
                 <NotesListComponent
                   isLoading={false}
                   loadMoreData={() => {}}
-                  onDeleteNote={handleDeleteNoteCallback}
+                  // The prop wins over the store, which is what keeps a
+                  // mentee's notes out of notesList — that one also backs the
+                  // player's notes panel, and BacePlayer clears it on mount.
+                  notes={mentee ? menteeNotes : undefined}
+                  onDeleteNote={mentee ? undefined : handleDeleteNoteCallback}
                   scrollEnabled={false}
                 />
               </View>

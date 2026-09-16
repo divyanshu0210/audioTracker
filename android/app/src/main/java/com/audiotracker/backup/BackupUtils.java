@@ -153,7 +153,7 @@ public class BackupUtils {
     // =========================
     // IMAGE BACKUP
     // =========================
-    public static void backupImagesIncremental(
+    public static boolean backupImagesIncremental(
             SQLiteDatabase db,
             Context context,
             String start,
@@ -167,7 +167,7 @@ public class BackupUtils {
 
             if (imageInc.length() == 0) {
                 Log.d(TAG, "No new images");
-                return;
+                return false;
             }
 
             JSONObject imageData = new JSONObject();
@@ -176,6 +176,7 @@ public class BackupUtils {
             writeImageFile(context, imageData, start, end);
 
             Log.d(TAG, "Images backed up: " + imageInc.length());
+            return true;
 
         } catch (Exception e) {
             Log.e(TAG, "Image backup failed", e);

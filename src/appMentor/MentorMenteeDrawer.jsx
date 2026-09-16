@@ -6,7 +6,6 @@ import {
   StyleSheet,
   TextInput,
   Dimensions,
-  ActivityIndicator,
   Platform,
 } from 'react-native';
 import Modal from 'react-native-modal';
@@ -14,6 +13,8 @@ import useMentorMenteeStore from './useMentorMenteeStore';
 import UserList from './UserList';
 import {useAppState} from '../contexts/AppStateContext';
 import {addCategory} from '../categories/catDB';
+import {fetchNewConnections} from '../appMentorBackend/userMgt';
+import {runNativeMenteeSyncNow} from './menteeNotesSync';
 import {TabView, SceneMap} from 'react-native-tab-view';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import {useSelectionStore} from '../stores/useSelectionStore';
@@ -103,6 +104,25 @@ const MentorMenteeDrawer = () => {
   const setSelectedCategory = useSelectionStore(
     state => state.setSelectedCategory,
   );
+
+  const [refreshing, setRefreshing] = useState(false);
+
+  // The list is fetched once, on Home's mount. Nothing retries it, so a user
+  // who opened the app with no signal had an empty drawer for the rest of the
+  // session with no way to ask again — and a mentorship accepted on the other
+  // side never showed up at all. Pulling down is the obvious gesture for a
+  // list that looks wrong.
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      // Silent: the pull control is already the progress indicator. Letting
+      // this raise isLoading would swap the list out for a spinner, or stack a
+      // second one under the pull when there is nothing in the list yet.
+      await fetchNewConnections({silent: true});
+    } finally {
+      setRefreshing(false);
+    }
+  }, []);
 
   const [searchText, setSearchText] = useState('');
   const [selectedName, setSelectedName] = useState('You');
@@ -205,6 +225,13 @@ const MentorMenteeDrawer = () => {
         // === mentee-specific logic ===
         setActiveMentee(item);
 
+        // Their notes, starting now. This is the moment a mentor says which
+        // mentee they are interested in, and it comes well before any day is
+        // opened — so a first sync, which is a whole backup, has the walk to
+        // the report to finish in rather than being started once the mentor
+        // is already looking at an empty card.
+        runNativeMenteeSyncNow(item.id);
+
         // Not awaited: the drawer closes immediately and the rows fill in
         // their ticks when the answer arrives.
         loadMenteeAssignmentStatus(userInfo?.id, item.id);
@@ -258,11 +285,13 @@ const MentorMenteeDrawer = () => {
         )}
         listType="Mentors"
         loading={isLoading}
+        refreshing={refreshing}
+        onRefresh={handleRefresh}
         onPress={item => selectAndClose(item, false, 'mentor')}
         selectedId={selectedId}
       />
     ),
-    [mentors, searchText, selectedId, selectAndClose, isLoading],
+    [mentors, searchText, selectedId, selectAndClose, isLoading, refreshing, handleRefresh],
   );
 
   const MenteeList = useCallback(
@@ -276,11 +305,13 @@ const MentorMenteeDrawer = () => {
         )}
         listType="Mentees"
         loading={isLoading}
+        refreshing={refreshing}
+        onRefresh={handleRefresh}
         onPress={item => selectAndClose(item, false, 'mentee')}
         selectedId={selectedId}
       />
     ),
-    [mentees, searchText, selectedId, selectAndClose, isLoading],
+    [mentees, searchText, selectedId, selectAndClose, isLoading, refreshing, handleRefresh],
   );
 
   const renderScene = SceneMap({
@@ -326,13 +357,12 @@ const MentorMenteeDrawer = () => {
         animationInTiming={300}
         animationOutTiming={300}>
         <View style={styles.drawerContent}>
-          {isLoading ? (
-            <View style={styles.loadingContainer}>
-              <ActivityIndicator size="large" color="#007AFF" />
-              <Text style={styles.loadingText}>Loading...</Text>
-            </View>
-          ) : (
-            <>
+          {/* No drawer-wide spinner. The list is the only part that has
+              nothing to show yet — the You button, the search box and the
+              tabs are all usable immediately, and blanking them meant the
+              whole drawer flickered out on every fetch. UserList puts the
+              indicator where the rows will be. */}
+          <>
               <TouchableOpacity
                 style={[
                   styles.youButton,
@@ -396,8 +426,7 @@ const MentorMenteeDrawer = () => {
                 style={styles.tabView}
               />
               {/* <DrawerFooterRow setDrawerVisible={setDrawerVisible} /> */}
-            </>
-          )}
+          </>
         </View>
       </Modal>
     </>
@@ -547,17 +576,6 @@ const styles = StyleSheet.create({
   },
   tabView: {
     flex: 1,
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  loadingText: {
-    marginTop: 10,
-    fontSize: 14,
-    color: '#666',
-    fontFamily: 'Roboto',
   },
 });
 

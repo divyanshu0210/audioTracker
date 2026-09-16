@@ -455,6 +455,10 @@ export const initDatabase = (db = null) => {
       () => console.log('category_items updated_at trigger created successfully'),
       error => console.error('Error creating category_items updated_at trigger:', error),
     );
+
+    // The mentee_* tables are not here. They have one writer — the native
+    // sync in menteenotes/ — and it creates them on its first run, so an
+    // account that never mentors anybody never carries them.
   },
   error => {
     console.error('Error initializing database:', error);

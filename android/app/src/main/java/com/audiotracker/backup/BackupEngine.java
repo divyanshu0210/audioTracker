@@ -48,18 +48,17 @@ public class BackupEngine {
             long endEpoch = BackupUtils.toEpoch(now);
 
             // Images
-            BackupUtils.backupImagesIncremental(db, context, last, now);
+            boolean wroteImages = BackupUtils.backupImagesIncremental(db, context, last, now);
 
             // L0
             JSONObject data = BackupUtils.prepareRangeBackup(db, last, now);
 
-            if (!BackupUtils.isEmpty(data)) {
+            if (!BackupUtils.isEmpty(data) || wroteImages) {
                 BackupUtils.writeLevelFile(context, db, 0, data, startEpoch, endEpoch);
+                BackupUtils.saveBackupTimestamp(context, userId, now);
             } else {
-                Log.d(TAG, "No structured data changes");
+                Log.d(TAG, "No changes — window stays open");
             }
-
-            BackupUtils.saveBackupTimestamp(context, userId, now);
 
             // Compaction
             BackupUtils.runCompaction(context, db);

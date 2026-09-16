@@ -8,6 +8,7 @@ import { closeUserDatabase } from '../database/userDBSetupService';
 import useDbStore from '../database/dbStore';
 import useSettingsStore from '../Settings/settingsStore';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import {NativeModules} from 'react-native';
 import { MenuOption } from 'react-native-popup-menu';
 import useBackupStore from '../stores/backupStore';
 import { useMediaStore } from '../stores/useMediaStore';
@@ -51,6 +52,11 @@ const {setSelectedItems} = useSelectionStore(
       await AsyncStorage.removeItem('userId');
       //also remove the user from set preference of backup module to prevent backup issues when another user logs in
       await useBackupStore.getState().setNativePreference('userId', null);
+
+      // The mentee-notes worker reads that same preference and so already
+      // does nothing once it is gone — but a signed-out phone should not
+      // still be waking every six hours to find that out.
+      NativeModules.BackupModule?.cancelMenteeNotesSync();
 
       navigationRef.dispatch(
         CommonActions.reset({

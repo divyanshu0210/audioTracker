@@ -63,9 +63,19 @@ public class DriveSyncEngine {
         SQLiteDatabase db = BackupUtils.openDatabase(context, userId);
         try {
             FolderIds folderIds = initializeDriveFolders(context);
-            uploadLocalBackups(context, db, folderIds.root);
+            int uploaded = uploadLocalBackups(context, db, folderIds.root);
             deleteGhostBackups(context, db, folderIds.root);
             syncImageFiles(context, folderIds.images);
+
+            // Something new is on Drive now. Any mentor of this user can only
+            // find that out by being told — the upload went straight from
+            // here to their own Drive and never passed through our server —
+            // so without this they would be left asking on a timer, which
+            // means asking many times per change and still arriving late.
+            if (uploaded > 0) {
+                com.audiotracker.menteenotes.MenteeNotesNet
+                        .notifyNotesUpdated(context, userId);
+            }
         } finally {
             db.close();
             Log.d(TAG, "[SYNC] DB closed");
@@ -89,10 +99,21 @@ public class DriveSyncEngine {
         return new FolderIds(root, images);
     }
 
-    private static void uploadLocalBackups(Context context, SQLiteDatabase db, String folderId) throws Exception {
+    /**
+     * Returns how many files actually reached Drive.
+     *
+     * Counted rather than assumed from the queue length, because a mentor is
+     * told to come and look based on this: an upload that failed leaves the
+     * file local to retry, and waking somebody to fetch a file that is not
+     * there yet wastes their trip.
+     */
+    private static int uploadLocalBackups(Context context, SQLiteDatabase db, String folderId) throws Exception {
         Log.d(TAG, "[PHASE] Upload local backups");
         List<BackupDbHelper.FileRow> localFiles = BackupDbHelper.getLocalFiles(db);
         Log.d(TAG, "[SYNC] Found " + localFiles.size() + " local files to sync");
+
+        final java.util.concurrent.atomic.AtomicInteger uploaded =
+                new java.util.concurrent.atomic.AtomicInteger();
 
         List<Runnable> tasks = new ArrayList<>();
         for (BackupDbHelper.FileRow row : localFiles) {
@@ -101,11 +122,15 @@ public class DriveSyncEngine {
                 File localPath = new File(BackupUtils.getLevelDir(context, r.level), r.file);
                 uploadTask(context, db, localPath, r.file, folderId,
                         () -> BackupDbHelper.updateState(db, r.file, "synced"),
-                        driveId -> BackupDbHelper.updateState(db, r.file, "synced", driveId),
+                        driveId -> {
+                            BackupDbHelper.updateState(db, r.file, "synced", driveId);
+                            uploaded.incrementAndGet();
+                        },
                         true);
             });
         }
         runWithLimit(tasks, CONCURRENCY);
+        return uploaded.get();
     }
 
     private static void deleteGhostBackups(Context context, SQLiteDatabase db, String folderId) throws Exception {

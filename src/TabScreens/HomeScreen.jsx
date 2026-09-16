@@ -10,7 +10,7 @@ import {
   updateNotificationCount,
 } from '../appNotification/notificationsMgt';
 import {syncAssignmentsOnStartup} from '../appMentorBackend/assignmentsMgt';
-import {BASE_URL} from '../appMentorBackend/userMgt';
+import {fetchNewConnections} from '../appMentorBackend/userMgt';
 import HomeTabs from './HomeTabs';
 import {useSelectionStore} from '../stores/useSelectionStore';
 import {useShallow} from 'zustand/react/shallow';
@@ -28,15 +28,12 @@ const HomeScreen = () => {
 
   const {userInfo, continueWatchingSheetRef} = useAppState();
 
-  const {setMentors, setMentees, activeMentee, activeMentor} =
-    useMentorMenteeStore(
-      useShallow(state => ({
-        setMentors: state.setMentors,
-        setMentees: state.setMentees,
-        activeMentee: state.activeMentee,
-        activeMentor: state.activeMentor,
-      })),
-    );
+  const {activeMentee, activeMentor} = useMentorMenteeStore(
+    useShallow(state => ({
+      activeMentee: state.activeMentee,
+      activeMentor: state.activeMentor,
+    })),
+  );
   const isActive = activeMentee || activeMentor;
 
   // The first screen the user actually sees is the one that gets to ask "carry
@@ -86,23 +83,15 @@ const HomeScreen = () => {
     syncAssignmentsOnStartup(userInfo);
   }, [userInfo?.id]);
 
-  const fetchMentorMenteeData = useCallback(async () => {
-    // Flagged so the drawer can show a spinner rather than "No mentees found."
-    // while this is still in flight — this runs on mount, which is exactly when
-    // someone is most likely to open it.
-    const {setIsLoading} = useMentorMenteeStore.getState();
-    try {
-      setIsLoading(true);
-      const response = await fetch(`${BASE_URL}/mentorships/${userInfo?.id}/`);
-      const data = await response.json();
-      setMentors(data.mentors || []);
-      setMentees(data.mentees || []);
-    } catch (err) {
-      console.error('Error:', err);
-    } finally {
-      setIsLoading(false);
-    }
-  }, [userInfo?.id]);
+  // Was a second copy of fetchNewConnections, and the two had already drifted:
+  // only the other one reconciles the Drive sharing that lets a mentor read
+  // their mentee's notes, so on a normal launch that never ran. One
+  // implementation, called from here, from the drawer's pull-to-refresh, and
+  // from the notification handlers.
+  const fetchMentorMenteeData = useCallback(
+    () => fetchNewConnections(),
+    [],
+  );
 
   return (
     <Provider>

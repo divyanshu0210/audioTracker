@@ -4,6 +4,7 @@ import {onDisplayNotification} from '../notification/notificationService';
 import {BASE_URL, fetchNewConnections} from '../appMentorBackend/userMgt';
 import {AppState} from 'react-native';
 import useNotificationStore from './useNotificationStore';
+import {runNativeMenteeSyncNow} from '../appMentor/menteeNotesSync';
 
 export const handleWSNotifications = async data => {
   await fetchNotification();
@@ -16,7 +17,78 @@ export const handleBackgroundNotifications = async () => {
   }
 };
 
+// Facts the app should act on, with nothing to show for them. Kept out of the
+// notification pipeline entirely: putting "the folder is shared" in someone's
+// tray would be showing them plumbing.
+const SILENT_TYPES = new Set([
+  'mentorship_changed',
+  'notes_shared',
+  'notes_updated',
+]);
+
+/**
+ * What a silent push is for.
+ *
+ * This is the path that makes the whole thing work on a phone nobody opens: a
+ * data-only message starts the process and runs this headless, and the worker
+ * it hands to does both halves — a mentee's device granting its new mentor
+ * access to its backup folder, and a mentor's device pulling its mentees'
+ * notes.
+ */
+/**
+ * Whether this mentee is the one on screen right now.
+ *
+ * Both halves matter. The app being open is not enough — a push about one
+ * mentee while their mentor reads another's report is work nobody asked for
+ * — and the selection alone is not enough either, since a backgrounded app
+ * has no screen to update and the fetch would only be spending a stranger's
+ * battery. Selecting a mentee fetches them, so nothing is lost by waiting.
+ */
+const isBeingWatched = menteeId => {
+  if (AppState.currentState !== 'active') return false;
+  if (!menteeId) return false;
+  const active = useMentorMenteeStore.getState().activeMentee?.id;
+  return active != null && String(active) === String(menteeId);
+};
+
+const handleSilentPush = async remoteMessage => {
+  const data = remoteMessage?.data ?? {};
+
+  // 'notes_updated' is a mentee saying they have just written something. That
+  // is worth fetching only if their mentor is looking: a mentor with a
+  // hundred mentees would otherwise spend the day downloading notes nobody
+  // has opened. Picking that mentee fetches them; until then nothing is owed.
+  //
+  // The other two are not like that, and neither is gated:
+  //
+  //   notes_shared      once per mentorship, and the first moment the notes
+  //                     can be read at all. Doing it now is what spares the
+  //                     mentor a whole backup download the first time they
+  //                     look.
+  //   mentorship_changed  on the mentee's device this is what triggers the
+  //                     grant, and a mentee who never opens the app is
+  //                     exactly the case that depends on it.
+  if (data.type === 'notes_updated' && !isBeingWatched(data.menteeId)) return;
+
+  // Handed to WorkManager rather than done here. This handler is given
+  // seconds and may be running headless on a phone that was killed; the
+  // worker waits for a network, retries, and outlives this process.
+  //
+  // The id names one mentee, so the worker opens one folder rather than
+  // every folder it has access to. Absent — as on the mentee's own
+  // mentorship_changed — it reconciles sharing and fetches nobody.
+  runNativeMenteeSyncNow(data.menteeId ?? null);
+};
+
 export const handleFCMNotifications = async remoteMessage => {
+  if (
+    SILENT_TYPES.has(remoteMessage?.data?.type) &&
+    !remoteMessage?.notification
+  ) {
+    await handleSilentPush(remoteMessage);
+    return;
+  }
+
   // await updateNotificationCountByOne();
   await fetchNotification();
   await updateNotificationCount();

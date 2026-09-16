@@ -200,6 +200,37 @@ public class BackupModule extends ReactContextBaseJavaModule {
         }
     }
 
+    /**
+     * Schedules the mentee-notes sync, which is native for the same reason
+     * backup is: it has to happen on a phone nobody opens. A mentee granting
+     * their mentor access to their Drive folder is the step the whole
+     * exchange waits on, and if that only ran while the app was in front, a
+     * mentee who never launches it would leave their mentor with nothing.
+     */
+    @ReactMethod
+    public void scheduleMenteeNotesSync() {
+        com.audiotracker.menteenotes.MenteeNotesWorker
+                .schedulePeriodic(getReactApplicationContext());
+    }
+
+    /**
+     * For a silent push, or a mentor picking a mentee.
+     *
+     * `menteeId` null means every mentee — right for a resume, wrong for a
+     * push, which always names one.
+     */
+    @ReactMethod
+    public void runMenteeNotesSyncNow(String menteeId) {
+        com.audiotracker.menteenotes.MenteeNotesWorker
+                .runNow(getReactApplicationContext(), menteeId);
+    }
+
+    @ReactMethod
+    public void cancelMenteeNotesSync() {
+        com.audiotracker.menteenotes.MenteeNotesWorker
+                .cancel(getReactApplicationContext());
+    }
+
 @ReactMethod
     public void setPreference(String key, String value) {
 

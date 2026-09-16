@@ -4,6 +4,7 @@ import {BASE_URL} from '../../appMentorBackend/userMgt';
 import {handleFCMNotifications} from '../notificationsMgt';
 import {askForNotificationsOnce} from '../notificationPermission';
 import {syncAssignmentsOnStartup} from '../../appMentorBackend/assignmentsMgt';
+import {setUpNativeMenteeSync} from '../../appMentor/menteeNotesSync';
 
 export async function setupFCM(user) {
   const userId = user?.id;
@@ -21,6 +22,12 @@ export async function setupFCM(user) {
   // the moment they turn notifications on in system settings, pushes work with
   // no re-login and no reinstall.
   await registerFcmToken(userId);
+
+  // Here because this runs on every start with a user, which is exactly what
+  // the native sync needs: the backend url written where a worker with no
+  // React context can read it, and the schedule kept alive. Both are no-ops
+  // when they are already right.
+  setUpNativeMenteeSync(BASE_URL);
 
   // Once, not on every launch. setupFCM runs on each start via restoreSession,
   // and the old unconditional request burned both of Android's two dialogs

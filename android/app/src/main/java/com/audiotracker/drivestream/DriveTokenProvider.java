@@ -12,7 +12,12 @@ import com.google.android.gms.auth.api.signin.GoogleSignInAccount;
 import java.io.IOException;
 
 /**
- * OAuth tokens for the streaming proxy.
+ * OAuth tokens for anything native that talks to Drive.
+ *
+ * Public because the mentee-notes sync needs it too, and needs exactly this
+ * one: DriveApiHelper asks for drive.file, which can only see files this app
+ * created. A mentee's backup folder was created by *their* app, so reading it
+ * requires the broader scope below.
  *
  * The proxy cannot ask the JS side for a token: it serves range requests while
  * the app is backgrounded and mid-seek, when the bridge may be idle or the
@@ -20,7 +25,7 @@ import java.io.IOException;
  * GoogleSignin uses, caches the token itself, and can be told to drop a stale
  * one — which is the whole refresh story, see invalidate().
  */
-final class DriveTokenProvider {
+public final class DriveTokenProvider {
 
     private static final String TAG = "DriveStream";
 
@@ -36,7 +41,7 @@ final class DriveTokenProvider {
     private DriveTokenProvider() {}
 
     /** Blocking — callers must already be off the main thread. */
-    static String get(Context context) throws IOException {
+    public static String get(Context context) throws IOException {
         GoogleSignInAccount signedIn = GoogleSignIn.getLastSignedInAccount(context);
         Account account = signedIn == null ? null : signedIn.getAccount();
         if (account == null) throw new IOException("No signed-in Google account");
@@ -60,7 +65,7 @@ final class DriveTokenProvider {
      * without this, Play Services would keep handing back the same dead token
      * for the rest of its cache lifetime and every seek would 401.
      */
-    static void invalidate(Context context, String token) {
+    public static void invalidate(Context context, String token) {
         if (token == null) return;
         try {
             GoogleAuthUtil.clearToken(context, token);

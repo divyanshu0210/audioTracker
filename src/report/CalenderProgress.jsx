@@ -4,7 +4,6 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
-  ActivityIndicator,
 } from 'react-native';
 import {Calendar} from 'react-native-calendars';
 import {generateWatchData} from './utils/ProgressDataCollector';
@@ -30,6 +29,7 @@ import {
 import {useAppState} from '../contexts/AppStateContext';
 import { navigationRef } from '../handlers/navigationRef';
 import {useMenteeRefresh} from '../appMentor/useMenteeStatusRefresh';
+import DotsLoader from '../components/DotsLoader';
 
 const ACHIEVEMENT_BANDS = [
   {min: 100, color: '#1B5E20'}, // Goal crushed
@@ -362,11 +362,7 @@ const CalendarProgress = () => {
   if (loading) {
     return (
       <SafeAreaView style={styles.container}>
-        <ActivityIndicator
-          size="large"
-          color="#0000ff"
-          style={{marginTop: 20}}
-        />
+        <DotsLoader />
       </SafeAreaView>
     );
   }

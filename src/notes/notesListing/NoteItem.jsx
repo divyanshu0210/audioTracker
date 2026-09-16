@@ -38,8 +38,16 @@ const NoteItem = ({item}) => {
 export default memo(NoteItem);
 
 export const getPreviewText = item => {
-  const bodyText = item?.text_content.slice(item.noteTitle.length).trim();
-  const hasImage = item.content?.includes('data-image-id=');
+  // Both of these can be null, and the optional chain only ever covered
+  // `item`. text_content is nullable in the notes table and an image-only
+  // note is the ordinary way to get one — it just took a mentee's note, read
+  // off their Drive backup, to put such a row in front of this function.
+  const text = item?.text_content ?? '';
+  const title = item?.noteTitle ?? '';
+
+  // text_content opens with the title, so this is the body on its own.
+  const bodyText = text.slice(title.length).trim();
+  const hasImage = item?.content?.includes('data-image-id=');
   if (!bodyText) {
     return hasImage ? 'Image Note...' : '...';
   }

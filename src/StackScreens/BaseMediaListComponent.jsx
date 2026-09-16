@@ -49,6 +49,11 @@ const BaseMediaListComponent = ({
   // row would otherwise land in one "Today" bucket. Everything else keeps
   // grouping by date.
   sections: providedSections,
+  // False for a list rendered inside a ScrollView — the day report puts one
+  // in a card. Two scrollables of the same orientation break windowing, which
+  // is what RN warns about; the outer one does the scrolling and this list
+  // just lays out at full height.
+  scrollEnabled = true,
 }) => {
   const renderCount = useRef(0);
   renderCount.current++;
@@ -142,6 +147,7 @@ const BaseMediaListComponent = ({
         refreshing={loading}
         onEndReached={() => onEndReached?.()}
         onEndReachedThreshold={0.5}
+        scrollEnabled={scrollEnabled}
         style={{flex: 1}}
       />
     </View>

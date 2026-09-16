@@ -11,6 +11,8 @@ const NotesListComponent = ({
   loadMoreData,
   loadInitialData,
   screen,
+  // Passed straight down. The day report renders this inside a ScrollView.
+  scrollEnabled = true,
 }) => {
   const isMainScreen = screen === ScreenTypes.MAIN;
   const {storedNotes} = useNotesStore(
@@ -45,6 +47,7 @@ const NotesListComponent = ({
         type={ItemTypes.NOTE}
         onEndReached={loadMoreData}
         loadingMore={loadingMore}
+        scrollEnabled={scrollEnabled}
       />
     </SafeAreaView>
   );

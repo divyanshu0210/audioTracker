@@ -27,6 +27,7 @@ import {
 import BulkDeleteConfirmModal from './BulkDeleteConfirmModal';
 import SelectNotebookModal from '../components/modals/SelectNotebookModal';
 import ShareNotesSheet from '../components/modals/ShareNotesSheet';
+import {isMenteeNoteRef} from '../notes/noteRef';
 
 const SelectionHeader = ({type, screen, allItemsInThisList}) => {
   const [confirmVisible, setConfirmVisible] = useState(false);
@@ -54,6 +55,23 @@ const SelectionHeader = ({type, screen, allItemsInThisList}) => {
 
   const selectedNotes = useMemo(
     () => selectedItems.filter(i => i.type === ItemTypes.NOTE),
+    [selectedItems],
+  );
+
+  // A mentee's note is read-only on this device: it lives in mentee_notes,
+  // and everything this header does but sharing writes to the tables that
+  // hold the user's own things. None of those writes would find the row, so
+  // they would report success over a database that never changed.
+  //
+  // Any such note in the selection takes the whole header down to share, not
+  // just that note's share: a bulk delete or a move is one action over the
+  // lot, and doing it to the half it can reach while silently skipping the
+  // rest is not something a count in a toast can explain afterwards.
+  //
+  // Sharing survives because it only ever reads - convertToPdf and the note
+  // bundle both go through getNoteById, which knows both tables.
+  const hasMenteeNotes = useMemo(
+    () => selectedItems.some(i => isMenteeNoteRef(i.id)),
     [selectedItems],
   );
 
@@ -270,27 +288,31 @@ ${describeFailures(failed)}`,
             </TouchableOpacity>
           )}
 
-          {type === ItemTypes.NOTE && movableNotes.length > 0 && (
+          {type === ItemTypes.NOTE && movableNotes.length > 0 && !hasMenteeNotes && (
             <TouchableOpacity onPress={() => setMoveVisible(true)} disabled={busy}>
               <MaterialIcons name="drive-file-move-outline" size={22} color="#007AFF" />
             </TouchableOpacity>
           )}
 
-          <TouchableOpacity onPress={openAddToCategory} disabled={busy}>
-            <Ionicons name="pricetag-outline" size={21} color="#007AFF" />
-          </TouchableOpacity>
+          {!hasMenteeNotes && (
+            <TouchableOpacity onPress={openAddToCategory} disabled={busy}>
+              <Ionicons name="pricetag-outline" size={21} color="#007AFF" />
+            </TouchableOpacity>
+          )}
 
-          {hasAssignableSelection && (
+          {hasAssignableSelection && !hasMenteeNotes && (
             <TouchableOpacity onPress={handleForward} disabled={busy}>
               <Fontisto name="share-a" size={20} color="#007AFF" />
             </TouchableOpacity>
           )}
 
-          <TouchableOpacity
-            onPress={() => setConfirmVisible(true)}
-            disabled={busy}>
-            <Ionicons name="trash-outline" size={22} color="#D32F2F" />
-          </TouchableOpacity>
+          {!hasMenteeNotes && (
+            <TouchableOpacity
+              onPress={() => setConfirmVisible(true)}
+              disabled={busy}>
+              <Ionicons name="trash-outline" size={22} color="#D32F2F" />
+            </TouchableOpacity>
+          )}
 
           <TouchableOpacity onPress={cancelSelection} style={styles.iconButton}>
             <Ionicons name="close-circle-outline" size={26} color="#007AFF" />

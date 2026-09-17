@@ -94,10 +94,14 @@ export const buildNoteBundle = async noteItems => {
       // sharing, it just arrives unattached the way every note did before.
       let media = null;
       try {
-        const described = await describeNoteMedia(note);
+        const described = await describeNoteMedia(note, item.id);
+        // Not either/or: an unreachable device file comes back as both, so
+        // the note keeps the name of what it was written against and the
+        // sender still gets the offer to upload it.
         if (described?.media) {
           media = described.media;
-        } else if (described?.reason) {
+        }
+        if (described?.reason) {
           unshared.push({
             item,
             reason: described.reason,

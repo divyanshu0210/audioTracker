@@ -46,9 +46,13 @@ import SaveToListBar from '../components/SaveToListBar';
 import {isContentUri, isStreamUrl, resolvePlaybackPath} from './driveStream';
 // const {PipModule} = NativeModules;
 
-const isAudioFile = mimeType => {
-  return mimeType.startsWith('audio/');
-};
+// Guarded rather than assuming a string: a row off the report API spells the
+// field mimetype and arrives here without this one, and an old items row may
+// carry no mime at all. Unknown means not-audio, which is the video layout
+// this has always defaulted to - a missing mime is no reason to take the
+// player down before it draws.
+const isAudioFile = mimeType =>
+  typeof mimeType === 'string' && mimeType.startsWith('audio/');
 
 // How much media time may sit unsaved before we force a write. Progress only
 // reaches the DB when an interval closes, so without this a process death
@@ -1086,7 +1090,7 @@ const BacePlayer = () => {
                 onNoteAdded={() => {
                   setShowNotes(true);
                   !isMinimized &&
-                    !currentItem?.type.startsWith('youtube') &&
+                    !currentItem?.type?.startsWith('youtube') &&
                     togglePlayerSize();
                   setIsCreatingNote(false);
                 }}
@@ -1137,13 +1141,70 @@ const BacePlayer = () => {
           {!isInPip && !showNotes && <SaveToListBar item={currentItem} />}
         </>
       ) : (
-        <Text>Loading...</Text>
+        // Nothing is loading, and nothing is going to: the player was handed
+        // no item at all. Every route that opens it can do this - a shared
+        // note whose media stayed on the sender's phone carries a link to
+        // nothing, a mentee's note points at an item that has not synced, and
+        // a timestamp tapped inside either lands here too, because
+        // seekToTimestamp shows the player unconditionally.
+        //
+        // "Loading..." promised that something was on its way, on a white
+        // screen whose own back button lives inside the branch above - so the
+        // only way out was the system gesture. Say what happened instead, and
+        // give them the way back.
+        <View style={styles.nothingToPlay}>
+          <TouchableOpacity
+            onPress={handleBackPress}
+            style={styles.nothingToPlayBack}>
+            <Icon name="arrow-back" size={26} color="#0f172a" />
+          </TouchableOpacity>
+          <View style={styles.nothingToPlayBody}>
+            <Icon name="cloud-off" size={34} color="#94a3b8" />
+            <Text style={styles.nothingToPlayTitle}>Nothing to play</Text>
+            <Text style={styles.nothingToPlayMessage}>
+              The recording this note was taken against isn't on this device. A
+              note carries a link to its media, not the media itself, so a file
+              kept on someone else's phone never travels with it.
+            </Text>
+          </View>
+        </View>
       )}
     </View>
   );
 };
 
 const styles = StyleSheet.create({
+  nothingToPlay: {
+    flex: 1,
+    backgroundColor: '#fff',
+  },
+  nothingToPlayBack: {
+    paddingHorizontal: 15,
+    paddingTop: 10,
+    alignSelf: 'flex-start',
+  },
+  nothingToPlayBody: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 32,
+    // Lifted off the true centre so the block sits where the eye lands rather
+    // than halfway down an empty screen.
+    paddingBottom: 60,
+  },
+  nothingToPlayTitle: {
+    marginTop: 10,
+    color: '#0f172a',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  nothingToPlayMessage: {
+    marginTop: 6,
+    color: '#64748b',
+    fontSize: 13,
+    lineHeight: 19,
+    textAlign: 'center',
+  },
   pipPlayerContainer: {flex: 1, height: '100%'},
   hidden: {display: 'none'},
   container: {

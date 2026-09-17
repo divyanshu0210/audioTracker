@@ -25,32 +25,59 @@ import {
 import {getDriveCopyId, saveDriveCopy} from '../../database/sharedDriveCopies';
 import {ITEM_TYPES_THAT_USE_ITEMS_TABLE} from '../../contexts/constants';
 import {getShareLink} from '../../Linking/utils/shareLink';
+import {getMenteeItemBySourceId} from '../../database/menteeNotesDB';
+import {parseNoteRef} from '../noteRef';
 
 // A note's source_type is either 'notebook' or one of the item types, so this
 // is also the test for "is this note attached to media at all".
 const isMediaSourceType = type => ITEM_TYPES_THAT_USE_ITEMS_TABLE.includes(type);
 
-// Why a note went out without its media. Reported to the sender, who is the
-// only one who can do anything about it — the recipient just sees a note.
+// Why a note's media can't be reached, for the sender — who is the only one
+// who can do anything about it. The note still travels with the media's
+// identity (see the device_file branch below), so this is about the bytes, not
+// about whether the recipient knows what the note was written against.
 export const MEDIA_NOT_SHARED = 'device-file-not-shared';
 export const MEDIA_MISSING = 'item-missing';
+// A mentee's device file with no copy in their Drive. Separate from
+// MEDIA_NOT_SHARED because that one is an offer - upload it and share again -
+// and this user cannot take it: the bytes are on the mentee's phone. Only the
+// mentee can make this one travel, so the note goes without it and nothing
+// interrupts the share to say so.
+export const MEDIA_NOT_MINE = 'mentee-device-file-not-shared';
 
 /**
  * Builds the media descriptor for a note, or explains why there isn't one.
  *
- * Returns {media} when the recipient will be able to reach the recording,
- * {reason} when they won't, and null for a note that was never attached to
+ * Returns {media} for a recording the recipient can reach, {media, reason} for
+ * one they can't but should still see named, {reason} alone when there is
+ * nothing to describe at all, and null for a note that was never attached to
  * media in the first place (a notebook note has nothing to describe).
  *
  * The descriptor is deliberately everything needed to rebuild the row without
  * a network call: an import that had to ask YouTube for a title would fail
  * offline, and fail differently again for a video that has since gone private.
  */
-export const describeNoteMedia = async note => {
+export const describeNoteMedia = async (note, ref) => {
   const type = note?.source_type;
   if (!type || !isMediaSourceType(type)) return null;
 
-  const item = await getItemBySourceId(note.source_id, type);
+  // A mentee's note points at a mentee's item, which lives in mentee_items
+  // and not in this user's own table - the sync brings both down together.
+  // Looking it up in the wrong one made every shared mentee note come out as
+  // MEDIA_MISSING, which reads as "their lecture is gone" when the truth is
+  // that it was never this user's lecture. Same fields either way, so only
+  // the lookup differs.
+  //
+  // ref is optional: callers holding a plain rowid - every path that shares
+  // the user's own notes - are unchanged by it.
+  const {menteeId} = parseNoteRef(ref);
+  const item = menteeId
+    ? await getMenteeItemBySourceId({
+        menteeId,
+        sourceId: note.source_id,
+        type,
+      })
+    : await getItemBySourceId(note.source_id, type);
   // The note outlives the item it was taken against — a deleted or
   // never-restored row leaves the note pointing at nothing.
   if (!item) return {reason: MEDIA_MISSING};
@@ -82,8 +109,30 @@ export const describeNoteMedia = async note => {
   if (type === 'device_file') {
     // The file came off the sender's phone. It is reachable only if they have
     // already uploaded a copy — see share/shareDeviceFile.
-    const driveFileId = await getDriveCopyId(item.id);
-    if (!driveFileId) return {reason: MEDIA_NOT_SHARED, item};
+    // The mentee's copy id rides on the row itself (mentee_item_meta), where
+    // the user's own is a lookup by local item id - and that id is this
+    // device's, which a mentee item does not have.
+    const driveFileId = menteeId
+      ? item.drive_file_id
+      : await getDriveCopyId(item.id);
+
+    // No copy: the descriptor still goes, carrying everything but an address.
+    // What the recipient gets is a row with a title and no path, which their
+    // player already knows how to be honest about - it opens and says the
+    // recording isn't on their device and there's no copy to fetch.
+    //
+    // Dropping the descriptor instead anchored the note to the Shared Notes
+    // notebook, and that loses something the sender never meant to withhold:
+    // which lecture they were writing about. A note that says "he answers
+    // this at 12:40" is about a recording by name even when the recording
+    // itself cannot travel.
+    //
+    // The reason rides along with it rather than instead of it, so the sender
+    // is still offered the upload — take it and the next share carries a
+    // drive_file_id that plays.
+    if (!driveFileId) {
+      return {media, reason: menteeId ? MEDIA_NOT_MINE : MEDIA_NOT_SHARED, item};
+    }
     media.drive_file_id = driveFileId;
     return {media};
   }

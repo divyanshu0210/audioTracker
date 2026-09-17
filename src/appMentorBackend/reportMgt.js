@@ -133,6 +133,13 @@ const toWatchHistoryRow = record => {
     // Empty string for every type but a shared device file. Normalised to null
     // so `!!item.drive_file_id` in the player's streamable check reads right.
     drive_file_id: record.drive_file_id || null,
+    // The API spells it mimetype; everything player-side reads mimeType off an
+    // items row - the audio-versus-video layout, the thumbnail placeholder.
+    // Mapped here so a mentee's row answers the same questions the user's own
+    // rows do, rather than arriving with no mime at all: the player called
+    // .startsWith on it before it could draw, and an audio lecture that got
+    // past that would have opened in the video layout.
+    mimeType: record.mimetype || record.mimeType || null,
   };
 };
 

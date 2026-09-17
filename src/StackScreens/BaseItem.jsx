@@ -24,6 +24,7 @@ import {navigationRef} from '../handlers/navigationRef';
 import {useShallow} from 'zustand/react/shallow';
 import {StackActions, useRoute} from '@react-navigation/core';
 import {logRender} from '../contexts/renderLog';
+import {isMenteeNoteRef} from '../notes/noteRef';
 
 const BaseItem = ({
   type,
@@ -460,7 +461,13 @@ const BaseItem = ({
     [ItemTypes.NOTE]: {
       Component: NoteItem,
       onPress: handleNotePress,
-      showMenu: () => screen,
+      // Never for someone else's note. Every entry in that menu but the two
+      // share ones writes to this device's own notes table, and a mentee's
+      // rowid matches nothing there - Delete asked for a destructive confirm
+      // and then silently did nothing, which is a worse answer than not
+      // offering it. Reading one is still a tap on the row, and sharing it
+      // moved to the long-press header.
+      showMenu: () => screen && !isMenteeNoteRef(sourceId),
     },
     [ItemTypes.CATEGORY]: {
       Component: CategoryItem,

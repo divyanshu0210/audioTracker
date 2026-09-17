@@ -150,3 +150,53 @@ export const fetchMenteeNotes = ({
     });
   });
 };
+
+/**
+ * The media row a mentee's note was taken against, or null.
+ *
+ * The same shape getItemBySourceId returns for this user's own items, so the
+ * one caller that needs both — describeNoteMedia, building the media half of
+ * a shared note — differs only in which of the two it asks.
+ *
+ * channel_title/thumbnail/drive_file_id come off mentee_item_meta rather than
+ * the item, exactly as youtube_meta and shared_drive_copies do on the user's
+ * own side; flattened onto the row here because that is how the fields are
+ * read downstream.
+ */
+export const getMenteeItemBySourceId = ({menteeId, sourceId, type}) => {
+  const fastdb = getDb();
+
+  return new Promise((resolve, reject) => {
+    fastdb.transaction(tx => {
+      tx.executeSql(
+        `SELECT mi.source_id,
+                mi.type,
+                mi.title,
+                mi.mimeType,
+                mi.duration,
+                mi.file_path,
+                mm.channel_title,
+                mm.thumbnail,
+                mm.drive_file_id
+           FROM mentee_items mi
+           LEFT JOIN mentee_item_meta mm
+                  ON mm.mentee_id = mi.mentee_id
+                 AND mm.remote_id = mi.remote_id
+          WHERE mi.mentee_id = ? AND mi.source_id = ? AND mi.type = ?;`,
+        [menteeId, sourceId, type],
+        (_, {rows: {_array}}) => resolve(_array[0] || null),
+        (_, error) => {
+          // No tables yet — the same honest empty answer fetchMenteeNotes
+          // gives. A note with no item behind it is an ordinary outcome here,
+          // so the caller already has a branch for null.
+          if (/no such table/i.test(error?.message ?? '')) {
+            resolve(null);
+            return;
+          }
+          reject(error);
+          return false;
+        },
+      );
+    });
+  });
+};

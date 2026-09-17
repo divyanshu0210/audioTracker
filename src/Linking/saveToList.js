@@ -17,7 +17,8 @@ import {
   isInSharedCache,
   resolveDestPath,
 } from './utils/handleLinkSubmit';
-import {isContentUri, takePersistableAccess} from '../utils/mediaFile';
+import {durableUriFor, isContentUri} from '../utils/mediaFile';
+import {captureIdentity} from '../utils/fileIdentity';
 
 // Which tab's list this item belongs to. The store keeps one array per source,
 // and the newly-saved row has to land in the right one or the tab shows
@@ -63,17 +64,19 @@ export const saveItemToList = async item => {
   const updates = {out_show: 1};
 
   if (needsImport(item)) {
-    // Ask for a lasting grant before spending the whole size of the file on a
-    // copy. Senders that offer one are the minority, but when one does, the
-    // file can simply be kept where it is and this costs a single call to find
-    // out. Only a uri can be kept this way — an older scratch copy is already
-    // the app's own bytes, sitting somewhere Android may evict.
-    const keptInPlace =
-      isContentUri(item.file_path) &&
-      (await takePersistableAccess(item.file_path));
+    // Look for a lasting address before spending the whole size of the file on
+    // a copy — a grant the sender offered, or the file's own MediaStore uri.
+    // Allowed to prompt for the permission, because this is the user deciding
+    // to keep something rather than glancing at it. Only a uri can be kept this
+    // way; an older scratch copy is already the app's own bytes.
+    const durable = isContentUri(item.file_path)
+      ? await durableUriFor(item.file_path, {prompt: true})
+      : null;
 
-    if (keptInPlace) {
-      console.log(`🔗 Kept ${item.title} in place at ${item.file_path}`);
+    if (durable) {
+      if (durable !== item.file_path) updates.file_path = durable;
+      await captureIdentity(item.id, durable);
+      console.log(`🔗 Kept ${item.title} in place at ${durable}`);
     } else {
       const destPath = await resolveDestPath(
         item.title || `file_${Date.now()}`,

@@ -27,7 +27,8 @@ public class BackupUtils {
             "category_items",
             "notes",
             "video_watch_history",
-            "shared_drive_copies"
+            "shared_drive_copies",
+            "device_file_meta"
     };
 
     private static final String PREF_NAME = "backup";

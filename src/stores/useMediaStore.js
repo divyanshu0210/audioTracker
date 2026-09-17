@@ -1,6 +1,10 @@
 import {create} from 'zustand';
 import {isAudioOrVideo} from '../Linking/utils/handleLinkSubmit';
 import {mediaExists} from '../utils/mediaFile';
+import {
+  hashPendingIdentities,
+  repairMissingDeviceFiles,
+} from '../utils/fileIdentity';
 
 export const useMediaStore = create((set, get) => ({
   driveLinksList: [],
@@ -117,6 +121,37 @@ export const useMediaStore = create((set, get) => ({
     // list — and treating that as "missing" flashed a warning chip on every
     // row for as long as the checks took.
     set({playableDeviceFiles: playable, validDeviceIds, deviceFilesChecked: true});
+
+    // Everything past this point is repair work, and none of it is allowed to
+    // hold up the list. The rows are already on screen with an honest answer;
+    // this only improves it.
+    const missing = files.filter(
+      file => file.type === 'device_file' && !validDeviceIds[file.source_id],
+    );
+
+    if (missing.length) {
+      repairMissingDeviceFiles(missing)
+        .then(repaired => {
+          if (!repaired.length) return;
+          // Re-pointed rows go back through setDeviceFiles rather than being
+          // patched into place, so the presence check runs again over the new
+          // paths and the chips, the queue and the menus all agree.
+          const byId = new Map(repaired.map(r => [r.sourceId, r.filePath]));
+          get().setDeviceFiles(prev =>
+            prev.map(file =>
+              byId.has(file.source_id)
+                ? {...file, file_path: byId.get(file.source_id)}
+                : file,
+            ),
+          );
+        })
+        .catch(error => console.warn('Repair pass failed:', error?.message));
+    }
+
+    // A trickle, not a sweep: each of these reads a whole file. Taking the
+    // identity now is what makes the repair above possible later, so it runs
+    // whenever the list is looked at and stops as soon as everything is known.
+    hashPendingIdentities().catch(() => {});
   },
 
   setData: async val => {

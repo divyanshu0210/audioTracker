@@ -28,7 +28,8 @@ import {NativeModules} from 'react-native';
 import NetInfo from '@react-native-community/netinfo';
 import RNFS from 'react-native-fs';
 
-import {isContentUri} from '../utils/mediaFile';
+import {isContentUri, mediaExists} from '../utils/mediaFile';
+import {repairDeviceFile} from '../utils/fileIdentity';
 
 const {DriveStream} = NativeModules;
 
@@ -110,8 +111,27 @@ export const resolvePlaybackPath = async item => {
   // What it does not survive is the user moving or deleting the file, which is
   // what uploading a copy to Drive is for — see shareDeviceFile.
   if (isContentUri(item?.file_path)) {
+    let path = item.file_path;
+
+    // The uri may have stopped working since it was stored: a share's grant
+    // dies with the task that received it, and a file the user moved leaves its
+    // old address pointing at nothing. Either way the bytes are usually still
+    // on the phone under a new name, and this is the right moment to go looking
+    // — the user has just asked for this file in particular, so a permission
+    // prompt here buys them the thing they are waiting for rather than
+    // interrupting something else.
+    //
+    // Checked rather than attempted, because handing a dead uri to the proxy
+    // fails silently: the player sits at 00:00 and the log says
+    // "no permission" where nobody is looking.
+    if (!(await mediaExists(path))) {
+      const repaired = await repairDeviceFile(item, {retry: true});
+      if (!repaired) return null;
+      path = repaired;
+    }
+
     try {
-      return await getContentStreamUrl(item.file_path);
+      return await getContentStreamUrl(path);
     } catch (error) {
       console.error('Could not start the stream proxy:', error);
       return null;

@@ -12,7 +12,7 @@
 // the unavailable screen in front of files that play fine.
 
 import RNFS from 'react-native-fs';
-import {NativeModules} from 'react-native';
+import {NativeModules, PermissionsAndroid, Platform} from 'react-native';
 import {releaseLongTermAccess} from '@react-native-documents/picker';
 
 const {FileMeta} = NativeModules;
@@ -53,6 +53,113 @@ export const takePersistableAccess = async uri => {
   } catch (error) {
     return false;
   }
+};
+
+/**
+ * Asks for the permission that makes MediaStore readable, and says whether the
+ * app now holds it.
+ *
+ * Split by version because the single storage permission became per-type ones
+ * in Android 13. Either audio or video counts as a yes — a user who allowed
+ * only one still gets that half of their library kept by reference and
+ * repairable, and refusing to use what was granted would help nobody.
+ *
+ * Worth calling only where the answer changes what happens next, since a
+ * standing refusal returns quietly but a first one costs the user a dialog.
+ */
+export const ensureMediaReadPermission = async () => {
+  if (Platform.OS !== 'android') return false;
+
+  const wanted =
+    Platform.Version >= 33
+      ? [
+          PermissionsAndroid.PERMISSIONS.READ_MEDIA_AUDIO,
+          PermissionsAndroid.PERMISSIONS.READ_MEDIA_VIDEO,
+        ]
+      : [PermissionsAndroid.PERMISSIONS.READ_EXTERNAL_STORAGE];
+
+  try {
+    const granted = await PermissionsAndroid.requestMultiple(wanted);
+    return wanted.some(
+      name => granted[name] === PermissionsAndroid.RESULTS.GRANTED,
+    );
+  } catch (error) {
+    return false;
+  }
+};
+
+/**
+ * The MediaStore uri for the same file, or null when there isn't one worth
+ * trusting. See FileMetaModule.resolveMediaStoreUri for what that means.
+ *
+ * Worth preferring over the uri a file arrived on, because a MediaStore uri is
+ * not read through a per-file grant at all — it is read on the strength of the
+ * media permission, so it outlives the task it arrived in and the app that sent
+ * it.
+ */
+export const resolveMediaStoreUri = async uri => {
+  if (!isContentUri(uri)) return null;
+  try {
+    return await FileMeta.resolveMediaStoreUri(uri);
+  } catch (error) {
+    return null;
+  }
+};
+
+/** Whether the media permission is already held, without asking for it. */
+export const hasMediaReadPermission = async () => {
+  if (Platform.OS !== 'android') return false;
+
+  const wanted =
+    Platform.Version >= 33
+      ? [
+          PermissionsAndroid.PERMISSIONS.READ_MEDIA_AUDIO,
+          PermissionsAndroid.PERMISSIONS.READ_MEDIA_VIDEO,
+        ]
+      : [PermissionsAndroid.PERMISSIONS.READ_EXTERNAL_STORAGE];
+
+  try {
+    const checks = await Promise.all(
+      wanted.map(name => PermissionsAndroid.check(name)),
+    );
+    return checks.some(Boolean);
+  } catch (error) {
+    return false;
+  }
+};
+
+/**
+ * A uri for the same file that will still work after this task ends, or null if
+ * there isn't one.
+ *
+ * Every way in — the picker, an "open with", a share — ends up here, because
+ * they all face the same question and used to answer it differently. A uri that
+ * arrived on an intent is readable now and worthless tomorrow; what varies is
+ * only which escape from that is available.
+ *
+ * Two of them, cheapest first. A sender that attached a persistable grant means
+ * the uri it sent is already permanent. Failing that, an ordinary media file in
+ * shared storage has a MediaStore uri of its own, which needs no grant at all —
+ * it is read on the strength of the media permission, so it outlives both the
+ * task and the app that sent it.
+ *
+ * `prompt` is the difference between a decision and a glance. Keeping a file is
+ * a deliberate act and can fairly ask for a permission; a file shared in to be
+ * watched once should not put a system dialog in front of someone who only
+ * tapped play, so that path takes the permission if it already has it and
+ * otherwise lets the uri be temporary.
+ */
+export const durableUriFor = async (uri, {prompt = false} = {}) => {
+  if (!isContentUri(uri)) return null;
+
+  if (await takePersistableAccess(uri)) return uri;
+
+  const allowed = prompt
+    ? await ensureMediaReadPermission()
+    : await hasMediaReadPermission();
+  if (!allowed) return null;
+
+  return await resolveMediaStoreUri(uri);
 };
 
 /**

@@ -8,7 +8,11 @@ import {
 } from '../../database/C';
 import RNFS from 'react-native-fs';
 import {pick, types} from '@react-native-documents/picker';
-import {takePersistableAccess} from '../../utils/mediaFile';
+import {durableUriFor} from '../../utils/mediaFile';
+import {
+  findDuplicateDeviceFile,
+  identifyNow,
+} from '../../utils/fileIdentity';
 import {NativeModules} from 'react-native';
 import {addItemToCategory} from '../../categories/catDB';
 import useDbStore from '../../database/dbStore';
@@ -554,18 +558,52 @@ export const isInSharedCache = path => !!path?.startsWith(`${SHARED_CACHE_DIR}/`
 // keep. Deciding to keep it is what reads the bytes, in saveItemToList, while
 // the grant is still alive.
 const handleSharedDeviceFile = async ({uri, name, type}) => {
+  // Without prompting. A file shared in to be watched once should not put a
+  // permission dialog in front of someone who only tapped play — but if the
+  // permission is already held, the MediaStore uri costs one query and is worth
+  // having, because it is the difference between this row working tomorrow and
+  // dying with the task.
+  const durable = await durableUriFor(uri);
+
+  // The same lecture shared in a second time is the same lecture. Reusing the
+  // row is what keeps the notes taken on it and the progress through it, rather
+  // than starting the user over on a file they are halfway through.
+  const existing = await findDuplicateDeviceFile(durable || uri);
+  if (existing) {
+    // Only the address. A share is not a decision to keep anything, so a row
+    // the user had deleted stays deleted and out of the list — it simply plays,
+    // exactly as an external YouTube or Drive link does.
+    const revived = await updateItemFields(existing.itemId, {
+      file_path: durable || uri,
+    });
+    navigationRef.navigate('BacePlayer', {item: revived});
+    console.log(`♻️ Reopened ${name} as the copy already in the library`);
+    return;
+  }
+
   const fullItem = await upsertItem({
     source_id: generateUUID(),
     type: 'device_file',
     title: name,
     mimeType: type,
-    file_path: uri,
+    file_path: durable || uri,
     out_show: 0,
     in_show: 0,
   });
 
+  // Identified in full, hash and all, rather than left for the background pass.
+  // A shared uri that could not be made durable is readable only while this
+  // task lives, so this is the single moment its fingerprint can be taken —
+  // and that fingerprint is the only thing that will find the file again once
+  // the grant lapses. Not awaited: playing must not wait on it.
+  identifyNow(fullItem.id, durable || uri);
+
   navigationRef.navigate('BacePlayer', {item: fullItem});
-  console.log(`✅ Opened shared ${name} in place from ${uri}`);
+  console.log(
+    durable
+      ? `✅ Opened shared ${name}, kept durable at ${durable}`
+      : `✅ Opened shared ${name} in place from ${uri}`,
+  );
 };
 
 const handleDeviceFileFromUri = async (
@@ -680,9 +718,12 @@ const resolveImportPath = async (file, fileName, uuid) => {
     return file.uri;
   }
 
-  if (await takePersistableAccess(file.uri)) {
-    console.log(`🔗 Referencing ${fileName} in place at ${file.uri}`);
-    return file.uri;
+  // Allowed to ask for the media permission here: this row is one the user is
+  // keeping, so the alternative to a dialog is copying the whole file.
+  const durable = await durableUriFor(file.uri, {prompt: true});
+  if (durable) {
+    console.log(`🔗 Referencing ${fileName} in place at ${durable}`);
+    return durable;
   }
 
   const destPath = await resolveDestPath(fileName, uuid);
@@ -708,31 +749,79 @@ export const handleFileProcessing = async (
 ) => {
   const fileName = file.name || `file_${Date.now()}`;
   const mimeType = file.type || 'unknown';
-  const uuid = generateUUID();
 
-  const filePath = await resolveImportPath(file, fileName, uuid);
+  // Checked before anything is copied, because the answer may be that there is
+  // nothing to import. The same file arriving twice used to become a second row
+  // with its own source_id, and everything hangs off that: the notes written
+  // against it, the minutes watched, the category it was filed under. A lecture
+  // shared in again a month later came back as a stranger.
+  const existing = await findDuplicateDeviceFile(file.uri);
 
-  const fullItem = await upsertItem({
-    source_id: uuid,
-    type: 'device_file',
-    title: fileName,
-    mimeType: mimeType,
-    file_path: filePath,
-    out_show: 1,
-    in_show: 0,
-  });
+  let fullItem;
 
+  if (existing) {
+    // The row is kept and only its address refreshed. The incoming uri is
+    // certainly alive and the stored one may not be, so re-importing a file is
+    // also how someone repairs one by hand without knowing that is what they
+    // are doing.
+    const durable = (await durableUriFor(file.uri, {prompt: true})) || file.uri;
+    // deleted_at cleared as well as out_show, so a file that had been removed
+    // comes all the way back. Setting only out_show — which is what the
+    // YouTube and Drive paths do — returns it to the list while leaving it
+    // filtered out of categories and downloads, which is a half-revived row
+    // nobody asked for.
+    fullItem = await updateItemFields(existing.itemId, {
+      file_path: durable,
+      out_show: 1,
+      deleted_at: null,
+    });
+    console.log(`♻️ ${fileName} was already in the library — reused its entry`);
+  } else {
+    const uuid = generateUUID();
+    const filePath = await resolveImportPath(file, fileName, uuid);
+
+    fullItem = await upsertItem({
+      source_id: uuid,
+      type: 'device_file',
+      title: fileName,
+      mimeType: mimeType,
+      file_path: filePath,
+      out_show: 1,
+      in_show: 0,
+    });
+
+    // Identified in full, now, while the file is definitely readable — which is
+    // the only moment it can be. Leaving the fingerprint to the background pass
+    // left a window where a file imported and then immediately moved had
+    // nothing recorded to find it by, and that pass takes the oldest first, so
+    // a fresh import was last in the queue precisely when its owner was most
+    // likely to be reorganising it. Under a megabyte, and not awaited.
+    identifyNow(fullItem.id, filePath);
+    console.log(`✅ Inserted ${fileName} into device_files table`);
+  }
+
+  // Everything below happens either way. A file the user just picked belongs in
+  // the category they had open and on the screen they expect, whether or not
+  // the library turned out to have seen it before — and an early return for the
+  // reused case is how an "open with" on a known file quietly stopped opening
+  // the player.
   if (selectedCategory != null) {
     await addItemToCategory(selectedCategory, fullItem.source_id, fullItem.type);
   }
-  setDeviceFiles(prev => [fullItem, ...prev]);
+
+  // Filtered as well as prepended, so a reused row moves to the top instead of
+  // appearing twice in a list that already held it.
+  setDeviceFiles(prev => [
+    fullItem,
+    ...prev.filter(f => f.source_id !== fullItem.source_id),
+  ]);
 
   if (navigate === 'player') {
     navigationRef.navigate('BacePlayer', {item: fullItem});
   } else if (navigate === 'list') {
     navigationRef.navigate('HomeScreen', {screen: 'Device'});
   }
-  console.log(`✅ Inserted ${fileName} into device_files table`);
+
   return fullItem;
 };
 

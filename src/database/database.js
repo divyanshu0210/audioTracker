@@ -116,6 +116,7 @@ export const initDatabase = (db = null) => {
       'trg_categories_updated_at',
       'trg_category_items_updated_at',
       'trg_shared_drive_copies_updated_at',
+      'trg_device_file_meta_updated_at',
     ].forEach(trigger => {
       tx.executeSql(`DROP TRIGGER IF EXISTS ${trigger};`);
     });
@@ -192,6 +193,73 @@ export const initDatabase = (db = null) => {
       () => console.log('shared_drive_copies table created successfully'),
       (_, error) =>
         console.error('Error creating shared_drive_copies table:', error),
+    );
+
+    // What a device file *is*, as opposed to where it currently happens to be.
+    //
+    // A device file is referenced rather than copied — items.file_path holds a
+    // content:// uri into the user's own storage — and that uri is an address,
+    // not an identity. Moving the file, renaming it, or a file manager that
+    // implements "move" as copy-then-delete all leave the row pointing at
+    // nothing, with the notes and watch history still attached to it.
+    //
+    // This is what makes the file findable again. Size and duration narrow the
+    // search to a handful of candidates without reading anything — they fail
+    // independently, since a re-encode keeps the running time and changes the
+    // length while a truncation does the reverse. content_hash then decides
+    // between the survivors, and is the only thing trusted to say two files are
+    // the same one. Nothing else here is evidence on its own: names repeat, and
+    // media_store_id survives a rename but not a re-creation.
+    //
+    // content_hash is null until something fills it in. It costs a full read,
+    // so it is never taken on the import path — see hashPendingIdentities.
+    //
+    // A side table, shaped exactly like youtube_meta and shared_drive_copies:
+    // only device files have any of this, and restore upserts on
+    // ON CONFLICT(id), which a table keyed only on item_id would fall through.
+    tx.executeSql(
+      `CREATE TABLE IF NOT EXISTS device_file_meta (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      item_id INTEGER NOT NULL,
+      media_store_id INTEGER,
+      display_name TEXT,
+      size INTEGER,
+      duration_ms INTEGER,
+      modified_at INTEGER,
+      content_hash TEXT,
+      hashed_at TIMESTAMP DEFAULT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE (item_id),
+      FOREIGN KEY (item_id) REFERENCES items(id) ON DELETE CASCADE
+    );`,
+      [],
+      () => console.log('device_file_meta table created successfully'),
+      (_, error) =>
+        console.error('Error creating device_file_meta table:', error),
+    );
+
+    // Looked up by hash when repairing, and by size when deciding what is
+    // worth hashing next, so both carry an index rather than a table scan per
+    // missing file.
+    tx.executeSql(
+      'CREATE INDEX IF NOT EXISTS idx_device_file_meta_hash ON device_file_meta (content_hash);',
+    );
+    tx.executeSql(
+      'CREATE INDEX IF NOT EXISTS idx_device_file_meta_size ON device_file_meta (size);',
+    );
+
+    tx.executeSql(
+      `CREATE TRIGGER IF NOT EXISTS trg_device_file_meta_updated_at
+       AFTER UPDATE ON device_file_meta
+       WHEN NEW.updated_at IS OLD.updated_at
+       BEGIN
+         UPDATE device_file_meta SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
+       END;`,
+      [],
+      () => console.log('device_file_meta updated_at trigger created'),
+      (_, error) =>
+        console.error('Error creating device_file_meta trigger:', error),
     );
 
     tx.executeSql(

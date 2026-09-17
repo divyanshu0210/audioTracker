@@ -17,6 +17,7 @@ import {
   isInSharedCache,
   resolveDestPath,
 } from './utils/handleLinkSubmit';
+import {isContentUri, takePersistableAccess} from '../utils/mediaFile';
 
 // Which tab's list this item belongs to. The store keeps one array per source,
 // and the newly-saved row has to land in the right one or the tab shows
@@ -29,11 +30,16 @@ const listSetterFor = type => {
 };
 
 /**
- * True when this item is still on the scratch copy it was shared in as, rather
- * than somewhere the app intends to keep it.
+ * True when this item's bytes are not yet anywhere the app can keep them.
+ *
+ * Two shapes, one meaning. A file shared in now arrives as the uri it was sent
+ * on, which the app has no lasting right to read; an older one arrived as a
+ * scratch copy in the cache, which Android may evict. Either way, keeping the
+ * item means putting the bytes somewhere of our own first.
  */
 const needsImport = item =>
-  item?.type === 'device_file' && isInSharedCache(item.file_path);
+  item?.type === 'device_file' &&
+  (isContentUri(item.file_path) || isInSharedCache(item.file_path));
 
 /**
  * Adds `item` to the root list.
@@ -57,15 +63,40 @@ export const saveItemToList = async item => {
   const updates = {out_show: 1};
 
   if (needsImport(item)) {
-    const destPath = await resolveDestPath(
-      item.title || `file_${Date.now()}`,
-      generateUUID(),
-    );
-    // Moved, not copied: the scratch copy has no reason to outlive the real
-    // one, and both directories are on the same volume so this is a rename.
-    await RNFS.moveFile(item.file_path, destPath);
-    updates.file_path = destPath;
-    console.log(`📁 Imported ${item.title} to ${destPath} on add`);
+    // Ask for a lasting grant before spending the whole size of the file on a
+    // copy. Senders that offer one are the minority, but when one does, the
+    // file can simply be kept where it is and this costs a single call to find
+    // out. Only a uri can be kept this way — an older scratch copy is already
+    // the app's own bytes, sitting somewhere Android may evict.
+    const keptInPlace =
+      isContentUri(item.file_path) &&
+      (await takePersistableAccess(item.file_path));
+
+    if (keptInPlace) {
+      console.log(`🔗 Kept ${item.title} in place at ${item.file_path}`);
+    } else {
+      const destPath = await resolveDestPath(
+        item.title || `file_${Date.now()}`,
+        generateUUID(),
+      );
+
+      if (isContentUri(item.file_path)) {
+        // The one moment these bytes are reachable. An ACTION_SEND grant lives
+        // only as long as the task that received it, so this reads them now,
+        // while the user is still in the session the file was shared into. If
+        // it has lapsed the copy throws, the row is left exactly as it was,
+        // and the Add bar says so — see SaveToListBar, which names this case.
+        await RNFS.copyFile(item.file_path, destPath);
+      } else {
+        // An older scratch copy. Moved, not copied: it has no reason to
+        // outlive the real one, and both directories are on the same volume so
+        // this is a rename.
+        await RNFS.moveFile(item.file_path, destPath);
+      }
+
+      updates.file_path = destPath;
+      console.log(`📁 Imported ${item.title} to ${destPath} on add`);
+    }
   }
 
   const saved = await updateItemFields(item.id, updates);

@@ -20,6 +20,7 @@ import { useShallow } from 'zustand/react/shallow';
 import { navigationRef } from '../handlers/navigationRef';
 import {ItemTypes} from '../contexts/constants';
 import {getDriveCopyId} from '../database/sharedDriveCopies';
+import {grantReaderAccess} from '../share/driveUpload';
 import UserAvatar from './UserAvatar';
 import {getUserId} from './UserList';
 
@@ -90,6 +91,9 @@ const {userInfo} = useAppState();
   const buildVideoPayload = async () => {
     const videos = [];
     const unshared = [];
+    // The Drive copies that need a permission granting on them, collected
+    // while walking the selection so the ids are not looked up twice.
+    const driveCopyIds = [];
 
     for (const item of selectedItems) {
       if (item.type === ItemTypes.DEVICE) {
@@ -113,12 +117,46 @@ const {userInfo} = useAppState();
           video_type: ItemTypes.DEVICE,
           origin_video_id: item.id,
         });
+        driveCopyIds.push(driveFileId);
         continue;
       }
       videos.push({video_id: item.id, video_type: item.type});
     }
 
-    return {videos, unshared};
+    return {videos, unshared, driveCopyIds};
+  };
+
+  // The mentee plays the Drive copy with their own Google account, so their
+  // account has to be allowed to read it. The copy is private to the mentor —
+  // deliberately, because the alternative was a link anyone could open — which
+  // leaves exactly this to do at the moment of assigning.
+  //
+  // Assigning is the consent. The mentor picked these people and picked this
+  // file for them to watch, which is the whole meaning of the action; asking
+  // again here would be asking them to confirm what they just did.
+  //
+  // Failures are collected rather than thrown. One mentee's permission failing
+  // must not cost the other mentees their assignment, and a file that is
+  // already shared with someone answers with an error this treats the same way
+  // — the end state is the one we wanted either way.
+  const grantMenteeAccess = async driveCopyIds => {
+    const emails = selectedUsers.map(u => u.user.email).filter(Boolean);
+    const failures = [];
+
+    await Promise.all(
+      driveCopyIds.flatMap(fileId =>
+        emails.map(async email => {
+          try {
+            await grantReaderAccess(fileId, email);
+          } catch (error) {
+            console.warn(`Could not grant ${email} access:`, error?.message);
+            failures.push(email);
+          }
+        }),
+      ),
+    );
+
+    return [...new Set(failures)];
   };
 
   const shareWithMentees = async () => {
@@ -133,7 +171,7 @@ const {userInfo} = useAppState();
 
     setAssigning(true);
     try {
-      const {videos, unshared} = await buildVideoPayload();
+      const {videos, unshared, driveCopyIds} = await buildVideoPayload();
 
       if (videos.length === 0) {
         Alert.alert(
@@ -142,6 +180,12 @@ const {userInfo} = useAppState();
         );
         return;
       }
+
+      // Before the assignment is recorded, so that a mentee opening it the
+      // moment it lands can already play it. A permission granted for an
+      // assignment that then fails to send is a mentee able to read a file
+      // nobody told them about, which is the harmless end of this trade.
+      const accessFailures = await grantMenteeAccess(driveCopyIds);
 
       const response = await fetch(
         `${BASE_URL}/assign/assign_videos_to_mentees/`,
@@ -173,6 +217,19 @@ const {userInfo} = useAppState();
         `Assigned to ${selectedUsers.length} mentee(s).${skipped}`,
         ToastAndroid.LONG,
       );
+
+      // Named, because the assignment did arrive and will sit there unplayable
+      // for these people until the permission exists. Silence would leave the
+      // mentor believing it worked and the mentee staring at a file that will
+      // not open, with neither able to see why.
+      if (accessFailures.length > 0) {
+        Alert.alert(
+          'Some mentees cannot open the file yet',
+          `${accessFailures.join('\n')}\n\nThe assignment was sent, but access ` +
+            'to your Drive copy could not be granted. Assign it again once you ' +
+            'are back online, or share the file with them from Drive.',
+        );
+      }
 
       // Cleared only on success. A network failure used to wipe the selection
       // too, so a retry meant picking every file and every mentee again.

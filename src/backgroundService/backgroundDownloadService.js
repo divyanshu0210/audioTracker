@@ -35,6 +35,11 @@ const removeFromQueue = async sourceId => {
 // ── Active job / progress tracking ───────────────────────────────────────────
 
 const activeJobIds = new Map(); // sourceId → RNFS jobId
+// sourceId → the in-flight RNFetchBlob upload, which is what cancelling one
+// needs. Kept apart from activeJobIds because that map's values are RNFS job
+// ids and an upload has none; it holds a null for an upload purely so the
+// shared notification can count what is in flight.
+const activeUploadTasks = new Map();
 const kindsInFlight = new Map(); // sourceId → 'download' | 'upload'
 const fileProgress = new Map(); // sourceId → { total, written }
 const lastReportedPct = new Map(); // sourceId → last progress % pushed to the store
@@ -173,13 +178,13 @@ const downloadSingleFile = async file => {
       await updateItemFields(file.id, {file_path: file.localPath});
       useDownloadStore.getState().notifyDownloadsChanged();
       // The row on the Device tab is still the one loaded at startup, carrying
-      // the file_path that wasn't there — so it stayed out of validDeviceFiles
+      // the file_path that wasn't there — so it stayed out of validDeviceIds
       // and a tap kept raising "File not on this device" over a file that had
       // just finished downloading. A drive_file gets this from the Download
       // button's own effect, but a device file's download is started from an
       // alert or the player, with no row component mounted to react to it, so
       // it has to happen here. setDeviceFiles re-runs the existence check and
-      // rebuilds validDeviceFiles, which is what makes the row playable again.
+      // rebuilds validDeviceIds, which is what makes the row playable again.
       if (file.type === 'device_file') {
         useMediaStore
           .getState()
@@ -258,6 +263,7 @@ const uploadSingleFile = async file => {
       title: file.title,
       localPath: file.localPath,
       mimeType: file.mimeType,
+      onTask: task => activeUploadTasks.set(file.sourceId, task),
       onProgress: ({percent, written, total}) => {
         // Real byte counts, so an upload contributes to the shared
         // "x MB / y MB" line on the same terms as a download. Recorded every
@@ -281,12 +287,19 @@ const uploadSingleFile = async file => {
       `${file.title} can now be shared. Use Copy Link on it.`,
     );
   } catch (error) {
-    console.error('Upload failed:', error);
-    await onDisplayNotification(
-      'Could not create link',
-      `${file.title} was not shared. ${error?.message || ''}`.trim(),
-    );
+    // A cancelled upload rejects here like any other failure. cancelUpload has
+    // already cleared the store entry by then, and its absence is what tells
+    // the two apart — the same test downloadSingleFile uses. Without it,
+    // stopping an upload on purpose ended in "Could not create link".
+    if (useShareStore.getState().uploading[file.id] != null) {
+      console.error('Upload failed:', error);
+      await onDisplayNotification(
+        'Could not create link',
+        `${file.title} was not shared. ${error?.message || ''}`.trim(),
+      );
+    }
   } finally {
+    activeUploadTasks.delete(file.sourceId);
     activeJobIds.delete(file.sourceId);
     kindsInFlight.delete(file.sourceId);
     fileProgress.delete(file.sourceId);
@@ -428,6 +441,38 @@ export const cancelDownload = async sourceId => {
     updateServiceNotification();
   }
   // If pendingCount === 1, the finally block will call BackgroundService.stop().
+};
+
+// Stops an upload in flight. Takes both ids because the two halves of an
+// upload are keyed differently: the queue and the in-flight maps go by
+// sourceId, while the share store — and so every bit of upload UI — goes by
+// the items-table id.
+//
+// The store entry is cleared first, so that the rejection this causes is read
+// as a cancel rather than as a failure.
+//
+// Nothing is left behind in Drive. The bytes go to a resumable session url
+// rather than to a file, and an abandoned session expires on Google's side
+// without ever becoming one.
+export const cancelUpload = async ({sourceId, itemId}) => {
+  useShareStore.getState().setUploading(itemId, null);
+  await removeFromQueue(sourceId);
+  fileProgress.delete(sourceId);
+  lastReportedPct.delete(sourceId);
+
+  const task = activeUploadTasks.get(sourceId);
+  if (task) {
+    try {
+      task.cancel();
+    } catch (error) {
+      console.warn('Could not cancel the upload:', error?.message);
+    }
+    activeUploadTasks.delete(sourceId);
+  }
+
+  if (pendingCount > 1) {
+    updateServiceNotification();
+  }
 };
 
 export const restoreDownloadState = async () => {

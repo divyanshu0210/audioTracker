@@ -43,7 +43,7 @@ import {
 } from '../backgroundService/playbackKeepAlive';
 import {usePipMode} from './usePipMode';
 import SaveToListBar from '../components/SaveToListBar';
-import {isStreamUrl, resolveDrivePlaybackPath} from './driveStream';
+import {isContentUri, isStreamUrl, resolvePlaybackPath} from './driveStream';
 // const {PipModule} = NativeModules;
 
 const isAudioFile = mimeType => {
@@ -149,10 +149,12 @@ const BacePlayer = () => {
   const [isResolvingSource, setIsResolvingSource] = useState(false);
   const currentSourceId = currentItem?.source_id;
   useEffect(() => {
-    // device_file too: one with a Drive copy streams from that copy, so it no
-    // longer has to be downloaded before it will play.
+    // device_file too, for either of two reasons: one left where the user
+    // keeps it plays through the proxy off its content:// uri, and one with a
+    // Drive copy streams from that copy rather than being downloaded first.
     const streamable =
       currentItem?.type === 'drive_file' ||
+      isContentUri(currentItem?.file_path) ||
       (currentItem?.type === 'device_file' && !!currentItem?.drive_file_id);
     if (!streamable) {
       setIsResolvingSource(false);
@@ -165,7 +167,7 @@ const BacePlayer = () => {
     let cancelled = false;
     setIsResolvingSource(true);
     (async () => {
-      const path = await resolveDrivePlaybackPath(currentItem);
+      const path = await resolvePlaybackPath(currentItem);
       if (cancelled) return;
       setIsResolvingSource(false);
       if (!path || path === currentItem.file_path) return;

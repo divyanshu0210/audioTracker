@@ -7,7 +7,8 @@ import {
   upsertYoutubeMeta,
 } from '../../database/C';
 import RNFS from 'react-native-fs';
-import {pick, types} from 'react-native-document-picker';
+import {pick, types} from '@react-native-documents/picker';
+import {takePersistableAccess} from '../../utils/mediaFile';
 import {NativeModules} from 'react-native';
 import {addItemToCategory} from '../../categories/catDB';
 import useDbStore from '../../database/dbStore';
@@ -521,58 +522,50 @@ export const extractFileId = url => {
   return match ? match[0] : null;
 };
 
-// Where a shared file waits while the user decides whether to keep it.
+// Where shared files used to wait while the user decided whether to keep one.
 //
-// The cache directory, not the app's files directory, and that distinction is
-// the whole point: an import goes somewhere permanent and shows up in the
-// Device tab, while this is a scratch copy Android may evict on its own and
-// nothing lists. Sharing a video from a chat to watch it once no longer costs
-// the user a permanent duplicate.
-//
-// Under ExternalCachesDirectoryPath rather than the internal one so that the
-// promotion in saveItemToList is a rename: getExternalCacheDir and
-// getExternalFilesDir are the same volume, and moveFile across volumes is not.
+// Nothing is written here any more — see handleSharedDeviceFile — but rows
+// created by earlier versions still point into it, and saveItemToList still
+// knows how to promote one of those, so the path has to stay recognisable.
 const SHARED_CACHE_DIR = `${RNFS.ExternalCachesDirectoryPath}/shared`;
 
 export const isInSharedCache = path => !!path?.startsWith(`${SHARED_CACHE_DIR}/`);
 
-// A file shared in from another app, copied to scratch and played from there.
+// A file shared in from another app, played straight from the uri it arrived
+// on. Nothing is copied.
 //
-// Playing straight from the content:// URI is what this did first, and VLC
-// cannot: the player's JS wrapper does flag a content: scheme as isNetwork and
-// hand it to `new Media(libvlc, Uri.parse(...))`, but this libvlc build has no
-// ContentResolver behind that path. It prefixes file:// and looks for a
-// literal file, so the MRL comes out as `file:////content%3A//...` and the
-// open fails with "No such file or directory" while the player sits at 00:00.
+// It used to be copied to a scratch file first, for a reason that no longer
+// holds: the player could not open a content: uri at all. Its JS wrapper flags
+// the scheme as a network source and hands it to
+// `new Media(libvlc, Uri.parse(...))`, which prefixes file:// and looks for a
+// literal path, so the MRL came out as `file:////content%3A//...` and the open
+// failed while the player sat at 00:00. The loopback proxy resolves the uri
+// now (see src/music/driveStream.js), so there is nothing left for the copy to
+// solve at this point.
 //
-// Copying here also settles the grant question. An ACTION_SEND URI is not
-// persistable — takePersistableUriPermission needs a flag Android only attaches
-// to SAF results — so the URI dies with the task. Reading it now, while the
-// grant is alive, is the only moment its bytes are reachable at all.
+// What it buys is the whole cost of the file. Sharing a 2GB video in from a
+// chat to watch once wrote 2GB to the cache before playback could even begin;
+// now it starts immediately and writes nothing.
 //
-// The name is the uuid: this file is addressed by the row, and the title the
-// user sees comes from the row too. It gets a real name if it is ever kept.
+// The grant question is deferred rather than answered. An ACTION_SEND uri is
+// not persistable — takePersistableUriPermission needs a flag Android only
+// attaches to SAF results — so it dies with the task, and this row is
+// out_show 0 precisely because it is not something the user has decided to
+// keep. Deciding to keep it is what reads the bytes, in saveItemToList, while
+// the grant is still alive.
 const handleSharedDeviceFile = async ({uri, name, type}) => {
-  const uuid = generateUUID();
-  const dot = name.lastIndexOf('.');
-  const ext = dot > 0 ? name.slice(dot) : '';
-
-  await RNFS.mkdir(SHARED_CACHE_DIR);
-  const cachePath = `${SHARED_CACHE_DIR}/${uuid}${ext}`;
-  await RNFS.copyFile(uri, cachePath);
-
   const fullItem = await upsertItem({
-    source_id: uuid,
+    source_id: generateUUID(),
     type: 'device_file',
     title: name,
     mimeType: type,
-    file_path: cachePath,
+    file_path: uri,
     out_show: 0,
     in_show: 0,
   });
 
   navigationRef.navigate('BacePlayer', {item: fullItem});
-  console.log(`✅ Opened shared ${name} from scratch copy ${cachePath}`);
+  console.log(`✅ Opened shared ${name} in place from ${uri}`);
 };
 
 const handleDeviceFileFromUri = async (
@@ -624,7 +617,7 @@ const handleDeviceFileFromUri = async (
       {uri, name: fileName, type: mimeType},
       setDeviceFiles,
       selectedCategory,
-      true,
+      'player',
     );
   } catch (err) {
     console.error('❌ Failed to handle file from URI:', err);
@@ -660,31 +653,71 @@ export const resolveDestPath = async (fileName, uuid) => {
   return destPath;
 };
 
+// Where an imported file's bytes will be read from, and the single decision
+// that makes an import cost storage or not.
+//
+// A uri whose grant was persisted is kept exactly as it is: the file stays
+// where the user keeps it, and plays through the loopback proxy because the
+// player cannot open a content: uri itself (see src/music/driveStream.js).
+// Every import used to be copied into the app's own storage instead, so a 2GB
+// video already on the phone cost 4GB once it was in the app.
+//
+// bookmarkStatus is the picker's own report of whether
+// takePersistableUriPermission went through, which is a different thing from
+// having asked for it: a provider can refuse.
+//
+// A uri that arrived on an intent instead — an "open with" — carries no such
+// report, and some senders do attach the persistable flag even though most do
+// not. The only way to find out is to try, so it is tried: winning means one
+// more file the app never has to copy.
+//
+// Copying remains the answer when neither works, since the row being written
+// here is one the user is keeping, and a uri with a session-long grant would
+// be dead in it by the next launch.
+const resolveImportPath = async (file, fileName, uuid) => {
+  if (file.bookmarkStatus === 'success') {
+    console.log(`🔗 Referencing ${fileName} in place at ${file.uri}`);
+    return file.uri;
+  }
+
+  if (await takePersistableAccess(file.uri)) {
+    console.log(`🔗 Referencing ${fileName} in place at ${file.uri}`);
+    return file.uri;
+  }
+
+  const destPath = await resolveDestPath(fileName, uuid);
+  await RNFS.copyFile(file.uri, destPath);
+  console.log(`📁 Copied ${fileName} to ${destPath}`);
+  return destPath;
+};
+
 // Throws if the file can't be copied or recorded. It used to swallow DB errors
 // and let copy errors escape to whoever called it, which is how a copy failing
 // on its own terms (a cloud provider's file that isn't on the device, a full
 // disk) reached the user as "Could not pick files".
 
+// `navigate` is where to go once the row exists: 'player' to open it, 'list'
+// to land on the Device tab, or 'none' to go nowhere — which is what a batch
+// import wants, so it can navigate once at the end rather than once per file.
+// Returns the row, so that caller has something to build a queue out of.
 export const handleFileProcessing = async (
   file,
   setDeviceFiles,
   selectedCategory,
-  navigateToPlayer = false,
+  navigate = 'list',
 ) => {
   const fileName = file.name || `file_${Date.now()}`;
   const mimeType = file.type || 'unknown';
   const uuid = generateUUID();
 
-  const destPath = await resolveDestPath(fileName, uuid);
-  await RNFS.copyFile(file.uri, destPath);
-  console.log(`📁 Copied ${fileName} to ${destPath}`);
+  const filePath = await resolveImportPath(file, fileName, uuid);
 
   const fullItem = await upsertItem({
     source_id: uuid,
     type: 'device_file',
     title: fileName,
     mimeType: mimeType,
-    file_path: destPath,
+    file_path: filePath,
     out_show: 1,
     in_show: 0,
   });
@@ -694,12 +727,13 @@ export const handleFileProcessing = async (
   }
   setDeviceFiles(prev => [fullItem, ...prev]);
 
-  if (navigateToPlayer) {
+  if (navigate === 'player') {
     navigationRef.navigate('BacePlayer', {item: fullItem});
-  } else {
+  } else if (navigate === 'list') {
     navigationRef.navigate('HomeScreen', {screen: 'Device'});
   }
   console.log(`✅ Inserted ${fileName} into device_files table`);
+  return fullItem;
 };
 
 // The picker and the import that follows it, in one place. Both callers used to
@@ -711,16 +745,41 @@ export const pickAndImportDeviceFiles = async (
 ) => {
   let results;
   try {
+    // 'open' rather than the default 'import', and that is the whole point:
+    // import mode runs ACTION_GET_CONTENT, whose uri Android refuses to make
+    // persistable — it never attaches the flag takePersistableUriPermission
+    // needs — so the picker copies the bytes into a cache dir and hands back a
+    // uri that dies with the task. Open mode runs ACTION_OPEN_DOCUMENT, and
+    // requestLongTermAccess takes the persistable grant, which is what lets
+    // the row point at the user's own file for good instead of at a copy.
     results = await pick({
       allowMultiSelection: true,
       type: [types.audio, types.video],
+      mode: 'open',
+      requestLongTermAccess: true,
+      // Hides the cloud sources — Drive, Dropbox, anything whose bytes are not
+      // on this phone. It becomes EXTRA_LOCAL_ONLY on the intent, which the
+      // system picker honours by dropping every root that does not declare
+      // Root.FLAG_LOCAL_ONLY; Downloads, internal storage and the SD card all
+      // declare it and stay.
+      //
+      // It matters more than it used to. A picked file is now referenced in
+      // place rather than copied, so a cloud-backed one would have played only
+      // while online, and would have failed at the worst possible moment
+      // instead of at import. Keeping those out of the picker means what the
+      // user picks is what plays, offline included.
+      //
+      // Not in the library's TypeScript types, but real: parsePickOptions
+      // reads it off the options map and pick() spreads the whole object
+      // through untouched. Not a stray key — don't tidy it away.
+      localOnly: true,
     });
   } catch (err) {
     // Cancelling isn't a failure, and neither is a second tap while the picker
     // is still opening — that one rejects with ASYNC_OP_IN_PROGRESS, and only
     // the cancel code was let through, so it raised an alert.
     if (
-      err?.code === 'DOCUMENT_PICKER_CANCELED' ||
+      err?.code === 'OPERATION_CANCELED' ||
       err?.code === 'ASYNC_OP_IN_PROGRESS'
     ) {
       console.log('🚫 File picker dismissed:', err.code);
@@ -736,15 +795,38 @@ export const pickAndImportDeviceFiles = async (
 
   // One unreadable file used to abort the loop, dropping every file after it
   // without a word. Import them independently and name the ones that failed.
+  const imported = [];
   const failed = [];
+  const notMedia = [];
   setInserting(true);
   try {
     for (const file of results) {
+      // The picker is asked for audio and video only — EXTRA_MIME_TYPES, see
+      // the pick() call above — but that filter is advisory, which is why the
+      // library bothers to report hasRequestedType at all. Some providers
+      // ignore it, and taking whatever came back would put a row in the Device
+      // tab that the player cannot open.
+      //
+      // Only a type that is present and not media is refused. A provider that
+      // returns none has told us nothing, and turning away a real recording
+      // because its provider was vague is the worse of the two mistakes — the
+      // player already says plainly when it cannot open something.
+      if (typeof file?.type === 'string' && !isAudioOrVideo(file.type)) {
+        console.warn(`🚫 Ignoring non-media pick: ${file?.name} (${file?.type})`);
+        notMedia.push(file?.name || 'Unnamed file');
+        continue;
+      }
+
       try {
         // Passed on like the link path does: both callers had the selected
         // category in hand and neither forwarded it, so a file picked from the
         // device while a category was open landed outside it.
-        await handleFileProcessing(file, setDeviceFiles, selectedCategory);
+        //
+        // 'none' because the navigation happens once, below — this used to
+        // bounce to the Device tab once per file in a multi-select.
+        imported.push(
+          await handleFileProcessing(file, setDeviceFiles, selectedCategory, 'none'),
+        );
       } catch (err) {
         console.error(`❌ Import failed for ${file?.name}:`, err);
         failed.push(file?.name || 'Unnamed file');
@@ -754,12 +836,32 @@ export const pickAndImportDeviceFiles = async (
     setInserting(false);
   }
 
+  // Straight into the player: picking a file is already the decision to hear
+  // it, and landing on the Device tab made the user find it in a list and tap
+  // it again. Several at once become the queue in the order they were picked,
+  // rather than one playing and the rest sitting there.
+  if (imported.length > 0) {
+    navigationRef.navigate(
+      'BacePlayer',
+      imported.length === 1
+        ? {item: imported[0]}
+        : {items: imported, currentIndex: 0},
+    );
+  }
+
+  if (notMedia.length > 0) {
+    Alert.alert(
+      'Not an audio or video file',
+      `${notMedia.join('\n')}\n\naudioTracker plays audio and video files.`,
+    );
+  }
+
   if (failed.length > 0) {
     Alert.alert(
-      failed.length === results.length
+      imported.length === 0
         ? 'Could not add these files'
         : 'Some files were not added',
-      `${failed.join('\n')}\n\nFiles kept in the cloud may need to be downloaded to this device first.`,
+      `${failed.join('\n')}\n\nThe file may have been moved, or the app providing it may no longer be granting access.`,
     );
   }
 };

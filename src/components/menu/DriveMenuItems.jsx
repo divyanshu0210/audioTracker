@@ -11,6 +11,7 @@ import { useShallow } from 'zustand/react/shallow';
 import { navigationRef } from '../../handlers/navigationRef';
 import useDownloadStore from '../../stores/useDownloadStore';
 import {enqueueDriveDownload} from '../buttons/Download';
+import {isContentUri, mediaExists, releaseMedia} from '../../utils/mediaFile';
 import useInMenteeCategory from '../../appMentor/useInMenteeCategory';
 import {
   downloadSharedCopy,
@@ -39,7 +40,7 @@ const {
   // not after.
   const hasSharedCopy = !!item?.drive_file_id;
 
-  // Read off validDeviceFiles, which setDeviceFiles already built by asking
+  // Read off validDeviceIds, which setDeviceFiles already built by asking
   // the filesystem — no second stat per menu.
   const isMissing = useMediaStore(
     s =>
@@ -48,7 +49,7 @@ const {
 
   // Only while the file is missing and a copy exists to fetch. Once it lands,
   // the download service writes file_path back, the row rejoins
-  // validDeviceFiles, and this gives way to the ordinary Delete entry.
+  // validDeviceIds, and this gives way to the ordinary Delete entry.
   const canRestoreFromDrive = isDevice && isMissing && hasSharedCopy;
 
   // Downloading a Drive file used to be the row's whole action, because
@@ -63,16 +64,15 @@ const {
   const inMenteeCategory = useInMenteeCategory();
 
   // The path outlives the file: Android can reclaim the app's files directory
-  // and a file manager can delete out of it, so this asks the filesystem
-  // rather than trusting file_path. One check per menu open, not per row —
-  // react-native-material-menu renders nothing while closed.
+  // and a file manager can delete out of it, so this asks rather than trusting
+  // file_path. One check per menu open, not per row — react-native-material-menu
+  // renders nothing while closed. Through mediaExists because a referenced
+  // import's file_path is a content:// uri that RNFS cannot stat.
   const [downloaded, setDownloaded] = useState(!!item?.file_path);
   useEffect(() => {
     let mounted = true;
     (async () => {
-      const exists = item?.file_path
-        ? await RNFS.exists(item.file_path).catch(() => false)
-        : false;
+      const exists = await mediaExists(item?.file_path);
       if (mounted) setDownloaded(exists);
     })();
     return () => {
@@ -157,15 +157,22 @@ const {
 
   const handleDeleteDeviceFile = async () => {
     try {
-      if (await RNFS.exists(item.file_path)) {
-        await RNFS.unlink(item.file_path);
-      }
+      // Whether this deletes anything depends on whose file it is: a copy the
+      // app made is removed, a file left where the user keeps it only has its
+      // access given back. releaseMedia draws that line — see src/utils/mediaFile.js.
+      const referenced = isContentUri(item.file_path);
+      await releaseMedia(item.file_path);
       // Before the row goes: the shared copy is readable by anyone with the
       // link, so it cannot outlive the file it is a copy of.
       await removeSharedCopy(item.id);
       await updateItemFields(item.id, {file_path: null});
       await softDeleteItem(item.type, item.source_id);
-      ToastAndroid.show('File deleted', ToastAndroid.SHORT);
+      // Said accurately, because for a referenced file it is the difference
+      // between the library forgetting it and the user losing a recording.
+      ToastAndroid.show(
+        referenced ? 'Removed from your list' : 'File deleted',
+        ToastAndroid.SHORT,
+      );
       setDeviceFiles(prev => prev.filter(f => f.source_id !== item.source_id));
     } catch (error) {
       Alert.alert('Delete failed');

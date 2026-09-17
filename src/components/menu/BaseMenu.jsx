@@ -54,7 +54,7 @@ const {setSelectedNote} = useNotesStore(
   const shareLink = getShareLink(item, driveCopyId);
 
   // file_path alone is not enough to know the bytes are there: a restored row
-  // carries the path it had on whatever device made the backup. validDeviceFiles
+  // carries the path it had on whatever device made the backup. validDeviceIds
   // is the list setDeviceFiles built by actually asking the filesystem.
   const isMissingDeviceFile = useMediaStore(
     s =>
@@ -163,14 +163,15 @@ const {setSelectedNote} = useNotesStore(
               hideMenu();
               confirmAndShareDeviceFile(item);
             }}>
+            {/* Just the word. The row carries the ring and the percentage,
+                and cancelling belongs there too — repeating it here would be a
+                second, smaller copy of something already on screen. */}
             <Text
               style={[
                 styles.menuItemText,
                 uploadingCopy && styles.menuItemTextDisabled,
               ]}>
-              {uploadingCopy
-                ? `Uploading… ${uploadPercent}%`
-                : 'Create shareable link'}
+              {uploadingCopy ? 'Uploading...' : 'Create shareable link'}
             </Text>
           </MenuItem>
         )}

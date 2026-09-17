@@ -7,23 +7,59 @@
 // service imports this, and shareDeviceFile imports the service to enqueue.
 // Putting this in shareDeviceFile would make those two import each other.
 
+import RNFS from 'react-native-fs';
+
 import {saveDriveCopy} from '../database/sharedDriveCopies';
 import {useMediaStore} from '../stores/useMediaStore';
-import {makeLinkReadable, uploadFileToDrive} from './driveUpload';
+import {isContentUri} from '../utils/mediaFile';
+import {uploadFileToDrive} from './driveUpload';
+
+/**
+ * Runs `send` against a path RNFetchBlob can stream from.
+ *
+ * A file the user keeps outside the app has no such path — the row holds a
+ * content:// uri, and wrap() wants a file on disk. So one is made for the
+ * length of the upload and dropped afterwards, which is a scratch copy rather
+ * than the permanent second copy every import used to carry.
+ *
+ * In the cache dir on purpose: if the process dies mid-upload and the finally
+ * never runs, Android reclaims it on its own.
+ */
+const withStreamablePath = async (localPath, send) => {
+  if (!isContentUri(localPath)) return send(localPath);
+
+  const scratch = `${RNFS.CachesDirectoryPath}/upload_${Date.now()}`;
+  await RNFS.copyFile(localPath, scratch);
+  try {
+    return await send(scratch);
+  } finally {
+    RNFS.unlink(scratch).catch(() => {});
+  }
+};
 
 // Resolves to the Drive file id. Throws on failure — the caller owns what a
 // failure means for the queue and the notification.
-export const performUpload = async ({itemId, title, localPath, mimeType, onProgress}) => {
-  const driveFileId = await uploadFileToDrive({
-    localPath,
-    name: title,
-    mimeType,
-    onProgress,
-  });
+export const performUpload = async ({
+  itemId,
+  title,
+  localPath,
+  mimeType,
+  onProgress,
+  onTask,
+}) => {
+  const driveFileId = await withStreamablePath(localPath, path =>
+    uploadFileToDrive({
+      localPath: path,
+      name: title,
+      mimeType,
+      onProgress,
+      onTask,
+    }),
+  );
 
-  // Order matters: the id is recorded before the file is made link-readable.
-  // If that second call fails, the copy still exists and is already ours, so a
-  // retry finds it here rather than uploading the whole file again.
+  // The copy stays private to the uploader. Nothing is granted here: who may
+  // read it is decided later, per person — see grantReaderAccess, called when
+  // a file is actually assigned to someone.
   await saveDriveCopy(itemId, driveFileId);
 
   // The list in memory was read before this row had a copy, and nothing refetches
@@ -34,8 +70,6 @@ export const performUpload = async ({itemId, title, localPath, mimeType, onProgr
     .setDeviceFiles(prev =>
       prev.map(f => (f.id === itemId ? {...f, drive_file_id: driveFileId} : f)),
     );
-
-  await makeLinkReadable(driveFileId);
 
   return driveFileId;
 };

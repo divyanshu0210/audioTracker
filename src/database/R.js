@@ -107,11 +107,12 @@ export const getChildrenByParent = async (parentId = null, types = null) => {
 //
 // device_file is excluded explicitly, though its file_path is always local and
 // it would otherwise qualify. A device file was never downloaded:
-// handleFileProcessing copies a picked file into the app's directory and stores
-// that path at import, so one has a local path from the moment it exists and
-// there is no "not yet downloaded" state to tell it apart from. Matching them
-// filled the Downloads screen with every local import, which the Device tab
-// already lists.
+// handleFileProcessing records somewhere to play from at import — the uri of
+// the user's own file, or a path to a copy of it when that uri could not be
+// kept (see resolveImportPath) — so one is playable from the moment it exists
+// and there is no "not yet downloaded" state to tell it apart from. Matching
+// them filled the Downloads screen with every local import, which the Device
+// tab already lists.
 export const getDownloadedItems = () => {
   const fastdb = getDb();
   return new Promise((resolve, reject) => {

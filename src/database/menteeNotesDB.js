@@ -122,7 +122,7 @@ export const fetchMenteeNotes = ({
             // and an iskcon file is the only type that can supply one from
             // what we hold — its source_id is the path on the site, so
             // getShareLink rebuilds it. Drive and device files resolve
-            // through resolveDrivePlaybackPath instead, off source_id and
+            // through resolvePlaybackPath instead, off source_id and
             // drive_file_id, and a copy downloaded onto the mentee's phone is
             // not something this device could open anyway.
             if (note.relatedItem?.type === 'iskcon_file') {

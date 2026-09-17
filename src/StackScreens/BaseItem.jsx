@@ -153,48 +153,50 @@ const BaseItem = ({
   }, [item, screen]);
 
   const handleDevicePress = useCallback(() => {
-    const {validDeviceFiles} = useMediaStore.getState();
+    const {validDeviceIds, playableDeviceFiles} = useMediaStore.getState();
 
     // Files whose bytes are gone are listed now instead of hidden, so a tap
     // on one has to say why nothing plays — and offer the way back when
     // there is a copy on Drive to fetch.
-    const present = validDeviceFiles.some(
-      f => f.source_id === item.source_id,
-    );
+    const present = !!validDeviceIds[item.source_id];
     const playable = isAudioOrVideo(item.mimeType);
 
-    if (!present) {
-      // A Drive copy is an address like any other, so this plays straight from
-      // it rather than insisting on a download first — the same streaming path
-      // a drive_file takes. Downloading is still offered from the row's menu
-      // for anyone who wants it offline.
-      if (playable && item.drive_file_id) {
-        navigationRef.navigate('BacePlayer', {item});
-        return;
-      }
-      // No copy to stream, or not something this app plays. One alert for both
-      // cases — it decides for itself whether there is a Drive copy to offer,
-      // and either way it can clear the row from the list.
+    if (!playable) {
+      // Nothing this app plays. A missing one still gets the recovery alert,
+      // which decides for itself whether there is a Drive copy to offer and
+      // can clear the row either way; a present one does nothing on tap, as
+      // it always has.
+      if (!present) offerSharedCopyDownload(item);
+      return;
+    }
+
+    // A Drive copy is an address like any other, so a file whose bytes are
+    // gone plays straight from it rather than insisting on a download first —
+    // the same streaming path a drive_file takes. Downloading is still offered
+    // from the row's menu for anyone who wants it offline.
+    if (!present && !item.drive_file_id) {
       offerSharedCopyDownload(item);
       return;
     }
 
-    if (item.file_path && playable) {
-      const startingIndex = validDeviceFiles.findIndex(
-        f => f.source_id === item.source_id,
-      );
-      // validDeviceFiles holds only files with bytes on disk, so a row can be
-      // absent from it and still be playable — start the player on the item
-      // itself rather than at index -1, which plays nothing.
-      if (startingIndex < 0) {
-        navigationRef.navigate('BacePlayer', {item});
-        return;
-      }
-      navigationRef.navigate('BacePlayer', {
-        items: validDeviceFiles,
-        currentIndex: startingIndex,
-      });
+    // The playable list, not just the present ones: a streamable file belongs in
+    // the queue with everything else, both so it can be reached by playing
+    // through the list and so tapping it does not strand the player on a
+    // playlist of one.
+    const startingIndex = playableDeviceFiles.findIndex(
+      f => f.source_id === item.source_id,
+    );
+    // A row can be playable and still be absent from that list — it is rebuilt
+    // asynchronously — so start the player on the item itself rather than at
+    // index -1, which plays nothing.
+    if (startingIndex < 0) {
+      navigationRef.navigate('BacePlayer', {item});
+      return;
     }
+    navigationRef.navigate('BacePlayer', {
+      items: playableDeviceFiles,
+      currentIndex: startingIndex,
+    });
   }, [item, screen]);
 
   const handleDrivePress = useCallback(() => {

@@ -16,8 +16,9 @@ const DeviceFilesView = ({onRefresh}) => {
   // still there. They are listed with a warning badge instead, and the row
   // says what to do about it.
   //
-  // validDeviceFiles stays as it is and still feeds the player queue: a file
-  // that cannot be played has no business being queued.
+  // The queue is playableDeviceFiles, which is a wider list than the on-disk
+  // one: a file that cannot be played has no business being queued, but a
+  // missing file with a copy in Drive can be played — it streams.
   const data = useMediaStore(state => state.deviceFiles);
   const loading = useLoadingStore(state => state.loadingStates.device);
   

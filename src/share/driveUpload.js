@@ -31,7 +31,17 @@ export const SHARED_FOLDER_NAME = 'audioTracker Shared';
 const stripScheme = path =>
   path.startsWith('file://') ? path.replace('file://', '') : path;
 
-export const uploadFileToDrive = async ({localPath, name, mimeType, onProgress}) => {
+// onTask hands the in-flight request back to the caller, which is the only
+// way to stop one. RNFetchBlob's task is the handle — there is no job id to
+// look up the way RNFS downloads have — so a caller that wants to cancel has
+// to be given the object itself while the upload is running.
+export const uploadFileToDrive = async ({
+  localPath,
+  name,
+  mimeType,
+  onProgress,
+  onTask,
+}) => {
   const accessToken = await getGoogleAccessToken();
   const folderId = await getOrCreateDriveFolder(SHARED_FOLDER_NAME);
   const type = mimeType || 'application/octet-stream';
@@ -70,6 +80,10 @@ export const uploadFileToDrive = async ({localPath, name, mimeType, onProgress})
     RNFetchBlob.wrap(stripScheme(localPath)),
   );
 
+  // Registered before any await on it, so a cancel arriving immediately still
+  // finds something to stop.
+  if (onTask) onTask(upload);
+
   if (onProgress) {
     // Byte counts as well as the percentage: the transfer notification shows
     // "12.4 MB / 30.1 MB" alongside the bar, and deriving that back from a
@@ -98,27 +112,36 @@ export const uploadFileToDrive = async ({localPath, name, mimeType, onProgress})
   return body.id;
 };
 
-// Without this the recipient lands on Google's request-access page: the file
-// is in the user's Drive and private to them until told otherwise. Called only
-// after the confirmation dialog has said in words that the link will be
-// openable by anyone who has it.
-export const makeLinkReadable = async fileId => {
+// Lets one named person read the copy, and nobody else.
+//
+// This replaced a blanket {role: 'reader', type: 'anyone'} on every upload,
+// which is a different thing entirely: it made a link that opens for whoever
+// holds it, forever, with no record of who that turned out to be. A personal
+// recording uploaded so it could be assigned to one mentee was readable by
+// anyone the link ever reached. The copy is private now, and access is given
+// to the people the owner actually meant.
+//
+// sendNotificationEmail=false because the app is already telling them — an
+// assignment arrives in their inbox in the app, and a second mail from Drive
+// naming a file they will never open directly is noise.
+export const grantReaderAccess = async (fileId, email) => {
   const accessToken = await getGoogleAccessToken();
 
   const response = await RNFetchBlob.fetch(
     'POST',
-    `https://www.googleapis.com/drive/v3/files/${fileId}/permissions`,
+    `https://www.googleapis.com/drive/v3/files/${fileId}/permissions` +
+      '?sendNotificationEmail=false',
     {
       Authorization: `Bearer ${accessToken}`,
       'Content-Type': 'application/json',
     },
-    JSON.stringify({role: 'reader', type: 'anyone'}),
+    JSON.stringify({role: 'reader', type: 'user', emailAddress: email}),
   );
 
   const status = response.info().status;
   if (status < 200 || status >= 300) {
     throw new Error(
-      `Could not make the Drive file link-readable (HTTP ${status})`,
+      `Could not give ${email} access to the Drive copy (HTTP ${status})`,
     );
   }
 };

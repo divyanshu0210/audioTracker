@@ -14,9 +14,9 @@
 // through a notification the way downloads do.
 
 import {Alert, ToastAndroid} from 'react-native';
-import RNFS from 'react-native-fs';
 import useShareStore from '../stores/useShareStore';
 import {useMediaStore} from '../stores/useMediaStore';
+import {isContentUri, mediaExists} from '../utils/mediaFile';
 import {softDeleteItem} from '../database/D';
 import {deleteDriveCopy, getDriveCopyId} from '../database/sharedDriveCopies';
 import {
@@ -26,13 +26,19 @@ import {
 import {resolveDestPath} from '../Linking/utils/handleLinkSubmit';
 import {trashDriveFile} from './driveUpload';
 
-// Said in full before anything is uploaded. Sharing a private file off the
-// phone to a link anyone can open is not something to infer from a tap on
-// "Copy Link", so it is its own menu entry with its own confirmation.
-const CONFIRM_TITLE = 'Share this file?';
+// Said in full before anything is uploaded. Putting a file from the phone into
+// the user's Drive is not something to infer from a tap on "Copy Link", so it
+// is its own menu entry with its own confirmation.
+//
+// The copy used to be made readable by anyone holding the link. It is private
+// now, so what this has to explain changed with it: the upload still happens,
+// but nobody gains access until the owner gives it to a named person.
+const CONFIRM_TITLE = 'Upload a copy to Drive?';
 const CONFIRM_BODY =
   'A copy will be uploaded to your Google Drive, in a folder called ' +
-  '"audioTracker Shared", and given a link that anyone who has it can open.\n\n' +
+  '"audioTracker Shared". It stays private to you.\n\n' +
+  'Anyone you send the link to has to ask you for access, and assigning the ' +
+  'file to your mentees gives it to them automatically.\n\n' +
   'You can delete the copy from your Drive at any time, which stops the link working.';
 
 export const confirmAndShareDeviceFile = item =>
@@ -40,7 +46,7 @@ export const confirmAndShareDeviceFile = item =>
     Alert.alert(CONFIRM_TITLE, CONFIRM_BODY, [
       {text: 'Cancel', style: 'cancel', onPress: () => resolve(false)},
       {
-        text: 'Upload and share',
+        text: 'Upload',
         onPress: () => {
           shareDeviceFile(item);
           resolve(true);
@@ -66,7 +72,7 @@ export const shareDeviceFile = async item => {
   }
   // The row can outlive the file; queueing a path that is not there would fail
   // deep inside the request with a much worse message.
-  if (!item.file_path || !(await RNFS.exists(item.file_path))) {
+  if (!(await mediaExists(item.file_path))) {
     Alert.alert('Cannot share', 'This file is no longer on the device.');
     return false;
   }
@@ -140,7 +146,7 @@ export const removeSharedCopy = async itemId => {
 // anonymous request would 403 even though the file is link-readable.
 //
 // On success the download service writes localPath into items.file_path, which
-// is what puts the file back in validDeviceFiles and makes it playable again.
+// is what puts the file back in validDeviceIds and makes it playable again.
 export const downloadSharedCopy = async item => {
   const driveFileId = item?.drive_file_id;
   if (!driveFileId) {
@@ -186,6 +192,13 @@ export const downloadSharedCopy = async item => {
 // the only one left, and destroying it from a tidy-up action would be a poor
 // surprise. The consequence is that a link handed out earlier keeps working
 // for a row the user has hidden.
+//
+// It does not give back a referenced file's access grant either, for the same
+// shape of reason. "Missing" is not always permanent — an SD card comes back,
+// a file comes out of the bin — and this is a soft delete the row can be
+// restored from. Releasing the grant would make that restore unable to reach
+// the file even once it returned. Deleting the row outright does release it;
+// see releaseMedia in DriveMenuItems.
 const removeMissingFromList = async item => {
   try {
     await softDeleteItem(item.type, item.source_id);
@@ -202,15 +215,32 @@ const removeMissingFromList = async item => {
 };
 
 // Shown when a missing file is tapped, and from its menu. What it offers
-// depends on whether there is a copy on Drive to fetch back.
+// depends on whether there is a copy on Drive to fetch back, and what it says
+// depends on whose file went missing.
+//
+// A referenced file is one the app never copied — it plays from wherever the
+// user keeps it — so "not stored on this device any more" would be describing
+// the wrong thing, and would read as the app having lost something of its own.
+// What actually happened is that the file moved, was renamed or deleted, or
+// the app's access to it was turned off, and the difference matters because
+// only the user can tell which and only they can fix it.
 export const offerSharedCopyDownload = item => {
   const hasCopy = !!item?.drive_file_id;
+  const referenced = isContentUri(item?.file_path);
+
+  const title = referenced ? 'Cannot open this file' : 'File not on this device';
+
+  const reason = referenced
+    ? 'audioTracker plays this file from where you keep it on your device, and cannot reach it any more. It may have been moved, renamed or deleted — or this app may have had its access to it turned off.'
+    : 'This file is not stored on this device any more.';
+
+  const copyOffer = hasCopy
+    ? ' A copy is in your Google Drive, so it can be downloaded and played from there.'
+    : '';
 
   Alert.alert(
-    'File not on this device',
-    hasCopy
-      ? 'This file is not stored on this device any more, but a copy is in your Google Drive. Download it to play it again.'
-      : 'This file is not stored on this device any more.',
+    title,
+    `${reason}${copyOffer}`,
     [
       {text: 'Cancel', style: 'cancel'},
       {

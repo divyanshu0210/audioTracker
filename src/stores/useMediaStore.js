@@ -1,12 +1,12 @@
 import {create} from 'zustand';
-import RNFS from 'react-native-fs';
 import {isAudioOrVideo} from '../Linking/utils/handleLinkSubmit';
+import {mediaExists} from '../utils/mediaFile';
 
 export const useMediaStore = create((set, get) => ({
   driveLinksList: [],
   items: [],
   deviceFiles: [],
-  validDeviceFiles: [],
+  playableDeviceFiles: [],
   validDeviceIds: {},
   deviceFilesChecked: false,
   nonFolderFiles: [],
@@ -82,9 +82,7 @@ export const useMediaStore = create((set, get) => ({
     // Checked in parallel rather than one await at a time: this used to be a
     // sequential round trip per file, and the whole list waited on it.
     const results = await Promise.all(
-      files.map(async file =>
-        file.file_path && (await RNFS.exists(file.file_path)) ? file : null,
-      ),
+      files.map(async file => ((await mediaExists(file.file_path)) ? file : null)),
     );
 
     // A concurrent call can finish after a later one; applying its answer
@@ -94,19 +92,31 @@ export const useMediaStore = create((set, get) => ({
 
     const valid = results.filter(Boolean);
 
-    // An id set beside the list, so a row can ask "am I still on disk?" in
-    // one lookup. Scanning validDeviceFiles instead meant every row walked
-    // the whole list, on every store change — quadratic in the number of
-    // device files, and re-run for unrelated updates like a drive refresh.
+    // An id set, so a row can ask "am I still on disk?" in one lookup. The
+    // list of present files this was built beside is gone: every caller was
+    // asking whether one file was in it, which is this, and the one that
+    // wanted a list wanted the playable one below instead.
     const validDeviceIds = {};
     for (const file of valid) {
       validDeviceIds[file.source_id] = true;
     }
 
+    // What can be played, which is a wider question than what is on disk. A
+    // file whose bytes are gone but whose copy is in Drive still plays — it
+    // streams, exactly as a drive_file does — so a queue built from the
+    // on-disk list alone skipped past files the player could have played, and
+    // made a tap on one of them start a playlist of one.
+    //
+    // Filtered from `files` rather than assembled from `valid`, so the queue
+    // runs in the order the list is showing.
+    const playable = files.filter(
+      file => validDeviceIds[file.source_id] || file.drive_file_id,
+    );
+
     // Until this runs at least once there is no answer yet, only an empty
     // list — and treating that as "missing" flashed a warning chip on every
     // row for as long as the checks took.
-    set({validDeviceFiles: valid, validDeviceIds, deviceFilesChecked: true});
+    set({playableDeviceFiles: playable, validDeviceIds, deviceFilesChecked: true});
   },
 
   setData: async val => {
@@ -132,9 +142,7 @@ export const useMediaStore = create((set, get) => ({
         // A Drive file streams whether or not it was ever downloaded. Anything
         // else in this list is only as playable as its bytes on disk.
         if (item.type === 'drive_file') return item;
-        return item.file_path && (await RNFS.exists(item.file_path))
-          ? item
-          : null;
+        return (await mediaExists(item.file_path)) ? item : null;
       }),
     );
 

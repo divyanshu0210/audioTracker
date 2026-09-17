@@ -22,6 +22,7 @@ import {useMediaStore} from '../stores/useMediaStore';
 import {getLocalFilePath} from '../iskcon/iskconActions';
 import {iskconUrlFromSourceId} from '../iskcon/iskconAudioApi';
 import {removeSharedCopy} from '../share/shareDeviceFile';
+import {releaseMedia} from '../utils/mediaFile';
 import useDownloadStore from '../stores/useDownloadStore';
 
 const DEFAULT_NOTEBOOK_TITLE = 'Default Notebook';
@@ -71,9 +72,10 @@ const deleteDriveItem = async (item, screen) => {
 // screen doesn't change device-file semantics the way it does for Drive.
 const deleteDeviceItem = async item => {
   if (item.file_path) {
-    if (await RNFS.exists(item.file_path)) {
-      await RNFS.unlink(item.file_path);
-    }
+    // releaseMedia rather than unlink: a file the user keeps outside the app
+    // is referenced, not copied, and removing it from the library gives back
+    // the access grant instead of deleting their file.
+    await releaseMedia(item.file_path);
     if (item.dbId != null) {
       await updateItemFields(item.dbId, {file_path: null});
     }

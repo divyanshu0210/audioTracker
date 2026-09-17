@@ -1,15 +1,22 @@
 // driveStream.js
 //
-// Streaming for Drive files, so playing one no longer means downloading it
-// first.
+// Playback urls for the two kinds of file the player cannot open by itself.
 //
-// A Drive file cannot simply be handed to the player the way an Iskcon file is
-// (see iskconActions.ensureDbItem, which puts the remote url straight into
-// file_path): Drive's media endpoint needs an `Authorization: Bearer` header,
-// and the VLC binding has no way to send one. So the native side runs a
-// loopback proxy that attaches the header, and what the player gets is a
-// header-free http://127.0.0.1/... url pointing at it — see
-// android/app/src/main/java/com/audiotracker/drivestream/DriveStreamServer.java.
+// libVLC takes an MRL and nothing else — no request headers, no content
+// resolver — so both of these have to reach it as a plain http://127.0.0.1/...
+// url served by the loopback proxy in
+// android/app/src/main/java/com/audiotracker/drivestream/DriveStreamServer.java:
+//
+//   A Drive file needs an `Authorization: Bearer` header, and the VLC binding
+//   has no way to send one. It cannot be handed over the way an Iskcon file is
+//   (see iskconActions.ensureDbItem, which puts the remote url straight into
+//   file_path), so the proxy attaches the header on the way out.
+//
+//   A device file lives behind a content:// uri, which the binding flags as a
+//   network source and mangles into `file:////content%3A//...`. Resolving it
+//   through the proxy is what lets an import stay where the user keeps it
+//   rather than being copied into the app, which used to double what every
+//   imported file cost on disk.
 //
 // Nothing here writes a stream url to the database. It is valid only for this
 // process (the port and the path secret are chosen at server start), so a
@@ -20,6 +27,8 @@
 import {NativeModules} from 'react-native';
 import NetInfo from '@react-native-community/netinfo';
 import RNFS from 'react-native-fs';
+
+import {isContentUri} from '../utils/mediaFile';
 
 const {DriveStream} = NativeModules;
 
@@ -40,10 +49,18 @@ const getBaseUrl = () => {
 export const isStreamUrl = path =>
   typeof path === 'string' && path.startsWith('http');
 
+export {isContentUri};
+
 /** The proxy url for a Drive file id. Starts the server on first use. */
 export const getDriveStreamUrl = async sourceId => {
   const base = await getBaseUrl();
   return `${base}/drive/${encodeURIComponent(sourceId)}`;
+};
+
+/** The proxy url for a device file's content:// uri. Starts the server too. */
+export const getContentStreamUrl = async uri => {
+  const base = await getBaseUrl();
+  return `${base}/content/${encodeURIComponent(uri)}`;
 };
 
 const isOffline = async () => {
@@ -81,7 +98,26 @@ const streamableDriveId = item => {
   return null;
 };
 
-export const resolveDrivePlaybackPath = async item => {
+export const resolvePlaybackPath = async item => {
+  // A content:// uri is the file itself rather than a copy of it, so there is
+  // nothing to prefer over it and nothing to fetch first — it only needs the
+  // proxy to become something the player can open. Checked before the Drive
+  // branch so a device file that also has an uploaded copy plays through the
+  // user's own file rather than over the network.
+  //
+  // The picker asks for local sources only (see pickAndImportDeviceFiles), so
+  // in practice these bytes are on this phone and this needs no connection.
+  // What it does not survive is the user moving or deleting the file, which is
+  // what uploading a copy to Drive is for — see shareDeviceFile.
+  if (isContentUri(item?.file_path)) {
+    try {
+      return await getContentStreamUrl(item.file_path);
+    } catch (error) {
+      console.error('Could not start the stream proxy:', error);
+      return null;
+    }
+  }
+
   const driveId = streamableDriveId(item);
   if (!driveId) {
     return item?.file_path ?? null;

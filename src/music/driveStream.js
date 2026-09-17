@@ -125,17 +125,28 @@ export const resolvePlaybackPath = async item => {
     // fails silently: the player sits at 00:00 and the log says
     // "no permission" where nobody is looking.
     if (!(await mediaExists(path))) {
-      const repaired = await repairDeviceFile(item, {retry: true});
-      if (!repaired) return null;
-      path = repaired;
+      path = await repairDeviceFile(item, {retry: true});
     }
 
-    try {
-      return await getContentStreamUrl(path);
-    } catch (error) {
-      console.error('Could not start the stream proxy:', error);
-      return null;
+    if (path) {
+      try {
+        return await getContentStreamUrl(path);
+      } catch (error) {
+        console.error('Could not start the stream proxy:', error);
+        return null;
+      }
     }
+
+    // The file is gone and could not be found again. If a copy was ever
+    // uploaded, that copy is the last thing that can play this — so this falls
+    // through to the Drive branch below rather than giving up, which is the
+    // whole reason for uploading one. Without the fall-through a backed-up
+    // file showed the unavailable screen while a perfectly good copy sat in
+    // the user's Drive.
+    //
+    // With no copy there is genuinely nothing: returned here rather than let
+    // through, because the branch below would hand the player the dead uri.
+    if (!item?.drive_file_id) return null;
   }
 
   const driveId = streamableDriveId(item);
@@ -145,7 +156,9 @@ export const resolvePlaybackPath = async item => {
 
   if (isStreamUrl(item.file_path)) return item.file_path;
 
-  if (item.file_path) {
+  // Skipped for a uri, which RNFS cannot stat anyway — reaching here with one
+  // means it was already found to be unreadable above.
+  if (item.file_path && !isContentUri(item.file_path)) {
     try {
       if (await RNFS.exists(item.file_path)) return item.file_path;
     } catch (error) {

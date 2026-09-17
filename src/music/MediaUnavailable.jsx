@@ -15,7 +15,7 @@
 // showPlayerMinimized unconditionally), so putting the offer here covers all of
 // them with one implementation and none of them with a modal.
 
-import React, {useCallback, useEffect, useState} from 'react';
+import React, {useEffect, useRef, useState} from 'react';
 import {
   ActivityIndicator,
   StyleSheet,
@@ -26,12 +26,7 @@ import {
 import NetInfo from '@react-native-community/netinfo';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
 import useDownloadStore from '../stores/useDownloadStore';
-import {
-  cancelDownload,
-  enqueueDownload,
-} from '../backgroundService/backgroundDownloadService';
-import {getLocalFilePath} from '../components/buttons/Download';
-import {downloadSharedCopy} from '../share/shareDeviceFile';
+import {cancelDownload} from '../backgroundService/backgroundDownloadService';
 
 /**
  * Where this item's bytes can be fetched from, or null if nowhere.
@@ -48,7 +43,7 @@ const getRecovery = item => {
   return null;
 };
 
-const MediaUnavailable = ({item, onDownloaded}) => {
+const MediaUnavailable = ({item, onRetry, onDownloaded}) => {
   const recovery = getRecovery(item);
 
   const download = useDownloadStore(state => state.downloads[item?.source_id]);
@@ -57,19 +52,31 @@ const MediaUnavailable = ({item, onDownloaded}) => {
   const progress = download?.progress;
   const isActive = status === 'queued' || status === 'downloading';
 
-  // Starting a transfer with no connection fails somewhere inside RNFS and
-  // surfaces as a generic failed download, so the button says so up front
-  // instead. Subscribed rather than polled — the answer can change while the
-  // panel is on screen, and it should stop being a dead end the moment it does.
+  // Subscribed rather than polled, because the answer changes while the panel
+  // is on screen and the panel exists precisely because of that answer.
   const [isOffline, setIsOffline] = useState(false);
+  const wasOffline = useRef(false);
   useEffect(() => {
     const unsubscribe = NetInfo.addEventListener(state => {
       // isInternetReachable is null until the first probe resolves; only a
-      // definite false counts, so a slow probe never blocks the button.
-      setIsOffline(!state.isConnected || state.isInternetReachable === false);
+      // definite false counts, so a slow probe never counts as offline.
+      const offline = !state.isConnected || state.isInternetReachable === false;
+      setIsOffline(offline);
+
+      // The connection coming back resolves the source again without being
+      // asked. This panel is on screen because there was no connection, and a
+      // Drive file needs nothing else to play — so the moment there is one it
+      // should simply start, rather than sitting behind a button asking the
+      // user to act on something the app already knows.
+      //
+      // On the transition, not the state: firing while merely online would
+      // re-resolve on every unrelated NetInfo event, and resolving is what
+      // rebuilds the stream url.
+      if (wasOffline.current && !offline) onRetry?.();
+      wasOffline.current = offline;
     });
     return unsubscribe;
-  }, []);
+  }, [onRetry]);
 
   // The download service writes file_path into the items row itself, but this
   // player is rendering an item that came from a route param, so it has to be
@@ -80,27 +87,6 @@ const MediaUnavailable = ({item, onDownloaded}) => {
     onDownloaded?.(item.source_id, download.localPath);
     removeDownload(item.source_id);
   }, [status]);
-
-  const handleDownload = useCallback(async () => {
-    try {
-      if (recovery === 'copy') {
-        await downloadSharedCopy(item);
-        return;
-      }
-      await enqueueDownload({
-        id: item.id,
-        sourceId: item.source_id,
-        title: item.title,
-        url: `https://www.googleapis.com/drive/v3/files/${item.source_id}?alt=media`,
-        localPath: getLocalFilePath(item.source_id, item.title),
-        type: item.type,
-        mimeType: item.mimeType,
-        googleAuth: true,
-      });
-    } catch (error) {
-      console.error('Could not start the download from the player:', error);
-    }
-  }, [item, recovery]);
 
   if (isActive) {
     return (
@@ -125,38 +111,49 @@ const MediaUnavailable = ({item, onDownloaded}) => {
     <View style={styles.container}>
       <MaterialCommunityIcons
         name={recovery ? 'cloud-download-outline' : 'cloud-off-outline'}
-        size={34}
+        size={26}
         color="#cbd5e1"
       />
-      <Text style={styles.title} numberOfLines={2}>
+      {/* One line, not two. This panel lives inside the player, which for audio
+          is about 18% of the screen — a second line of a long lecture title was
+          enough to push the button off the bottom of it. */}
+      <Text style={styles.title} numberOfLines={1}>
         {item?.title}
       </Text>
 
-      {/* No copy anywhere is a different situation from one not fetched yet,
+{/* No copy anywhere is a different situation from one not fetched yet,
           and offering a download that cannot happen would be worse than
           saying plainly that there is nothing to fetch. */}
       {!recovery ? (
         <Text style={styles.message}>
           This recording isn't on your device, and there's no copy to download.
         </Text>
+      ) : isOffline ? (
+        // Nothing to press. Waiting for the connection is the only thing to do
+        // and the listener above is already doing it, so a button here would
+        // be a second way to perform an action that happens by itself.
+        <Text style={styles.offline}>
+          Waiting for a connection.
+        </Text>
       ) : (
         <>
           <Text style={styles.message}>
             {status === 'failed'
               ? "That download didn't finish."
-              : "This recording isn't on your device yet."}
+              : "Couldn't reach this recording."}
           </Text>
-          {isOffline ? (
-            <Text style={styles.offline}>
-              No internet connection — reconnect to download it.
-            </Text>
-          ) : (
-            <TouchableOpacity style={styles.button} onPress={handleDownload}>
-              <Text style={styles.buttonText}>
-                {status === 'failed' ? 'Try again' : 'Download to play'}
-              </Text>
-            </TouchableOpacity>
-          )}
+
+          {/* One action, and it is not downloading. This panel was written when
+              a Drive file had to be on the phone before it would play, and said
+              "Download to play" — which in front of something that streams asks
+              the user to spend storage and a wait on a file they only wanted to
+              hear. Keeping a copy offline is a real thing to want, but it lives
+              on the row's own menu, where it already is.
+              Reached only when online and the resolve still failed, which is
+              rare enough to deserve a plain retry and nothing more. */}
+          <TouchableOpacity style={styles.button} onPress={onRetry}>
+            <Text style={styles.buttonText}>Try again</Text>
+          </TouchableOpacity>
         </>
       )}
     </View>
@@ -166,37 +163,41 @@ const MediaUnavailable = ({item, onDownloaded}) => {
 export default MediaUnavailable;
 
 const styles = StyleSheet.create({
+  // Every measurement here is set against the height this has to live in: the
+  // player container, which for audio is roughly 145dp. The old spacing came
+  // to about 180dp of content and simply overflowed it, taking the buttons
+  // with it.
   container: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 24,
-    paddingVertical: 16,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
     backgroundColor: '#000',
   },
   title: {
-    marginTop: 10,
+    marginTop: 6,
     color: '#f1f5f9',
     fontSize: 14,
     fontWeight: '600',
     textAlign: 'center',
   },
   message: {
-    marginTop: 6,
+    marginTop: 4,
     color: '#94a3b8',
     fontSize: 12,
     textAlign: 'center',
   },
   offline: {
-    marginTop: 12,
+    marginTop: 8,
     color: '#fbbf24',
     fontSize: 12,
     textAlign: 'center',
   },
   button: {
-    marginTop: 14,
-    paddingHorizontal: 18,
-    paddingVertical: 8,
+    marginTop: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 7,
     borderRadius: 20,
     backgroundColor: '#2563eb',
   },
@@ -206,9 +207,10 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   secondaryButton: {
-    marginTop: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 6,
+    marginTop: 10,
+    marginLeft: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
   },
   secondaryButtonText: {
     color: '#cbd5e1',

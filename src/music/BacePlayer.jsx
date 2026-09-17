@@ -147,6 +147,20 @@ const BacePlayer = () => {
   // card, a note's timestamp — and each of those hands over a row whose
   // file_path is whatever the database happened to hold.
   const [isResolvingSource, setIsResolvingSource] = useState(false);
+  // Bumped to run the resolve effect again. Mostly this happens by itself:
+  // MediaUnavailable watches the connection and calls it the moment one comes
+  // back, which is what makes a Drive file start playing without being asked.
+  // Its button is the other caller, for the rarer case of being online and the
+  // resolve failing anyway.
+  //
+  // The whole resolution is what is worth repeating — a returning connection
+  // makes a Drive copy reachable, and nothing else in the player notices.
+  // Stable through useCallback because it is a dependency of that listener's
+  // effect: a new reference each render would re-subscribe it, losing the
+  // record of having been offline and with it the transition to watch for.
+  const [resolveAttempt, setResolveAttempt] = useState(0);
+  const retrySource = useCallback(() => setResolveAttempt(n => n + 1), []);
+
   const currentSourceId = currentItem?.source_id;
   useEffect(() => {
     // device_file too, for either of two reasons: one left where the user
@@ -170,7 +184,15 @@ const BacePlayer = () => {
       const path = await resolvePlaybackPath(currentItem);
       if (cancelled) return;
       setIsResolvingSource(false);
-      if (!path || path === currentItem.file_path) return;
+      if (path === currentItem.file_path) return;
+
+      // null is written through rather than ignored. An empty file_path is what
+      // puts MediaUnavailable on screen — the panel renders on the absence of a
+      // path, so leaving a dead one in place showed the player instead, sitting
+      // at 00:00 over a file it could never open. Drive files were never caught
+      // by this because theirs is already null until something downloads it;
+      // a device file's is a uri, and a uri that has stopped working is still
+      // a string.
       setPlaylist(prev =>
         prev.map(it =>
           it.source_id === currentSourceId ? {...it, file_path: path} : it,
@@ -180,7 +202,9 @@ const BacePlayer = () => {
     return () => {
       cancelled = true;
     };
-  }, [currentSourceId]);
+    // resolveAttempt as well, so a retry re-runs this. A connection returning
+    // is invisible to everything else here.
+  }, [currentSourceId, resolveAttempt]);
 
   // Seconds left before auto-advancing to the next item, or null when no
   // countdown is running — see handleAutoAdvance/stopAutoAdvanceCountdown.
@@ -1020,6 +1044,7 @@ const BacePlayer = () => {
                 // nothing, leaving a black rectangle with no explanation.
                 <MediaUnavailable
                   item={currentItem}
+                  onRetry={retrySource}
                   onDownloaded={handleMediaDownloaded}
                 />
               )}

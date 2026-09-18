@@ -1,5 +1,6 @@
 import BackgroundService from 'react-native-background-actions';
 import {PermissionsAndroid, Platform} from 'react-native';
+import {repairAllDeviceFiles} from '../utils/fileIdentity';
 import {attemptRestore} from '../backupRestore/restoreManager';
 import useRestoreStore from '../backupRestore/restoreStore';
 
@@ -39,6 +40,31 @@ const restoreTask = async taskData => {
         progressBar: {max: 100, value: percent, indeterminate: false},
       });
     });
+
+    // Before the restore calls itself finished, because this is part of
+    // finishing it.
+    //
+    // Every row that just landed carries an address from the install that
+    // made the backup — a persistable grant that died with it, or a
+    // MediaStore id belonging to another device. Left to the ordinary sweep
+    // in setDeviceFiles, they would be repaired a list at a time and only
+    // once the user was looking at one, so the library came up covered in
+    // warnings that then cleared themselves one by one. That reads as an app
+    // that lost the files and found them again.
+    //
+    // Here, the progress notification is still up and the user is still
+    // waiting on a restore, which is the honest place to spend the time.
+    // Never fatal: a restore that worked is not going to be undone by
+    // bookkeeping, and anything missed still gets the ordinary sweep.
+    try {
+      await safeUpdateNotification({
+        taskDesc: 'Finding your files...',
+        progressBar: {max: 100, value: 100, indeterminate: true},
+      });
+      await repairAllDeviceFiles();
+    } catch (e) {
+      console.warn('[BACKGROUND] Post-restore repair failed:', e?.message);
+    }
 
     await new Promise(r => setTimeout(r, 500));
     notifyComplete();

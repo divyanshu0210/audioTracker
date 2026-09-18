@@ -32,7 +32,11 @@ import notifee from '@notifee/react-native';
 import {isAllowed} from '../appNotification/notificationPermission';
 
 const GoogleLoginScreen = ({navigation}) => {
-  const [isLoading, setIsLoading] = useState(false);
+  // Starts true, because the first thing this screen does is look for a
+  // session. Starting false meant the sign-in button was painted on the
+  // frame before that check began, and anyone already signed in saw an
+  // invitation to sign in again on the way past.
+  const [isLoading, setIsLoading] = useState(true);
 
   const {setUserInfo} = useAppState();
   const {initDb} = useDbStore();
@@ -104,6 +108,12 @@ const GoogleLoginScreen = ({navigation}) => {
   };
 
     const navigateToMain = async (userInfo) => {
+    // The restore has just switched isRestoring off, and what comes next is
+    // several awaits before the replace: a default notebook, settings, the
+    // startup backup routine. With nothing claiming the screen for that
+    // stretch it fell through to the sign-in button — an app that finished
+    // restoring someone's library and then asked them who they were.
+    setIsLoading(true);
     try {
       const defaultNotebookIdValue = await getOrCreateDefaultNotebookId();
       useNotesStore.getState().setDefaultNotebookId(defaultNotebookIdValue);
@@ -115,20 +125,7 @@ const GoogleLoginScreen = ({navigation}) => {
       // heavy mount/data-loading is skipped entirely. It's built lazily when
       // the user leaves that screen via back (launchedDirectly → goHome).
       const pendingRoute = consumePendingRoute();
-
-      // The permissions are read here, before anything of the app is built,
-      // and not by the gate itself. A gate mounted inside MainApp could only
-      // ever arrive after the tabs and the continue-watching sheet had been
-      // drawn, and the user watched that race on every launch. This screen
-      // is already on show and can hold the frame while two native calls
-      // answer.
-      if (await hasAllPermissions()) {
-        landAfterLogin(navigation, {pendingRoute, user});
-      } else {
-        // Carrying the destination with it: the gate does the landing when
-        // it is done, and a deep link taken above would otherwise be lost.
-        navigation.replace('PermissionGate', {pendingRoute, user});
-      }
+      landAfterLogin(navigation, {pendingRoute, user});
     } catch (e) {
       console.error('[Login] Post-restore nav error:', e);
       Alert.alert('Error', 'Failed to complete setup. Please restart the app.');
@@ -149,6 +146,24 @@ const GoogleLoginScreen = ({navigation}) => {
       mode === 'signIn'
         ? syncUserToBackend(userInfo.user).then(() => setupFCM(userInfo.user))
         : setupFCM(userInfo.user);
+
+      // Permissions before the backup check, not after it.
+      //
+      // The restore is where a device file's address is at its most broken —
+      // every row arrives holding one from another install — and repairing
+      // that needs the media permission. Asked for afterwards, the repair
+      // had nothing to work with and the library came up full of warnings
+      // instead. So the gate goes first, and the restore runs knowing the
+      // app can read what it is about to rebuild.
+      //
+      // The gate hands back to this screen rather than carrying the flow
+      // onwards: restoreSession runs again, the session is still there, and
+      // this time the check below passes straight through to the restore.
+      // One owner for what happens after login, which is this function.
+      if (!(await hasAllPermissions())) {
+        navigation.replace('PermissionGate');
+        return;
+      }
 
       await checkAndPromptRestore(userInfo, navigateToMain);
     } catch (error) {

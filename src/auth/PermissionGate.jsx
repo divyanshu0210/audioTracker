@@ -47,7 +47,6 @@ import {
   ensureMediaReadPermission,
   hasMediaReadPermission,
 } from '../utils/mediaFile';
-import {landAfterLogin} from '../handlers/navigationIntent';
 
 const readNotifications = async () => {
   try {
@@ -117,9 +116,7 @@ const notificationSettingsSteps = () =>
 // counted across installs and invisible to us until we ask.
 const INSTANT_MS = 400;
 
-const PermissionGate = ({navigation, route}) => {
-  // Where login was going before this screen interrupted it.
-  const {pendingRoute = null, user = null} = route?.params ?? {};
+const PermissionGate = ({navigation}) => {
 
   // null while the first check is in flight. Rendering the gate on an
   // assumption would flash it in front of everyone who granted these months
@@ -212,11 +209,16 @@ const PermissionGate = ({navigation, route}) => {
 
   // Both granted — which can happen on arrival, if they were turned on from
   // system settings while this screen waited, or the moment the second
-  // dialog is accepted. Either way this screen is done and the user carries
-  // on to where they were going before it interrupted.
+  // dialog is accepted.
+  //
+  // Back to login rather than onwards into the app: login is what decides
+  // what happens next, and after this screen there is still a backup check
+  // and possibly a restore to run before anybody sees a library. It picks
+  // the session up again, finds these permissions granted, and carries on
+  // past the point it stopped at.
   useEffect(() => {
-    if (satisfied) landAfterLogin(navigation, {pendingRoute, user});
-  }, [satisfied, navigation, pendingRoute, user]);
+    if (satisfied) navigation.replace('GoogleLoginScreen');
+  }, [satisfied, navigation]);
 
   // Back cannot leave. This is a stack screen now rather than a modal, so
   // the hardware button would otherwise pop it and put the login screen

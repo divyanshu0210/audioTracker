@@ -223,3 +223,45 @@ export const getUnhashedDeviceFiles = async (limit = 3) => {
     });
   });
 };
+
+/**
+ * Every device file that is referenced rather than copied, whatever list it
+ * belongs to.
+ *
+ * getChildrenByParent only sees the root of one tab, and the sweep that runs
+ * off it therefore only ever repairs what the user happens to be looking at.
+ * After a restore that is the wrong shape entirely: every row on the device
+ * arrived at once, holding addresses from another install, and the ones
+ * filed in a category or hidden behind a shared note are no less broken for
+ * not being on screen.
+ *
+ * content:// only, for the same reason as getUnhashedDeviceFiles: a file the
+ * app copied into its own directory sits at a path it controls, which does
+ * not wander.
+ */
+export const getReferencedDeviceFiles = async () => {
+  const fastdb = getDb();
+
+  return new Promise((resolve, reject) => {
+    fastdb.transaction(tx => {
+      tx.executeSql(
+        `SELECT id, source_id, type, title, file_path, duration, mimeType
+           FROM items
+          WHERE type = 'device_file'
+            AND deleted_at IS NULL
+            AND file_path LIKE 'content://%';`,
+        [],
+        (_, {rows}) => {
+          const out = [];
+          for (let i = 0; i < rows.length; i++) out.push(rows.item(i));
+          resolve(out);
+        },
+        (_, error) => {
+          console.error('Error reading referenced device files:', error);
+          reject(error);
+          return false;
+        },
+      );
+    });
+  });
+};

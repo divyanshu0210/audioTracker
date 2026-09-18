@@ -32,6 +32,7 @@ import {
   getUnhashedDeviceFiles,
   saveDeviceFileHash,
   saveDeviceFileIdentity,
+  getReferencedDeviceFiles,
 } from '../database/deviceFileMeta';
 import {updateItemFields} from '../database/U';
 import {hasMediaReadPermission, isContentUri, mediaExists} from './mediaFile';
@@ -310,4 +311,49 @@ export const repairMissingDeviceFiles = async missing => {
   }
 
   return repaired;
+};
+
+/**
+ * Finds every referenced device file whose address no longer opens, and
+ * re-points the ones that can be found. Resolves to how many were.
+ *
+ * For the moment after a restore, which is unlike any other. Ordinarily a
+ * file goes missing one at a time and the sweep in setDeviceFiles catches it
+ * when its list is next built; after a restore every row on the device is
+ * carrying an address from another install at once, and the user watches
+ * their library come up covered in warnings that then clear themselves one
+ * by one. Doing it here means the library is already correct the first time
+ * it is drawn.
+ *
+ * Not cheap and not meant to be: it is one MediaStore query and a sampled
+ * fingerprint per broken row. It belongs where the user is already waiting
+ * for a restore to finish, and nowhere else.
+ */
+export const repairAllDeviceFiles = async () => {
+  if (!(await hasMediaReadPermission())) {
+    console.log('No media permission — skipping the post-restore repair');
+    return 0;
+  }
+
+  let rows;
+  try {
+    rows = await getReferencedDeviceFiles();
+  } catch (error) {
+    return 0;
+  }
+  if (!rows.length) return 0;
+
+  // Checked in parallel because each one is a question for the OS and none of
+  // them depends on the others; the repairs below are sequential because each
+  // may read several files to the end.
+  const checks = await Promise.all(
+    rows.map(async row => ((await mediaExists(row.file_path)) ? null : row)),
+  );
+  const missing = checks.filter(Boolean);
+  if (!missing.length) return 0;
+
+  console.log(`Repairing ${missing.length} device file(s) after a restore`);
+  const repaired = await repairMissingDeviceFiles(missing);
+  console.log(`Re-pointed ${repaired.length} of ${missing.length}`);
+  return repaired.length;
 };

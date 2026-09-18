@@ -27,6 +27,11 @@ export default UserList = ({
   loading = false,
   listType = 'Users',
   onPress,
+  // Optional trailing node per row. Assign uses it to say what this mentee
+  // already has of the current selection, which is a fact about the screen
+  // asking rather than about the person, so it is passed in rather than read
+  // from a store here.
+  renderTrailing,
 }) => {
   const {
     selectedUsers,
@@ -148,6 +153,8 @@ const {selectedItems, setSelectedCategory} = useSelectionStore(
               <Text style={styles.unreadText}>{unread > 99 ? '99+' : unread}</Text>
             </View>
           )}
+
+          {renderTrailing?.(item)}
         </View>
       </TouchableOpacity>
     );

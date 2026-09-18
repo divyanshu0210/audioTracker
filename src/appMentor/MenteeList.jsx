@@ -2,7 +2,7 @@ import React from 'react';
 import UserList from './UserList';
 import useMentorMenteeStore from './useMentorMenteeStore';
 
-const MenteeList = ({refreshing, onRefresh}) => {
+const MenteeList = ({refreshing, onRefresh, renderTrailing}) => {
   const mentees = useMentorMenteeStore(state => state.mentees);
   const isLoading = useMentorMenteeStore(state => state.isLoading);
 
@@ -13,6 +13,7 @@ const MenteeList = ({refreshing, onRefresh}) => {
       onRefresh={onRefresh}
       loading={isLoading}
       listType="Mentees"
+      renderTrailing={renderTrailing}
     />
   );
 };

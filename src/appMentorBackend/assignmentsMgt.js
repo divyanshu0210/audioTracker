@@ -345,7 +345,10 @@ let lastChildQuery = null;
 const isStillSelected = menteeId =>
   String(useMentorMenteeStore.getState().activeMentee?.id) === String(menteeId);
 
-const fetchMenteeAssignments = async (mentorId, menteeId) => {
+// Exported as well as used here: the Assign screen asks the same question
+// before sending, to tell a mentor which of the items they picked this mentee
+// already has rather than creating a second assignment for it.
+export const fetchMenteeAssignments = async (mentorId, menteeId) => {
   const response = await fetch(
     `${BASE_URL}/assign/mentee-assignments/?mentor_id=${encodeURIComponent(
       mentorId,

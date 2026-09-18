@@ -3,9 +3,11 @@ package com.audiotracker
 import android.app.PictureInPictureParams
 import android.content.res.Configuration
 import android.os.Build
+import android.os.Bundle
 import android.util.Log
 import android.util.Rational
 import androidx.annotation.RequiresApi
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import com.audiotracker.bridge.ReactEmitter
 import com.facebook.react.ReactActivity
 import com.facebook.react.ReactActivityDelegate
@@ -27,6 +29,19 @@ class MainActivity : ReactActivity() {
    */
   override fun createReactActivityDelegate(): ReactActivityDelegate =
       DefaultReactActivityDelegate(this, mainComponentName, fabricEnabled)
+
+  /**
+   * Installs the splash before the window is themed — it has to happen ahead
+   * of super.onCreate(), which is the whole reason this override exists.
+   *
+   * setKeepOnScreenCondition is polled on every draw, so the splash stays up
+   * across the bundle load and lifts on the first draw after JS releases
+   * SplashGate. See src/utils/splashScreen.js.
+   */
+  override fun onCreate(savedInstanceState: Bundle?) {
+    installSplashScreen().setKeepOnScreenCondition { SplashGate.shouldKeepOnScreen() }
+    super.onCreate(savedInstanceState)
+  }
 
   // ── Picture-in-Picture ──────────────────────────────────────────────────────
   //

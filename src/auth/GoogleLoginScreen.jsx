@@ -30,6 +30,7 @@ import {consumePendingRoute, landAfterLogin} from '../handlers/navigationIntent'
 import {hasMediaReadPermission} from '../utils/mediaFile';
 import notifee from '@notifee/react-native';
 import {isAllowed} from '../appNotification/notificationPermission';
+import {hideSplashScreen} from '../utils/splashScreen';
 
 const GoogleLoginScreen = ({navigation}) => {
   // Starts true, because the first thing this screen does is look for a
@@ -43,6 +44,19 @@ const GoogleLoginScreen = ({navigation}) => {
   const {initialize: initializeSettings} = useSettingsStore();
   const {appStartupBackupRoutine} = useBackupStore();
   const {isRestoring, checkingAvailableBackup} = useRestoreStore();
+
+  // The native splash is still up at this point, and it is this screen it is
+  // covering for. One frame, so it lifts onto something drawn rather than onto
+  // the empty root view — and onto the same #18222d it was already showing,
+  // which is why the two are kept the same colour.
+  //
+  // Deliberately not waiting on restoreSession below: that path can raise a
+  // restore prompt and a progress bar, and holding a splash over those would
+  // hide the one part of launch the user actually needs to see.
+  useEffect(() => {
+    const frame = requestAnimationFrame(hideSplashScreen);
+    return () => cancelAnimationFrame(frame);
+  }, []);
 
   useEffect(() => {
     GoogleSignin.configure({

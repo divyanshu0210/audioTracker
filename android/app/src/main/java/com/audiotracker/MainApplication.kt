@@ -31,6 +31,7 @@ class MainApplication : Application(), ReactApplication {
               add(PlaybackServicePackage())
               add(PipPackage())
               add(DriveStreamPackage())
+              add(SplashPackage())
              //  add(RNBackgroundFetchPackage())
             }
  

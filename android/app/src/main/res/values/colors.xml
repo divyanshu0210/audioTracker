@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <!-- The login screen's own background (GoogleLoginScreen, styles.container).
+         Identical on purpose: the splash hands straight over to that screen,
+         and a matching colour makes the handover invisible. -->
+    <color name="splash_background">#18222d</color>
+
+</resources>

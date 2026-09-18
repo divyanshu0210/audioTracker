@@ -6,4 +6,27 @@
         <item name="android:editTextBackground">@drawable/rn_edit_text_material</item>
     </style>
 
+    <!-- Cold-start splash, and the activity's real launch theme.
+         postSplashScreenTheme is what the window becomes once the splash
+         lifts, so AppTheme above still governs everything after launch.
+
+         The icon is @drawable/splash_icon: a 1152px bitmap that is the
+         288dp icon canvas at 4x, with the logo drawn across the middle 48%
+         and transparent padding around it.
+
+         The padding is part of the bitmap on purpose. Only a 192dp circle of
+         that 288dp canvas survives — the rest is masked — so the logo has to
+         sit well inside it, and a rounded square fits a circle badly. Saying
+         so in a layer-list, in dp, does not work: the splash puts the drawable
+         in an ImageView that scales it to fill, so a 140dp logo was helpfully
+         enlarged until the mask cut it. A proportion baked into the pixels
+         survives that scaling; a declared size does not.
+
+         Held past the first frame by SplashGate — see MainActivity. -->
+    <style name="SplashTheme" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/splash_background</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/splash_icon</item>
+        <item name="postSplashScreenTheme">@style/AppTheme</item>
+    </style>
+
 </resources>

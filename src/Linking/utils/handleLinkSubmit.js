@@ -563,6 +563,9 @@ const handleSharedDeviceFile = async ({uri, name, type}) => {
   // permission is already held, the MediaStore uri costs one query and is worth
   // having, because it is the difference between this row working tomorrow and
   // dying with the task.
+  // A share is the one arrival with no durable answer of its own when the
+  // sender attached no grant, so the MediaStore address matters most here —
+  // it is what keeps the recording playable after a reinstall.
   const durable = await durableUriFor(uri);
 
   // The same lecture shared in a second time is the same lecture. Reusing the
@@ -713,17 +716,24 @@ export const resolveDestPath = async (fileName, uuid) => {
 // here is one the user is keeping, and a uri with a session-long grant would
 // be dead in it by the next launch.
 const resolveImportPath = async (file, fileName, uuid) => {
-  if (file.bookmarkStatus === 'success') {
-    console.log(`🔗 Referencing ${fileName} in place at ${file.uri}`);
-    return file.uri;
-  }
-
-  // Allowed to ask for the media permission here: this row is one the user is
-  // keeping, so the alternative to a dialog is copying the whole file.
-  const durable = await durableUriFor(file.uri, {prompt: true});
+  // The picker's own grant used to win here without anything else being
+  // tried, which made a picked file the one kind whose address does not
+  // survive a reinstall — grants are per-install and a restored row keeps
+  // pointing through a door that has been locked. durableUriFor takes the
+  // MediaStore address first now and falls back to that grant, so this is no
+  // longer an early exit.
+  const durable = await durableUriFor(file.uri);
   if (durable) {
     console.log(`🔗 Referencing ${fileName} in place at ${durable}`);
     return durable;
+  }
+
+  // Refused the permission and MediaStore could not name it, but the picker
+  // did take a lasting grant — worth more than a copy, and it still plays for
+  // as long as this install lives.
+  if (file.bookmarkStatus === 'success') {
+    console.log(`🔗 Referencing ${fileName} in place at ${file.uri}`);
+    return file.uri;
   }
 
   const destPath = await resolveDestPath(fileName, uuid);
@@ -764,7 +774,7 @@ export const handleFileProcessing = async (
     // certainly alive and the stored one may not be, so re-importing a file is
     // also how someone repairs one by hand without knowing that is what they
     // are doing.
-    const durable = (await durableUriFor(file.uri, {prompt: true})) || file.uri;
+    const durable = (await durableUriFor(file.uri)) || file.uri;
     // deleted_at cleared as well as out_show, so a file that had been removed
     // comes all the way back. Setting only out_show — which is what the
     // YouTube and Drive paths do — returns it to the list while leaving it

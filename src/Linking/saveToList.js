@@ -70,7 +70,7 @@ export const saveItemToList = async item => {
     // to keep something rather than glancing at it. Only a uri can be kept this
     // way; an older scratch copy is already the app's own bytes.
     const durable = isContentUri(item.file_path)
-      ? await durableUriFor(item.file_path, {prompt: true})
+      ? await durableUriFor(item.file_path)
       : null;
 
     if (durable) {

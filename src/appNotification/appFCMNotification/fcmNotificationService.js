@@ -2,7 +2,6 @@ import messaging from '@react-native-firebase/messaging';
 import {Platform} from 'react-native';
 import {BASE_URL} from '../../appMentorBackend/userMgt';
 import {handleFCMNotifications} from '../notificationsMgt';
-import {askForNotificationsOnce} from '../notificationPermission';
 import {syncAssignmentsOnStartup} from '../../appMentorBackend/assignmentsMgt';
 import {setUpNativeMenteeSync} from '../../appMentor/menteeNotesSync';
 
@@ -29,13 +28,12 @@ export async function setupFCM(user) {
   // when they are already right.
   setUpNativeMenteeSync(BASE_URL);
 
-  // Once, not on every launch. setupFCM runs on each start via restoreSession,
-  // and the old unconditional request burned both of Android's two dialogs
-  // inside the first two app opens — before the user had played anything or
-  // met the mentorship feature, and with nothing on screen explaining why.
-  // Asking here keeps the first chance; the second is spent at first
-  // background playback, where the reason is visible.
-  await askForNotificationsOnce('login');
+  // Not asked for here any more. PermissionGate owns this now: it goes up
+  // after login with both permissions on one screen and a sentence each
+  // saying what they are for, and it can spend both of Android's dialogs
+  // deliberately before falling back to system settings. Firing a bare
+  // system prompt from here as well would race it — two dialogs, one of them
+  // unexplained, and the budget gone.
 
   // Tokens rotate — app restore to a new device, cleared app data, Firebase
   // rotating one on its own. Without this the backend keeps pushing to a dead

@@ -25,6 +25,7 @@ import {useShallow} from 'zustand/react/shallow';
 import {StackActions, useRoute} from '@react-navigation/core';
 import {logRender} from '../contexts/renderLog';
 import {isMenteeNoteRef} from '../notes/noteRef';
+import {repairDeviceFile} from '../utils/fileIdentity';
 
 const BaseItem = ({
   type,
@@ -153,7 +154,7 @@ const BaseItem = ({
     }
   }, [item, screen]);
 
-  const handleDevicePress = useCallback(() => {
+  const handleDevicePress = useCallback(async () => {
     const {validDeviceIds, playableDeviceFiles} = useMediaStore.getState();
 
     // Files whose bytes are gone are listed now instead of hidden, so a tap
@@ -176,7 +177,37 @@ const BaseItem = ({
     // the same streaming path a drive_file takes. Downloading is still offered
     // from the row's menu for anyone who wants it offline.
     if (!present && !item.drive_file_id) {
-      offerSharedCopyDownload(item);
+      // "Not present" is what the last sweep concluded, and the sweep runs
+      // one file at a time in the background — so a file that was moved and
+      // can be found again by its fingerprint may simply not have been
+      // reached yet. A tap is someone waiting for this particular recording,
+      // which makes it the right moment to look for that one now rather than
+      // in its turn. retry is what gets past the memo of files already
+      // searched for and not found this run.
+      //
+      // Only then the Drive offer, which is the honest answer once the file
+      // really cannot be found.
+      const repaired = await repairDeviceFile(item, {retry: true});
+      if (!repaired) {
+        offerSharedCopyDownload(item);
+        return;
+      }
+
+      // The row in memory still holds the address that failed; the repaired
+      // one is in the database. Handing the player the fresh path is what
+      // makes this tap play rather than the next one.
+      navigationRef.navigate('BacePlayer', {
+        item: {...item, file_path: repaired},
+      });
+
+      // One file moved is rarely one file moved — a folder renamed takes
+      // every recording in it. Handing the list back to setDeviceFiles
+      // re-runs the presence check and puts the rows that are still missing
+      // through the repair sweep, so the rest of that folder is found in the
+      // background instead of one tap at a time.
+      //
+      // The same array back, so this costs the checks and not a re-render.
+      useMediaStore.getState().setDeviceFiles(prev => prev);
       return;
     }
 

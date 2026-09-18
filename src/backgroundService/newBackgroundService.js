@@ -65,12 +65,16 @@ export const startBackgroundRestore = async (userInfo, backups) => {
     console.log('[BACKGROUND] Service already running');
     return;
   }
-  // Request notification permission for Android 13+
-
- await requestPermissions().catch(() => {
-    console.log('[BACKGROUND] Notification permission denied — continuing anyway');
-  });
-
+  // No permission asked for here, deliberately. A foreground service runs
+  // whether or not its notification can be shown — POST_NOTIFICATIONS decides
+  // only whether the user watches the progress, and this code already said as
+  // much by carrying on after a refusal.
+  //
+  // What it cost was the dialog itself. A restore starts before PermissionGate
+  // is on screen, so the prompt arrived with nothing explaining it, and
+  // Android only offers two per permission ever: one spent here is one the
+  // gate no longer has, and the gate is the place where the user is told what
+  // notifications are for and can still be sent to settings afterwards.
   await BackgroundService.start(restoreTask, {
     ...options,
     parameters: {userInfo, backups},

@@ -21,6 +21,7 @@ import Feather from 'react-native-vector-icons/Feather';
 import FontAwesome6 from 'react-native-vector-icons/FontAwesome6';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
 import GoogleLoginScreen from './auth/GoogleLoginScreen';
+import PermissionGate from './auth/PermissionGate';
 import CategoryDetailScreen from './categories/CategoryDetailScreen';
 import CategoriesView from './categories/CategoriesView';
 import AddNotebookBottomSheet from './components/bottomsheets/AddNotebookBottomSheet';
@@ -266,6 +267,11 @@ const MainApp = track(function MainApp() {
           }}
         />
       </Tab.Navigator>
+
+      {/* Inside MainApp rather than at the root, so it is only ever put in
+          front of someone who has signed in. It renders nothing once both
+          permissions are held, which is every launch after the first. */}
+      <PermissionGate />
 
       {/* {checkingAvailableBackup && (
         <View style={styles.overlay}>

@@ -80,7 +80,10 @@ export const ensureMediaReadPermission = async () => {
 
   try {
     const granted = await PermissionsAndroid.requestMultiple(wanted);
-    return wanted.some(
+    // All of them, for the same reason hasMediaReadPermission wants all of
+    // them: a half-granted library is one where some files open and some do
+    // not, with nothing on screen saying which or why.
+    return wanted.every(
       name => granted[name] === PermissionsAndroid.RESULTS.GRANTED,
     );
   } catch (error) {
@@ -122,7 +125,13 @@ export const hasMediaReadPermission = async () => {
     const checks = await Promise.all(
       wanted.map(name => PermissionsAndroid.check(name)),
     );
-    return checks.some(Boolean);
+    // Every one of them, not any. Android 13 split a single media permission
+    // into one per type, and this app plays both — so a grant covering audio
+    // alone means every video in the library is unreadable while this
+    // function cheerfully reports that media may be read. It said yes, the
+    // gate let the user through, and the failure surfaced much later as a
+    // lecture that would not open.
+    return checks.every(Boolean);
   } catch (error) {
     return false;
   }
@@ -137,29 +146,35 @@ export const hasMediaReadPermission = async () => {
  * arrived on an intent is readable now and worthless tomorrow; what varies is
  * only which escape from that is available.
  *
- * Two of them, cheapest first. A sender that attached a persistable grant means
- * the uri it sent is already permanent. Failing that, an ordinary media file in
- * shared storage has a MediaStore uri of its own, which needs no grant at all —
- * it is read on the strength of the media permission, so it outlives both the
- * task and the app that sent it.
+ * Two of them, and MediaStore goes first even though it is the dearer question
+ * to ask. Both survive a restart, so that is not what separates them: a
+ * persistable grant is held by *this install* and every one of them is revoked
+ * when the app is uninstalled, while a MediaStore uri is read on the strength
+ * of the media permission and is still the file's address afterwards. Restore
+ * the database onto a reinstalled app and the grant-held rows all point at
+ * files they may no longer open, which is the one moment a library most needs
+ * to come back intact. Taking the grant second keeps it for what MediaStore
+ * cannot name at all — a document provider's own tree, a drive the scanner
+ * does not index — because the alternative there is copying the whole file,
+ * which is what referencing files in place exists to avoid.
  *
- * `prompt` is the difference between a decision and a glance. Keeping a file is
- * a deliberate act and can fairly ask for a permission; a file shared in to be
- * watched once should not put a system dialog in front of someone who only
- * tapped play, so that path takes the permission if it already has it and
- * otherwise lets the uri be temporary.
+ * Never asks for the media permission, only reads it. PermissionGate refuses
+ * to let the app start without it, so every arrival here already has it —
+ * and if that ever stops being true, the honest fallback is the grant below
+ * rather than a dialog fired from inside an import.
  */
-export const durableUriFor = async (uri, {prompt = false} = {}) => {
+export const durableUriFor = async uri => {
   if (!isContentUri(uri)) return null;
 
+  if (await hasMediaReadPermission()) {
+    const viaMediaStore = await resolveMediaStoreUri(uri);
+    if (viaMediaStore) return viaMediaStore;
+  }
+
+  // Refused, or a file MediaStore has no name for. A grant still beats a copy.
   if (await takePersistableAccess(uri)) return uri;
 
-  const allowed = prompt
-    ? await ensureMediaReadPermission()
-    : await hasMediaReadPermission();
-  if (!allowed) return null;
-
-  return await resolveMediaStoreUri(uri);
+  return null;
 };
 
 /**

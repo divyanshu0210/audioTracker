@@ -34,7 +34,7 @@ import {
   saveDeviceFileIdentity,
 } from '../database/deviceFileMeta';
 import {updateItemFields} from '../database/U';
-import {ensureMediaReadPermission, isContentUri, mediaExists} from './mediaFile';
+import {hasMediaReadPermission, isContentUri, mediaExists} from './mediaFile';
 
 const {FileMeta} = NativeModules;
 
@@ -234,6 +234,14 @@ export const repairDeviceFile = async (item, {retry = false} = {}) => {
   if (!retry && searchedFor.has(item.id)) return null;
   searchedFor.add(item.id);
 
+  // Checked, never asked for. PermissionGate holds the app shut until this
+  // permission is granted, so by the time anything reaches here it is held —
+  // and a prompt from a background sweep would be a question nobody asked.
+  // The check stays because this module should not depend on a gate two
+  // screens away being there: without the permission there is no MediaStore
+  // to search, and saying so here is cheaper than failing inside the query.
+  if (!(await hasMediaReadPermission())) return null;
+
   let meta;
   try {
     meta = await getDeviceFileMeta(item.id);
@@ -244,8 +252,6 @@ export const repairDeviceFile = async (item, {retry = false} = {}) => {
   // nothing to search by, and searching by title alone is exactly the guess
   // this module exists to avoid.
   if (!meta?.contentHash || !meta.size) return null;
-
-  if (!(await ensureMediaReadPermission())) return null;
 
   let found;
   try {

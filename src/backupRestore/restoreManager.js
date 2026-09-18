@@ -21,6 +21,7 @@ const TABLE_ORDER = [
   'items',
   'youtube_meta',
   'shared_drive_copies',
+  'device_file_meta',
   'category_items',
   'notes',
   'video_watch_history',
@@ -128,6 +129,7 @@ const TABLES_WITH_UPDATED_AT = new Set([
   'notes',
   'images',
   'shared_drive_copies',
+  'device_file_meta',
 ]);
 
 // A backup written before updated_at existed has no such column, so the insert
@@ -147,7 +149,7 @@ const withPreservedUpdatedAt = (table, row) => {
 };
 
 // Tables whose surrogate id is not the only key a replayed row can collide on.
-// Both declare UNIQUE(item_id) alongside an AUTOINCREMENT primary key, and the
+// Each declares UNIQUE(item_id) alongside an AUTOINCREMENT primary key, and the
 // upsert below can only name one conflict target — it names id, so a row
 // arriving with a fresh id but an item_id that is already taken raises
 // SQLITE_CONSTRAINT_UNIQUE instead of updating.
@@ -163,6 +165,7 @@ const withPreservedUpdatedAt = (table, row) => {
 const NATURAL_KEYS = {
   shared_drive_copies: ['item_id'],
   youtube_meta: ['item_id'],
+  device_file_meta: ['item_id'],
 };
 
 const clearConflictingNaturalKey = (table, row, label, tx) => {

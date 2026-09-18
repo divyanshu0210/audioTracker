@@ -7,7 +7,8 @@
     "ios": "react-native run-ios",
     "lint": "eslint .",
     "start": "react-native start",
-    "test": "jest"
+    "test": "jest",
+    "db": "node tools/db-viewer/server.js"
   },
   "dependencies": {
     "@gorhom/bottom-sheet": "^5.1.2",
@@ -103,10 +104,12 @@
     "@types/react": "^18.3.18",
     "@types/react-test-renderer": "^19.0.0",
     "eslint": "^8.56.0",
+    "express": "^5.2.1",
     "jest": "^29.7.0",
     "metro-react-native-babel-preset": "^0.77.0",
     "prettier": "^3.5.1",
     "react-test-renderer": "18.3.1",
+    "sql.js": "^1.14.2",
     "typescript": "^5.7.3"
   },
   "engines": {

@@ -6,7 +6,6 @@ import {createStackNavigator} from '@react-navigation/stack';
 import React, {useEffect, useRef} from 'react';
 import {
   ActivityIndicator,
-  Button,
   NativeEventEmitter,
   NativeModules,
   StyleSheet,
@@ -45,7 +44,6 @@ import PlaylistView from './StackScreens/PlaylistView';
 import HomeScreen from './TabScreens/HomeScreen';
 import ProfileTab from './TabScreens/ProfileTab';
 import ReportScreen from './report/ReportScreen';
-import copyDatabaseToAccessibleLocation from './database/dbCopyUtil';
 import MenteeList from './appMentor/MenteeList';
 import AssignScreen from './appMentor/AssignScreen';
 import CreateCategoryModal from './components/modals/CreateCategoryModal';
@@ -329,12 +327,6 @@ export default App = track(function App() {
               <GlobalBottomSheets />
               <GlobalListeners />
               <GlobalOverlays />
-{/* 
-              <Button
-                title="Debug"
-                onPress={() => {
-                  copyDatabaseToAccessibleLocation();
-                }}></Button> */}
             </NavigationContainer>
           </MenuProvider>
         </GestureHandlerRootView>

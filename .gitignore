@@ -75,3 +75,5 @@ yarn-error.log
 !.yarn/versions
 
 **/.bundle/
+# Databases pulled off a device by tools/db-viewer (real user data, ~13MB each)
+tools/db-viewer/*/

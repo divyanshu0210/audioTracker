@@ -9,7 +9,8 @@ import IskconMenuItems from './IskconMenuItems';
 import NBMenuItems from './NBMenuItems';
 import NoteMenuItems from './NoteMenuItems';
 import YTMenuItems from './YTMenuItems';
-import {ItemTypes} from '../../contexts/constants';
+import {ItemTypes, ScreenTypes} from '../../contexts/constants';
+import useInMenteeCategory from '../../appMentor/useInMenteeCategory';
 import { useSelectionStore } from '../../stores/useSelectionStore';
 import { useNotesStore } from '../../stores/useNotesStore';
 import { useShallow } from 'zustand/react/shallow';
@@ -31,6 +32,26 @@ const {setSelectedNote} = useNotesStore(
     setSelectedNote: state.setSelectedNote,
   })),
 );
+
+  // A mentor looking at what they assigned to one mentee is not looking at
+  // their own shelf, and nearly every entry here acts on the shelf: Add Notes
+  // writes a note the mentee will never read, Add to Category files their
+  // lecture under the mentor's own headings, Download fills this phone with a
+  // copy of everything they ever sent. Delete was already hidden for reading as
+  // "unassign" and doing the opposite; the rest is the same mistake with a
+  // smaller bill.
+  //
+  // What is left is the two entries that are about the mentee: their notes on
+  // this item, and a link to hand them. Withdrawing an assignment is not among
+  // them and is not missing - what has been sent has been sent, and that is the
+  // mentor's to carry.
+  //
+  // Decided here rather than in each of the per-type files, which is where it
+  // started: three copies of one condition, and the iskcon file never got a
+  // copy, so Remove Download sat on a mentee's row and deleted the mentor's
+  // own download.
+  const inMenteeCategory = useInMenteeCategory();
+  const menteeView = inMenteeCategory && screen === ScreenTypes.MAIN;
 
   const sourceId =
     item?.rowid ||
@@ -124,6 +145,13 @@ const {setSelectedNote} = useNotesStore(
     }
   };
 
+  const canShowNotes = showAddNote();
+
+  // In a mentee's category the menu is two entries at most, and a row can have
+  // neither - a folder has no notes of its own and no link. An anchor that
+  // opens an empty popup is worse than no anchor.
+  if (menteeView && !canShowNotes && !shareLink && !canCreateLink) return null;
+
   return (
     <View style={styles.row}>
       <Menu
@@ -145,7 +173,10 @@ const {setSelectedNote} = useNotesStore(
           sourceType={type}
           hideMenu={hideMenu}
           screen={screen}
-          showAddNote={showAddNote()}
+          showAddNote={canShowNotes && !menteeView}
+          showAllNotes={canShowNotes}
+          showAddToCategory={!menteeView}
+          menteeView={menteeView}
         />
         {shareLink && (
           <MenuItem
@@ -175,7 +206,7 @@ const {setSelectedNote} = useNotesStore(
             </Text>
           </MenuItem>
         )}
-        {renderMenuItems()}
+        {!menteeView && renderMenuItems()}
       </Menu>
     </View>
   );

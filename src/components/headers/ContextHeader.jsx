@@ -16,7 +16,13 @@ const sourceTypeColors = {
   notebook: null,
 };
 
-const ContextHeader = ({}) => {
+// menteeName is set only when this header sits over a mentee's notes, and it
+// changes two things: the line under the title says whose writing this is, and
+// the search box goes. Their notes are deliberately outside this user's search
+// index - mentee_notes is a plain table while `notes` is the fts5 one the box
+// queries - so searching here would quietly answer with the mentor's own notes
+// on the same lecture.
+const ContextHeader = ({menteeName = null}) => {
   const activeItem = useSelectionStore(state => state.activeItem);
 
   const isNoteSource = activeItem?.sourceType === 'note';
@@ -34,7 +40,10 @@ const ContextHeader = ({}) => {
 
   const title = item?.title || 'Related Notes';
 
-  const subtitle = sourceTypeLabels[sourceType] || '';
+  const typeLabel = sourceTypeLabels[sourceType] || '';
+  const subtitle = menteeName
+    ? [typeLabel, 'Notes by ' + menteeName].filter(Boolean).join(' · ')
+    : typeLabel;
 
   const barColor =
     sourceType === 'notebook'
@@ -46,7 +55,7 @@ const ContextHeader = ({}) => {
       title={title}
       subtitle={subtitle}
       accentColor={barColor}
-      enableSearch
+      enableSearch={!menteeName}
       searchParams={{
         initialSearchActive: true,
         mode: 'notes',

@@ -35,6 +35,14 @@ const CommonMenuItems = ({
   hideMenu,
   screen,
   showAddNote = true,
+  // Split from showAddNote, which used to gate both. Inside a mentee's category
+  // writing a note is the mentor's own business and off the point, while
+  // reading the mentee's is the whole reason to open the menu.
+  showAllNotes = true,
+  showAddToCategory = true,
+  // Only for the wording. Which notes the screen reads is its own question,
+  // asked of the same hook - see NotesListScreen.
+  menteeView = false,
   showRemove = true,
 }) => {
 const {
@@ -106,41 +114,46 @@ const {
   return (
     <>
       {showAddNote && (
-        <>
-          <MenuItem onPress={hideMenu}>
-            <AddNewNoteBtn
-              renderItem={() => (
-                <Text style={styles.menuItemText}>Add Notes</Text>
-              )}
-              onNoteAdded={noteId => {
-                navigationRef.navigate('BacePlayer', {
-                  item: item,
-                  currentNoteId: noteId,
-                  pauseOnStart: true,
-                });
-                hideMenu();
-              }}
-            />
-          </MenuItem>
-          <MenuItem onPress={hideMenu}>
-            <TouchableOpacity
-              onPress={() => {
-                hideMenu();
-                navigationRef.navigate('NotesListScreen');
-              }}>
-              <Text style={styles.menuItemText}>Show All Notes</Text>
-            </TouchableOpacity>
-          </MenuItem>
-        </>
+        <MenuItem onPress={hideMenu}>
+          <AddNewNoteBtn
+            renderItem={() => (
+              <Text style={styles.menuItemText}>Add Notes</Text>
+            )}
+            onNoteAdded={noteId => {
+              navigationRef.navigate('BacePlayer', {
+                item: item,
+                currentNoteId: noteId,
+                pauseOnStart: true,
+              });
+              hideMenu();
+            }}
+          />
+        </MenuItem>
       )}
 
-      <MenuItem
-        onPress={() => {
-          handleAddToCategory();
-          hideMenu();
-        }}>
-        <Text style={styles.menuItemText}>Add to Category</Text>
-      </MenuItem>
+      {showAllNotes && (
+        <MenuItem onPress={hideMenu}>
+          <TouchableOpacity
+            onPress={() => {
+              hideMenu();
+              navigationRef.navigate('NotesListScreen');
+            }}>
+            <Text style={styles.menuItemText}>
+              {menteeView ? 'Show Their Notes' : 'Show All Notes'}
+            </Text>
+          </TouchableOpacity>
+        </MenuItem>
+      )}
+
+      {showAddToCategory && (
+        <MenuItem
+          onPress={() => {
+            handleAddToCategory();
+            hideMenu();
+          }}>
+          <Text style={styles.menuItemText}>Add to Category</Text>
+        </MenuItem>
+      )}
 
       {/* "Remove from this category" only makes sense on the screen that is
           actually filtered by the selected category — the Home tabs. Elsewhere

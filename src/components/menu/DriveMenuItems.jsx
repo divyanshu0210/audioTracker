@@ -12,7 +12,6 @@ import { navigationRef } from '../../handlers/navigationRef';
 import useDownloadStore from '../../stores/useDownloadStore';
 import {enqueueDriveDownload} from '../buttons/Download';
 import {isContentUri, mediaExists, releaseMedia} from '../../utils/mediaFile';
-import useInMenteeCategory from '../../appMentor/useInMenteeCategory';
 import {
   downloadSharedCopy,
   removeSharedCopy,
@@ -58,10 +57,10 @@ const {
   // button.
   const isDriveFile = !isFolder && !isDevice;
 
-  // Hidden while a mentor is inside a mentee's category: there Delete looks
-  // like "unassign" and instead removes the item from the mentor's own
-  // library. See useInMenteeCategory.
-  const inMenteeCategory = useInMenteeCategory();
+  // Nothing here asks whether a mentor is inside a mentee's category any more.
+  // BaseMenu does not render this file at all in that view - see the comment
+  // there for why Delete and Download both go, and why the answer belongs in
+  // one place.
 
   // The path outlives the file: Android can reclaim the app's files directory
   // and a file manager can delete out of it, so this asks rather than trusting
@@ -270,11 +269,7 @@ const {
           so with nothing downloaded there is nothing for it to do. It used to
           be unreachable in that state anyway — the row showed a download
           button instead of this menu. */}
-      {/* screen === 'out' as well: inside a Drive folder this entry reads
-          "Remove Download", which is useful and not misleading, and the
-          category filter does not apply there anyway. */}
-      {!(inMenteeCategory && screen === 'out') &&
-        !(isDriveFile && !downloaded && screen === 'in') && (
+      {!(isDriveFile && !downloaded && screen === 'in') && (
         <MenuItem
           onPress={() => {
             hideMenu();

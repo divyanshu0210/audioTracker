@@ -200,3 +200,61 @@ export const getMenteeItemBySourceId = ({menteeId, sourceId, type}) => {
     });
   });
 };
+
+/**
+ * How many notes this mentee has written against each item, keyed by source_id.
+ *
+ * One grouped query rather than a count per row: a list is twenty rows deep and
+ * every one of them would otherwise open its own read for a number that comes
+ * out of a single GROUP BY.
+ *
+ * Keyed on source_id alone, which is safe because an assignment gives both
+ * sides the same one - see ingestDeviceAssignment, where the mentor's id is
+ * deliberately what the mentee's row is built with. Notebook notes are left out:
+ * their source_id is a notebook rowid, which belongs to a different numbering
+ * altogether and has no row on a mentor's screen to sit under.
+ *
+ * Tombstones are excluded the same way fetchMenteeNotes excludes them - a
+ * deleted note arrives as a blanked row, not a missing one, so counting rows
+ * without this would keep counting notes the mentee has thrown away.
+ */
+export const countMenteeNotesBySource = menteeId => {
+  const fastdb = getDb();
+
+  return new Promise((resolve, reject) => {
+    if (!menteeId) {
+      resolve({});
+      return;
+    }
+
+    fastdb.transaction(tx => {
+      tx.executeSql(
+        `SELECT source_id, COUNT(*) AS noteCount
+           FROM mentee_notes
+          WHERE mentee_id = ?
+            AND deleted_at IS NULL
+            AND source_id IS NOT NULL
+            AND source_type <> 'notebook'
+          GROUP BY source_id;`,
+        [menteeId],
+        (_, {rows}) => {
+          const counts = {};
+          for (let i = 0; i < rows.length; i++) {
+            const row = rows.item(i);
+            counts[String(row.source_id)] = row.noteCount;
+          }
+          resolve(counts);
+        },
+        (_, error) => {
+          // No tables yet - the same honest empty answer the reads above give.
+          if (/no such table/i.test(error?.message ?? '')) {
+            resolve({});
+            return;
+          }
+          reject(error);
+          return false;
+        },
+      );
+    });
+  });
+};

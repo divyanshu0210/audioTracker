@@ -18,7 +18,9 @@
 import React from 'react';
 import {StyleSheet, Text, View} from 'react-native';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
+import SimpleLineIcons from 'react-native-vector-icons/SimpleLineIcons';
 import useAssignmentStatusStore from './useAssignmentStatusStore';
+import {useMenteeNoteCountStore} from './useMenteeNoteCounts';
 
 // Blue is reserved for the state a person caused. Delivered is the device
 // reporting in, which is worth showing but is not the same claim.
@@ -56,6 +58,12 @@ const AssignmentSubtitleBase = ({sourceId, isContainer = false}) => {
     state => state.byVideoId[String(sourceId)],
   );
 
+  // Their notes on this item. Zero for most rows, and for every row until the
+  // first sync of a newly picked mentee lands.
+  const noteCount = useMenteeNoteCountStore(
+    state => state.counts[String(sourceId)] ?? 0,
+  );
+
   if (!assignment) return null;
 
   const {status, percent} = assignment;
@@ -80,6 +88,37 @@ const AssignmentSubtitleBase = ({sourceId, isContainer = false}) => {
           ? label
           : `${label} · Watched ${Math.round(percent ?? 0)}%`}
       </Text>
+
+      {/* What they wrote, as a count, because it is the other half of the
+          question the ticks answer - a lecture watched in full with nothing
+          written against it is a different report from one watched half way
+          with six notes on it. The reading itself is a tap away on the same
+          row, under the menu's "Show Their Notes".
+
+          Zero is shown like any other number, so every row carries the figure
+          in the same place and a mentor reads down the column instead of
+          noticing which lines happen to have one.
+
+          A container is the exception, for the reason the watched figure is:
+          its notes are on the lectures inside it, not against the folder, so a
+          0 here would be an invented number rather than a quiet one. */}
+      {!isContainer && (
+        <>
+          <Text
+            style={[
+              styles.subtitleText,
+              styles.noteCount,
+              noteCount === 0 && styles.noteCountEmpty,
+            ]}>
+            · <SimpleLineIcons
+            name="note"
+            size={10}
+            color={noteCount > 0 ? SEEN_COLOR : PENDING_COLOR}
+            style={styles.noteIcon}
+          /> {noteCount}
+          </Text>
+        </>
+      )}
     </View>
   );
 };
@@ -128,6 +167,22 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: '#9aa0a6',
     marginLeft: 4,
+  },
+  // Set off from the delivery half of the line, which runs together as one
+  // sentence; this is a separate fact about the same row.
+  noteIcon: {
+    marginLeft: 8,
+  },
+  // Blue, like the seen tick: both are the mentee having done something, as
+  // against the device reporting in. A zero is nobody having done anything, so
+  // it stays the same grey as the rest of the line - the figure is always
+  // there, but it only speaks up once there is something to say.
+  noteCount: {
+    color: SEEN_COLOR,
+    marginLeft: 3,
+  },
+  noteCountEmpty: {
+    color: PENDING_COLOR,
   },
   // Sat on the row's bottom edge rather than in a band of its own, the way
   // report/VideoReportItem.jsx puts it along the foot of its card - same

@@ -15,7 +15,8 @@ import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
 import {useSelectionStore} from '../stores/useSelectionStore';
 import {useShallow} from 'zustand/react/shallow';
 import {navigationRef} from '../handlers/navigationRef';
-import {ItemTypes} from '../contexts/constants';
+import {ItemTypes, ScreenTypes} from '../contexts/constants';
+import useInMenteeCategory from '../appMentor/useInMenteeCategory';
 import {
   bulkMoveNotesToNotebook,
   bulkShareNotesAsFile,
@@ -52,6 +53,22 @@ const SelectionHeader = ({type, screen, allItemsInThisList}) => {
       setAddToCategoryModalVisible: state.setAddToCategoryModalVisible,
     })),
   );
+
+  // The line BaseMenu draws across a single row's menu, drawn again across a
+  // selection. Inside a mentee's category everything this header writes lands
+  // on the mentor's own library: Delete soft-deletes the file out of every tab
+  // while the assignment and the mentee's copy both survive, and Add to
+  // Category files someone else's lecture under the mentor's headings. Doing
+  // either to a whole selection at once is the same mistake, multiplied.
+  //
+  // Assign is the one action that still means what it says here - forwarding
+  // what this mentee has to another one - so it is what is left, beside Select
+  // All and the count.
+  //
+  // The Notes tab cannot complicate this: it is filtered by the same selected
+  // category, and a mentee category only ever holds assigned media, so there is
+  // nothing in it to select when this is true.
+  const menteeView = useInMenteeCategory() && screen === ScreenTypes.MAIN;
 
   const selectedNotes = useMemo(
     () => selectedItems.filter(i => i.type === ItemTypes.NOTE),
@@ -294,7 +311,7 @@ ${describeFailures(failed)}`,
             </TouchableOpacity>
           )}
 
-          {!hasMenteeNotes && (
+          {!hasMenteeNotes && !menteeView && (
             <TouchableOpacity onPress={openAddToCategory} disabled={busy}>
               <Ionicons name="pricetag-outline" size={21} color="#007AFF" />
             </TouchableOpacity>
@@ -306,7 +323,7 @@ ${describeFailures(failed)}`,
             </TouchableOpacity>
           )}
 
-          {!hasMenteeNotes && (
+          {!hasMenteeNotes && !menteeView && (
             <TouchableOpacity
               onPress={() => setConfirmVisible(true)}
               disabled={busy}>

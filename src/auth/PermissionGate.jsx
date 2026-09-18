@@ -11,9 +11,15 @@
 // instant denial, so those scattered asks were also spending a budget nobody
 // was counting.
 //
-// Mounted inside MainApp, so it is only ever seen by someone who has signed
-// in — asking before that would be asking on behalf of an app the user has not
-// yet agreed to use.
+// A screen between login and MainApp, not an overlay on top of it. As an
+// overlay it lost a race it could not win: a Modal is its own window, so
+// whatever is behind it gets painted first, and the tabs and the continue-
+// watching sheet appeared for a moment before the gate covered them. Deciding
+// before MainApp is navigated to means none of it is ever built.
+//
+// Which also keeps the old promise: only someone who has signed in sees this,
+// because login is what sends them here. Asking earlier would be asking on
+// behalf of an app the user has not yet agreed to use.
 //
 // It does not offer a way past itself. That is the whole point of a gate, and
 // it is only defensible because of the settings fallback below: once Android
@@ -26,8 +32,8 @@ import React, {useCallback, useEffect, useState} from 'react';
 import {
   ActivityIndicator,
   AppState,
+  BackHandler,
   Linking,
-  Modal,
   Platform,
   StyleSheet,
   Text,
@@ -41,6 +47,7 @@ import {
   ensureMediaReadPermission,
   hasMediaReadPermission,
 } from '../utils/mediaFile';
+import {landAfterLogin} from '../handlers/navigationIntent';
 
 const readNotifications = async () => {
   try {
@@ -82,10 +89,9 @@ const mediaSettingsSteps = () => {
   // access to files this app was given years ago.
   return Platform.Version >= 33
     ? [
-       'Settings → App Permissions',
-'  • Music and audio → Allow',
-'  • Photos and videos → Allow all',
-
+        'Settings → App Permissions',
+        '  • Music and audio → Allow',
+        '  • Photos and videos → Allow all',
       ]
     : ['Permissions → Files and media → Allow'];
 };
@@ -111,7 +117,10 @@ const notificationSettingsSteps = () =>
 // counted across installs and invisible to us until we ask.
 const INSTANT_MS = 400;
 
-const PermissionGate = () => {
+const PermissionGate = ({navigation, route}) => {
+  // Where login was going before this screen interrupted it.
+  const {pendingRoute = null, user = null} = route?.params ?? {};
+
   // null while the first check is in flight. Rendering the gate on an
   // assumption would flash it in front of everyone who granted these months
   // ago, on every single launch.
@@ -198,7 +207,28 @@ const PermissionGate = () => {
     [exhausted, openSettings],
   );
 
-  if (!granted || (granted.notifications && granted.media)) return null;
+  const checked = granted !== null;
+  const satisfied = checked && granted.notifications && granted.media;
+
+  // Both granted — which can happen on arrival, if they were turned on from
+  // system settings while this screen waited, or the moment the second
+  // dialog is accepted. Either way this screen is done and the user carries
+  // on to where they were going before it interrupted.
+  useEffect(() => {
+    if (satisfied) landAfterLogin(navigation, {pendingRoute, user});
+  }, [satisfied, navigation, pendingRoute, user]);
+
+  // Back cannot leave. This is a stack screen now rather than a modal, so
+  // the hardware button would otherwise pop it and put the login screen
+  // back — an exit the gate is not supposed to have. The home button still
+  // works for anyone who would rather not.
+  useEffect(() => {
+    const subscription = BackHandler.addEventListener(
+      'hardwareBackPress',
+      () => true,
+    );
+    return () => subscription.remove();
+  }, []);
 
   // Whichever of the two has run out of dialogs gets its path printed, in
   // the order the rows are listed above.
@@ -225,69 +255,68 @@ const PermissionGate = () => {
   ];
 
   return (
-    <Modal
-      visible
-      animationType="fade"
-      // Deliberately does nothing. The back button cannot dismiss a gate — the
-      // way out is to grant, and the home button still works for anyone who
-      // would rather not.
-      onRequestClose={() => {}}>
-      <View style={styles.container}>
-        <Text style={styles.heading}>Let’s get AudioTracker ready</Text>
-        <Text style={styles.sub}>
-          A couple of permissions help AudioTracker play your files. 
-          {/* You can always change these later in system settings. */}
-        </Text>
+    <View style={styles.container}>
+      {/* Blank while the first read is in flight, and blank again once both
+          are granted — the navigation away is already in flight by then, and
+          a screen that flashes its own content on the way out is the thing
+          this was moved here to stop. */}
+      {checked && !satisfied && (
+        <>
+          <Text style={styles.heading}>Let’s get AudioTracker ready</Text>
+          <Text style={styles.sub}>
+            A couple of permissions help AudioTracker play your files.
+            {/* You can always change these later in system settings. */}
+          </Text>
 
-        <View style={styles.rows}>
-          {rows.map(row => {
-            const ok = granted[row.key];
-            return (
-              <View key={row.key} style={styles.row}>
-                <View style={[styles.iconWrap, ok && styles.iconWrapDone]}>
-                  <Ionicons
-                    name={ok ? 'checkmark' : row.icon}
-                    size={20}
-                    color={ok ? '#15803d' : '#334155'}
-                  />
+          <View style={styles.rows}>
+            {rows.map(row => {
+              const ok = !!granted?.[row.key];
+              return (
+                <View key={row.key} style={styles.row}>
+                  <View style={[styles.iconWrap, ok && styles.iconWrapDone]}>
+                    <Ionicons
+                      name={ok ? 'checkmark' : row.icon}
+                      size={20}
+                      color={ok ? '#15803d' : '#334155'}
+                    />
+                  </View>
+
+                  <View style={styles.rowBody}>
+                    <Text style={styles.rowTitle}>{row.title}</Text>
+                    <Text style={styles.rowText}>{row.body}</Text>
+                  </View>
+
+                  {ok ? (
+                    <Text style={styles.done}>Allowed</Text>
+                  ) : (
+                    <TouchableOpacity
+                      style={styles.button}
+                      disabled={busy === row.key}
+                      onPress={() => request(row.key)}>
+                      {busy === row.key ? (
+                        <ActivityIndicator size="small" color="#fff" />
+                      ) : (
+                        <Text style={styles.buttonText}>
+                          {exhausted[row.key] ? 'Settings' : 'Allow'}
+                        </Text>
+                      )}
+                    </TouchableOpacity>
+                  )}
                 </View>
+              );
+            })}
+          </View>
 
-                <View style={styles.rowBody}>
-                  <Text style={styles.rowTitle}>{row.title}</Text>
-                  <Text style={styles.rowText}>{row.body}</Text>
-                </View>
-
-                {ok ? (
-                  <Text style={styles.done}>Allowed</Text>
-                ) : (
-                  <TouchableOpacity
-                    style={styles.button}
-                    disabled={busy === row.key}
-                    onPress={() => request(row.key)}>
-                    {busy === row.key ? (
-                      <ActivityIndicator size="small" color="#fff" />
-                    ) : (
-                      <Text style={styles.buttonText}>
-                        {exhausted[row.key] ? 'Settings' : 'Allow'}
-                      </Text>
-                    )}
-                  </TouchableOpacity>
-                )}
-              </View>
-            );
-          })}
-        </View>
-
-        {/* Only once a dialog has stopped working. Saying it up front would
+          {/* Only once a dialog has stopped working. Saying it up front would
             teach every new user that there is a harder path when there is
             not. */}
-        {(exhausted.notifications || exhausted.media) && (
-          <Text style={[styles.hint, styles.hintFirst]}>
-            Tap Settings above, turn it on, then come back.
-          </Text>
-        )}
+          {(exhausted.notifications || exhausted.media) && (
+            <Text style={[styles.hint, styles.hintFirst]}>
+              Tap Settings above, turn it on, then come back.
+            </Text>
+          )}
 
-        {/* Down here with the sentence that already sends them to Settings,
+          {/* Down here with the sentence that already sends them to Settings,
             rather than under the rows: those are a list of two things to
             grant, and a menu path growing out of one of them made the list
             read as something else halfway down.
@@ -295,22 +324,25 @@ const PermissionGate = () => {
             Only for a permission whose dialogs are spent, and only while it
             is still missing — the block disappears the moment the switch is
             found, which is the confirmation that it was the right one. */}
-        {settingsPaths
-          .filter(
-            path =>
-              exhausted[path.key] && !granted[path.key] && !!path.lines?.length,
-          )
-          .map(path => (
-            <View key={path.key} style={styles.hintSteps}>
-              {path.lines.map(line => (
-                <Text key={line} style={styles.hint}>
-                  {line}
-                </Text>
-              ))}
-            </View>
-          ))}
-      </View>
-    </Modal>
+          {settingsPaths
+            .filter(
+              path =>
+                exhausted[path.key] &&
+                !granted?.[path.key] &&
+                !!path.lines?.length,
+            )
+            .map(path => (
+              <View key={path.key} style={styles.hintSteps}>
+                {path.lines.map(line => (
+                  <Text key={line} style={styles.hint}>
+                    {line}
+                  </Text>
+                ))}
+              </View>
+            ))}
+        </>
+      )}
+    </View>
   );
 };
 

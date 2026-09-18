@@ -27,6 +27,9 @@ import React, {
   useState,
 } from 'react';
 import {
+  Animated,
+  Dimensions,
+  Easing,
   Modal,
   ScrollView,
   StyleSheet,
@@ -34,6 +37,8 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+
+const SCREEN_HEIGHT = Dimensions.get('window').height;
 
 import {HistoryItem} from './HistoryCard';
 import {getRecentlyWatchedVideos} from '../database/R';
@@ -59,7 +64,48 @@ const ContinueWatchingSheet = forwardRef((props, ref) => {
   const [visible, setVisible] = useState(false);
   const [recent, setRecent] = useState([]);
 
-  const close = useCallback(() => setVisible(false), []);
+  // Where the sheet starts: far enough down to be off any screen, because
+  // its real height is not known until it has been laid out once. Replaced
+  // with the measured height the moment there is one, and never re-measured
+  // after that — the strip is a fixed size and a second measurement would
+  // only arrive mid-animation.
+  const translateY = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
+  const backdrop = useRef(new Animated.Value(0)).current;
+  const measuredRef = useRef(false);
+
+  const onSheetLayout = useCallback(
+    event => {
+      if (measuredRef.current) return;
+      const {height} = event.nativeEvent.layout;
+      if (!height) return;
+      measuredRef.current = true;
+
+      translateY.setValue(height);
+      Animated.parallel([
+        Animated.timing(translateY, {
+          toValue: 0,
+          duration: 260,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
+        Animated.timing(backdrop, {
+          toValue: 1,
+          duration: 260,
+          useNativeDriver: true,
+        }),
+      ]).start();
+    },
+    [translateY, backdrop],
+  );
+
+  const close = useCallback(() => {
+    // Reset for the next time it is asked for: the component stays mounted
+    // between openings and an Animated.Value remembers where it stopped.
+    measuredRef.current = false;
+    translateY.setValue(SCREEN_HEIGHT);
+    backdrop.setValue(0);
+    setVisible(false);
+  }, [translateY, backdrop]);
 
   // Once per app launch. HomeScreen mounting again - coming back from a deep
   // link, or a sign-out and back in - is not a fresh launch, and a sheet
@@ -123,18 +169,45 @@ const ContinueWatchingSheet = forwardRef((props, ref) => {
   if (!visible) return null;
 
   return (
-    <Modal visible transparent animationType="slide" onRequestClose={close}>
+    // animationType none, because the window animation is what made the sheet
+    // travel from the top of the screen.
+    //
+    // Android hands a Modal's children a root view whose height is not known
+    // on the first frame — it is set once the dialog window has been
+    // measured. Until then this overlay is flex:1 of nothing, so "put the
+    // sheet at the bottom" resolves to y=0 and the sheet paints at the top.
+    // A frame later the real height arrives, flex-end recomputes, and the
+    // sheet drops into place while the window slide is still running. The
+    // delay did not cause that; it only made it visible by leaving a still
+    // background to see it against.
+    //
+    // So nothing here depends on that measurement. The sheet is laid out
+    // bottom-anchored as before, but it is drawn a screen-height out of the
+    // way until it has measured itself, and then it animates in on its own
+    // translateY. Whatever the window does with its size in the first frames,
+    // the sheet is off-screen for all of them.
+    <Modal visible transparent animationType="none" onRequestClose={close}>
       <View style={styles.overlay}>
         {/* Backdrop as an absolute sibling rather than a wrapper - wrapping
             the sheet means it has to claim the touch responder to stay open,
-            which also swallows the strip's scroll gestures. */}
+            which also swallows the strip's scroll gestures.
+            
+            Its dimming is its own layer so that fading it in does not fade
+            the sheet with it: the sheet rises at full opacity, which is what
+            makes it read as a sheet rather than an apparition. */}
+        <Animated.View
+          style={[StyleSheet.absoluteFill, styles.dim, {opacity: backdrop}]}
+          pointerEvents="none"
+        />
         <TouchableOpacity
           style={StyleSheet.absoluteFill}
           activeOpacity={1}
           onPress={close}
         />
 
-        <View style={styles.sheet}>
+        <Animated.View
+          style={[styles.sheet, {transform: [{translateY}]}]}
+          onLayout={onSheetLayout}>
           <Text style={styles.title}>Continue watching</Text>
 
           {/* The same horizontal card strip as the Profile tab's Recently
@@ -158,7 +231,7 @@ const ContinueWatchingSheet = forwardRef((props, ref) => {
               />
             ))}
           </ScrollView>
-        </View>
+        </Animated.View>
       </View>
     </Modal>
   );
@@ -170,6 +243,8 @@ const styles = StyleSheet.create({
   overlay: {
     flex: 1,
     justifyContent: 'flex-end',
+  },
+  dim: {
     backgroundColor: 'rgba(0,0,0,0.5)',
   },
   sheet: {

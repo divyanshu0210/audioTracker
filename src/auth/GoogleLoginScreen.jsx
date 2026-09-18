@@ -26,7 +26,10 @@ import useRestoreStore from '../backupRestore/restoreStore';
 import {useNotesStore} from '../stores/useNotesStore';
 import LoginRestoreProgressBar from './LoginRestoreProgressBar';
 import { checkAndPromptRestore } from '../backupRestore/restoreManager';
-import { consumePendingRoute } from '../handlers/navigationIntent';
+import {consumePendingRoute, landAfterLogin} from '../handlers/navigationIntent';
+import {hasMediaReadPermission} from '../utils/mediaFile';
+import notifee from '@notifee/react-native';
+import {isAllowed} from '../appNotification/notificationPermission';
 
 const GoogleLoginScreen = ({navigation}) => {
   const [isLoading, setIsLoading] = useState(false);
@@ -82,6 +85,24 @@ const GoogleLoginScreen = ({navigation}) => {
     }
   };
 
+  // Both of them, because the app needs both — see PermissionGate, which is
+  // where they are explained and asked for.
+  const hasAllPermissions = async () => {
+    try {
+      const [media, notifications] = await Promise.all([
+        hasMediaReadPermission(),
+        notifee.getNotificationSettings().then(isAllowed),
+      ]);
+      return media && notifications;
+    } catch (error) {
+      // Unanswerable is not the same as granted, but sending someone to the
+      // gate they can satisfy is the better failure: it reads the same two
+      // values again and lets them straight through if they are fine.
+      console.log('[Login] Could not read permissions:', error?.message);
+      return false;
+    }
+  };
+
     const navigateToMain = async (userInfo) => {
     try {
       const defaultNotebookIdValue = await getOrCreateDefaultNotebookId();
@@ -94,13 +115,19 @@ const GoogleLoginScreen = ({navigation}) => {
       // heavy mount/data-loading is skipped entirely. It's built lazily when
       // the user leaves that screen via back (launchedDirectly → goHome).
       const pendingRoute = consumePendingRoute();
-      if (pendingRoute) {
-        navigation.reset({
-          index: 0,
-          routes: [{name: pendingRoute, params: {launchedDirectly: true}}],
-        });
+
+      // The permissions are read here, before anything of the app is built,
+      // and not by the gate itself. A gate mounted inside MainApp could only
+      // ever arrive after the tabs and the continue-watching sheet had been
+      // drawn, and the user watched that race on every launch. This screen
+      // is already on show and can hold the frame while two native calls
+      // answer.
+      if (await hasAllPermissions()) {
+        landAfterLogin(navigation, {pendingRoute, user});
       } else {
-        navigation.replace('MainApp', {user});
+        // Carrying the destination with it: the gate does the landing when
+        // it is done, and a deep link taken above would otherwise be lost.
+        navigation.replace('PermissionGate', {pendingRoute, user});
       }
     } catch (e) {
       console.error('[Login] Post-restore nav error:', e);

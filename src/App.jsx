@@ -103,6 +103,16 @@ const RootNavigator = track(function RootNavigator() {
           component={MainApp}
           options={{headerShown: false}}
         />
+        {/* Between login and MainApp, which is the whole point of it: the
+            tabs and everything they mount are never built for someone who
+            has not granted the permissions the app runs on. gestureEnabled
+            off because a swipe back would be an exit the gate does not
+            have; the hardware button is refused inside the screen. */}
+        <Stack.Screen
+          name="PermissionGate"
+          component={PermissionGate}
+          options={{headerShown: false, gestureEnabled: false}}
+        />
 
         <Stack.Screen
           name="DayReport"
@@ -265,11 +275,6 @@ const MainApp = track(function MainApp() {
           }}
         />
       </Tab.Navigator>
-
-      {/* Inside MainApp rather than at the root, so it is only ever put in
-          front of someone who has signed in. It renders nothing once both
-          permissions are held, which is every launch after the first. */}
-      <PermissionGate />
 
       {/* {checkingAvailableBackup && (
         <View style={styles.overlay}>

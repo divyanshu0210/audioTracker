@@ -86,6 +86,10 @@ const SettingsScreen = () => {
     updateSettings({autoPauseOnTyping: value});
   };
 
+  const handleFocusModeToggle = value => {
+    updateSettings({focusModeEnabled: value});
+  };
+
   return (
     <ScrollView style={styles.container}>
       {/* Notification Banner */}
@@ -208,6 +212,31 @@ const SettingsScreen = () => {
             onValueChange={handleAutoPauseOnTypingToggle}
           />
         </View>
+
+        {/* Focus mode. The one switch here that says what it costs as well as
+            what it does - it withdraws background playback and PiP, which
+            people rely on, and finding that out by having audio stop when they
+            pocket the phone would read as a bug. The second line also explains
+            why the switch in the player is sometimes dead. */}
+        <View style={styles.switchRow}>
+          <View style={styles.switchLabelGroup}>
+            <Text style={[styles.switchLabel, {color: '#000'}]}>
+              Focus Mode
+            </Text>
+            <Text style={styles.switchHint}>
+              Keeps the app in front while you watch: no background audio, no
+              picture-in-picture, and an occasional tap to confirm you are
+              there. Always on for assignments until you have watched them
+              through once.
+            </Text>
+          </View>
+          <Switch
+            trackColor={{false: '#bdbdbd', true: '#b2dfdb'}}
+            thumbColor={settings.focusModeEnabled ? '#00796b' : '#eeeeee'}
+            value={settings.focusModeEnabled ?? false}
+            onValueChange={handleFocusModeToggle}
+          />
+        </View>
       </View>
     </ScrollView>
   );
@@ -324,6 +353,18 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+  },
+  // Only the rows that carry a hint use this. Flexed so a long explanation
+  // wraps against the switch instead of pushing it off the edge.
+  switchLabelGroup: {
+    flex: 1,
+    paddingRight: 12,
+  },
+  switchHint: {
+    color: '#616161',
+    fontSize: 12,
+    marginTop: 2,
+    lineHeight: 17,
   },
   picker: {
     color: '#000',

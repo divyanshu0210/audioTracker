@@ -45,6 +45,7 @@ const VLCPlayerComponent = forwardRef(
       pauseOnStart,
       startTime,
       onEnd,
+      focusMode = false,
     },
     ref,
   ) => {
@@ -452,7 +453,14 @@ const VLCPlayerComponent = forwardRef(
           }}
           onBuffering={handleBuffering}
           onPlaying={handlePlaying}
-          playInBackground={true}
+          // Off under focus mode, and this is the load-bearing half of it.
+          // BacePlayer pauses on the way to the background, but a pause is a
+          // request to a player that has been told to keep decoding regardless
+          // - and on the YouTube path the embed stops itself, which is exactly
+          // the behaviour focus mode wants everywhere. Withdrawing the
+          // permission is what makes leaving the app actually stop the audio
+          // rather than race with it.
+          playInBackground={!focusMode}
           videoAspectRatio={aspectRatio ?? undefined}
           rate={playbackRate}
           // The app drives its own end-of-track behavior via handleReplay/onEnd
@@ -555,7 +563,11 @@ const BottomControls = React.memo(
 
     return (
       <Animated.View
-        style={[styles.bottomControls, {opacity: controlsOpacity}]}>
+        style={[
+          styles.bottomControls,
+          isAudio && styles.bottomControlsAudio,
+          {opacity: controlsOpacity},
+        ]}>
         {isAudio && (
           <View style={styles.audioButtonRow}>
             <TouchableOpacity
@@ -673,6 +685,17 @@ const styles = StyleSheet.create({
     zIndex: 10,
     paddingBottom: 10,
   },
+  // An audio player is AUDIO_MINIMIZED_RATIO of the screen - around 144dp on a
+  // usual phone - and this block is anchored to the bottom and grows upward,
+  // so its height is what decides where its top edge lands. At the sizes below
+  // it came to about 107dp, and the title overlay takes ~36 from the top: the
+  // two met exactly, and the skip and play buttons sat on the title.
+  //
+  // Everything here and in the audio button styles is trimmed for that one
+  // reason. The video layout is untouched - it has a whole screen to work in.
+  bottomControlsAudio: {
+    paddingBottom: 6,
+  },
   bottomRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -687,9 +710,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 5,
+    marginBottom: 2,
   },
-  audioControlButton: {padding: 10, marginHorizontal: 15},
+  audioControlButton: {padding: 6, marginHorizontal: 15},
   audioMainGlyph: {
     // 36, not the icon's 30: "large" is the only size ActivityIndicator takes
     // cross-platform and it draws at 36 on Android, so the slot is sized to
@@ -703,12 +726,15 @@ const styles = StyleSheet.create({
   },
   // audioMainButton's box without its chrome — the pill background is the
   // part that says "press me", and there is nothing to press while buffering.
+  //
+  // Its padding has to stay equal to audioMainButton's, or the row jumps every
+  // time buffering starts - the same reason audioMainGlyph is a fixed size.
   audioMainPlaceholder: {
-    padding: 10,
+    padding: 6,
     marginHorizontal: 15,
   },
   audioMainButton: {
-    padding: 10,
+    padding: 6,
     marginHorizontal: 15,
     backgroundColor: 'rgba(255, 255, 255, 0.2)',
     borderRadius: 50,

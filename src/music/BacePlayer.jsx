@@ -2,6 +2,7 @@ import { useRoute} from '@react-navigation/native';
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Animated,
   AppState,
   Dimensions,
@@ -11,6 +12,7 @@ import {
   PanResponder,
   StyleSheet,
   Text,
+  ToastAndroid,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -44,6 +46,8 @@ import {
 import {usePipMode} from './usePipMode';
 import SaveToListBar from '../components/SaveToListBar';
 import {isContentUri, isStreamUrl, resolvePlaybackPath} from './driveStream';
+import useFocusSession, {CHECK_GRACE_MS} from './useFocusSession';
+import FocusCheck from './FocusCheck';
 // const {PipModule} = NativeModules;
 
 // Guarded rather than assuming a string: a row off the report API spells the
@@ -63,6 +67,57 @@ const PROGRESS_CHECKPOINT_SECONDS = 120;
 // stutter between words and while thinking mid-sentence, short enough that
 // finishing a note doesn't feel like the video forgot to come back.
 const TYPING_RESUME_DELAY_MS = 700;
+
+// Leading edge: the first tap acts, the ones crowding behind it are dropped.
+// Android queues toasts with no way to cancel one, so five quick taps would
+// leave five cycling long after the pill settled.
+const FOCUS_TAP_INTERVAL_MS = 700;
+
+// Shown when switching focus mode off. Random rather than fixed, because a
+// line you have read nine times stops being read at all. None of them scolds:
+// each is a reason to stay, not a suggestion you were wrong to reach for it.
+const FOCUS_KEEP_ON_MESSAGES = [
+  'A few focused minutes can make a bigger difference than you think.',
+  'Give this your full attention for a little longer.',
+  'Let this be the one thing you are doing right now.',
+  'You do not need more time. You need a little more attention.',
+  'Keep going. Your future self will be glad you stayed.',
+  'Give this your full attention.Everything else can wait for later.',
+  'One uninterrupted session can be worth more than hours of half-attention.',
+  'Stay present. You might hear something you would have otherwise missed.',
+  'Protect this time. It is yours.',
+  'You are already focused. Just stay with it.',
+  'No need to rush. Listen fully, and let it sink in.',
+  'The distractions can wait. This moment cannot.',
+  'Keep the noise out for a little longer. Let the message come through.',
+  'Be here for this. The rest can wait.',
+  'A little more focus. A little more understanding.',
+   'Sometimes one sentence is enough to change your perspective.',
+  'Give the speaker your full attention. You may hear something meant just for you.',
+  'Do not just listen in the background. Be present for the message.',
+  'Let the words reach you before you move on to the next thing.',
+  'A focused mind receives more than a distracted one.',
+  'Stay present. Understanding begins with listening.',
+  'Give this time. Let the message settle before you move on.',
+  'You pressed play for a reason. Stay long enough to discover it.',
+  'For these few minutes, let this be the only thing that matters.',
+  'What you hear today may stay with you for much longer.',
+];
+
+const randomKeepOnMessage = () =>
+  FOCUS_KEEP_ON_MESSAGES[
+    Math.floor(Math.random() * FOCUS_KEEP_ON_MESSAGES.length)
+  ];
+
+// Pale tint, saturated ink of the same hue - borrowed from the Pill styles in
+// appMentor/AssignManifest.jsx. Light, not dark: this row sits on white while a
+// video plays and on black once notes open (see focusPillHit). All three states
+// share one glyph, so the tint is the only thing telling them apart.
+const FOCUS_PILL_LOOKS = {
+  off: {bg: '#f3f4f6', ink: '#6b7280'},
+  on: {bg: '#eff6ff', ink: '#1d4ed8'},
+  locked: {bg: '#fffbeb', ink: '#b45309'},
+};
 
 const NoteSection = React.memo(
   ({editorRef, source_type, playerRef, captureVLCScreenshot, showPlayerMinimized, isHidden, onTypingActivity, onImageOverlayChange}) => {
@@ -263,6 +318,128 @@ const BacePlayer = () => {
   const pausedByTypingRef = useRef(false);
   const typingResumeTimerRef = useRef(null);
 
+  // State, not just durationRef: focus mode's lock is coverage over duration,
+  // and the items row often stores 0 for something never played through. A ref
+  // would never re-resolve.
+  const [knownDuration, setKnownDuration] = useState(0);
+
+  // Stop playback because a focus check went unanswered. Not tracked as "ours"
+  // the way the typing pause is - this one stays until someone presses play.
+  const pauseForFocus = useCallback(() => {
+    if (!playerRef.current) return;
+    if (isPausedRef.current) return;
+    playerRef.current.togglePlayPause();
+  }, []);
+
+  const focus = useFocusSession({
+    sourceId: currentItem?.source_id,
+    // Either may be 0; resolveFocusMode holds the lock closed rather than guess.
+    duration: knownDuration || currentItem?.duration || 0,
+    onMissedCheck: pauseForFocus,
+  });
+
+  // A ref because reconcileKeepAlive and the PiP arming read it from callbacks
+  // handed to memoized players, which must not gain a dependency.
+  const focusOnRef = useRef(false);
+  useEffect(() => {
+    focusOnRef.current = focus.focusOn;
+  }, [focus.focusOn]);
+
+  const focusLook = focus.locked
+    ? FOCUS_PILL_LOOKS.locked
+    : focus.focusOn
+    ? FOCUS_PILL_LOOKS.on
+    : FOCUS_PILL_LOOKS.off;
+
+  // When the focus control was last acted on, for the guard below.
+  const lastFocusTapRef = useRef(0);
+
+  // See FOCUS_TAP_INTERVAL_MS.
+  const focusTapAllowed = useCallback(() => {
+    const now = Date.now();
+    if (now - lastFocusTapRef.current < FOCUS_TAP_INTERVAL_MS) return false;
+    lastFocusTapRef.current = now;
+    return true;
+  }, []);
+
+  /**
+   * A tap switches focus mode on, but will not switch it off.
+   *
+   * One-directional on purpose: the moment it is most tempting to reach for
+   * this is the moment the check appears, which is the moment it most needs to
+   * hold. Turning it on needs no such protection.
+   *
+   * The toast advertises the hold every time, not once - the control has no
+   * label, and a gesture nobody knows about is the same as none.
+   */
+  const handleFocusPress = useCallback(() => {
+    if (!focusTapAllowed()) return;
+
+    if (focus.locked) {
+      ToastAndroid.show(
+        'Focus stays on until you watch this assignment once',
+        ToastAndroid.LONG,
+      );
+      return;
+    }
+
+    if (!focus.focusOn) {
+      focus.setFocus(true);
+      ToastAndroid.show('Focus mode on', ToastAndroid.SHORT);
+      return;
+    }
+
+    ToastAndroid.show(
+      'Focus mode is on. Hold to turn it off',
+      ToastAndroid.LONG,
+    );
+  }, [focus.locked, focus.focusOn, focus.setFocus, focusTapAllowed]);
+
+  // The only way to switch focus mode off. The hold stops a reflex; the dialog
+  // gives the person a moment to notice they were having one.
+  const handleFocusLongPress = useCallback(() => {
+    if (focus.locked) {
+      if (!focusTapAllowed()) return;
+      ToastAndroid.show(
+        'Focus stays on until you watch this assignment once',
+        ToastAndroid.LONG,
+      );
+      return;
+    }
+
+    // Not behind the tap guard: a hold cannot fire repeatedly by accident, and
+    // swallowing one because a tap landed moments earlier loses the gesture
+    // that counts.
+    lastFocusTapRef.current = Date.now();
+
+    // Same as a tap when it is off - a gesture that works one way round and not
+    // the other reads as a broken button.
+    if (!focus.focusOn) {
+      focus.setFocus(true);
+      ToastAndroid.show('Focus mode on', ToastAndroid.SHORT);
+      return;
+    }
+
+    Alert.alert(
+      'Are you sure you want to stop?',
+      randomKeepOnMessage(),
+      [
+        // First and plain, so the easy answer changes nothing. Android
+        // emphasises the last button, which is why this is not it.
+        {text: 'Keep Focusing', style: 'cancel'},
+        {
+          text: 'Turn off',
+          style: 'destructive',
+          onPress: () => {
+            focus.setFocus(false);
+            ToastAndroid.show('Focus mode off', ToastAndroid.SHORT);
+          },
+        },
+      ],
+      {cancelable: true},
+    );
+  }, [focus.locked, focus.focusOn, focus.setFocus, focusTapAllowed]);
+
   const [isAudio, setIsAudio] = useState(false);
   const {height: SCREEN_HEIGHT} = Dimensions.get('window');
   const AUDIO_MINIMIZED_RATIO = 0.18;
@@ -312,7 +489,10 @@ const BacePlayer = () => {
    * session's progress.
    */
   const reconcileKeepAlive = useCallback(() => {
+    // Focus mode refuses it: the service exists to keep media alive with no
+    // visible activity, which is the state focus mode is there to prevent.
     const shouldHold =
+      !focusOnRef.current &&
       !isPausedRef.current &&
       (canPlayInBackgroundRef.current || isInPipRef.current);
 
@@ -376,6 +556,9 @@ const BacePlayer = () => {
       }
 
       loadPreviousWatchData(videoId);
+      // A new track measures its own length - carrying the last one's over
+      // would resolve the lock against the wrong duration.
+      setKnownDuration(0);
     }
 
     if (route.params?.currentNoteId) {
@@ -514,6 +697,9 @@ const BacePlayer = () => {
       if (nextAppState !== 'active' && appState.current === 'active') {
         // App is moving from foreground to background/inactive
         console.log('App is no longer active. Running function...');
+        // Before the save, so what gets written ends where the person left.
+        // Closes the ordinary hole: press Home, keep listening, get credited.
+        if (focusOnRef.current) pauseForFocus();
         await cleanupPlayerRef.current();
       }
 
@@ -536,7 +722,7 @@ const BacePlayer = () => {
     return () => {
       subscription.remove();
     };
-  }, []);
+  }, [pauseForFocus]);
 
   const handleCurrentTimeChange = useCallback(
     time => {
@@ -631,8 +817,12 @@ const BacePlayer = () => {
       reconcileKeepAlive();
 
       // Arm PiP only while a video is actually playing, so pressing Home from
-      // anywhere else backgrounds the app normally.
-      armPip(!paused && isVideoRef.current);
+      // anywhere else backgrounds the app normally. Never under focus mode,
+      // where it would turn pressing Home into a way to keep playing.
+      armPip(!paused && isVideoRef.current && !focusOnRef.current);
+
+      // Called rather than watched, so play/pause still costs no render here.
+      focus.onPlaybackChange(paused);
 
       // Handle play/pause tracking
       if (tracker.current) {
@@ -650,8 +840,18 @@ const BacePlayer = () => {
         }
       }
     },
-    [tracker, TIME_FACTOR, armPip, reconcileKeepAlive],
+    [tracker, TIME_FACTOR, armPip, reconcileKeepAlive, focus.onPlaybackChange],
   );
+
+  // Focus mode resolves asynchronously, so it can come on after media has
+  // started - by which point PiP is armed and the service may be held. Waiting
+  // for the next play/pause to reconcile them might wait forever.
+  useEffect(() => {
+    if (!focus.focusOn) return;
+    armPip(false);
+    reconcileKeepAlive();
+    if (!isPausedRef.current) focus.onPlaybackChange(false);
+  }, [focus.focusOn, focus.onPlaybackChange, armPip, reconcileKeepAlive]);
 
   useEffect(() => {
     autoPauseOnTypingRef.current = autoPauseOnTyping;
@@ -702,6 +902,10 @@ const BacePlayer = () => {
   }, []);
 
   const handleTypingActivity = useCallback(() => {
+    // Ahead of the autoPauseOnTyping guard: writing a note is the strongest
+    // evidence of attention there is, whether or not that setting is on.
+    focus.onPresenceSignal();
+
     if (!autoPauseOnTypingRef.current) return;
     if (!playerRef.current) return;
 
@@ -723,7 +927,7 @@ const BacePlayer = () => {
       pausedByTypingRef.current = false;
       if (isPausedRef.current) playerRef.current?.togglePlayPause();
     }, TYPING_RESUME_DELAY_MS);
-  }, []);
+  }, [focus.onPresenceSignal]);
 
   const handlePlaybackRateChange = useCallback(speed => {
     playbackSpeedRef.current = speed;
@@ -732,6 +936,12 @@ const BacePlayer = () => {
   const updateDuration = useCallback(async (duration) => {
     if (playerRef.current) {
       durationRef.current = duration;
+      // Mirrored into state so the lock re-resolves against a real length.
+      // Guarded: this fires repeatedly, and setting state per report would
+      // re-render the player on a loop.
+      setKnownDuration(previous =>
+        duration > 0 && duration !== previous ? duration : previous,
+      );
     }
   }, [playerRef.current]);
 
@@ -1032,6 +1242,7 @@ const BacePlayer = () => {
                     pauseOnStart={pauseOnStart}
                     startTime={startFrom?.current}
                     onEnd={handleAutoAdvance}
+                    focusMode={focus.focusOn}
                   />
                 )
               ) : isResolvingSource ? (
@@ -1054,6 +1265,19 @@ const BacePlayer = () => {
               )}
             </ViewShot>
 
+            {/* Not in PiP: focus mode never arms it, so a prompt there would
+                be a check nobody could have earned. */}
+            {!isInPip && (
+              <FocusCheck
+                visible={focus.prompting}
+                graceMs={CHECK_GRACE_MS}
+                onConfirm={focus.confirmPresence}
+                // An audio player is barely a third of the screen; the stacked
+                // layout does not fit inside one.
+                compact={isAudio}
+              />
+            )}
+
             {autoAdvanceSecondsLeft !== null && !isInPip && (
               <View style={styles.autoAdvanceOverlay}>
                 <Text style={styles.autoAdvanceText}>
@@ -1068,12 +1292,63 @@ const BacePlayer = () => {
             )}
 
             <View style={[styles.btnContainer, isInPip && styles.hidden]}>
-              <TouchableOpacity
-                style={styles.addButton}
-                disabled={isCreatingNote}
-                onPress={handleOpenBottomMenu}>
-                <Text style={styles.name}>All Notes</Text>
-              </TouchableOpacity>
+              {/* Grouped left so the middle stays empty: space-between put the
+                  pill dead centre, which is where renderDragHandle draws the
+                  grab bar while notes are open. They collided. */}
+              <View style={styles.btnGroup}>
+                <TouchableOpacity
+                  style={styles.addButton}
+                  disabled={isCreatingNote}
+                  onPress={handleOpenBottomMenu}>
+                  <Text style={styles.name}>All Notes</Text>
+                </TouchableOpacity>
+
+                {/* Here rather than the VLC gear menu, which the YouTube path
+                    does not have - focus mode applies to both.
+
+                    Shown even when off, and shown locked rather than hidden: a
+                    mentee who cannot turn it off is owed the reason.
+
+                    Unlabelled and asymmetric - a tap switches it on, only a
+                    hold plus a confirmation switches it off. The toast stands
+                    in for the label; Settings explains what the mode does. */}
+                <TouchableOpacity
+                  style={styles.focusPillHit}
+                  activeOpacity={focus.locked ? 0.9 : 0.75}
+                  onPress={handleFocusPress}
+                  onLongPress={handleFocusLongPress}
+                  // Longer than the 500ms default: it has to feel like holding.
+                  delayLongPress={650}
+                  accessibilityRole="switch"
+                  accessibilityState={{
+                    checked: focus.focusOn,
+                    disabled: focus.locked,
+                  }}
+                  accessibilityLabel="Focus mode"
+                  // The two directions use different gestures, so a fixed hint
+                  // would be wrong half the time.
+                  accessibilityHint={
+                    focus.locked
+                      ? 'Stays on until you have watched this assignment once'
+                      : focus.focusOn
+                      ? 'Double tap and hold to switch focus mode off'
+                      : 'Double tap to switch focus mode on'
+                  }>
+                  <View
+                    style={[styles.focusPill, {backgroundColor: focusLook.bg}]}>
+                    {/* One glyph for all three states, with colour carrying the
+                        difference. A padlock said "forbidden" about something
+                        working exactly as intended; the toast explains instead.
+                        21 in a 32 circle - about the most it holds without the
+                        glyph touching the edge. */}
+                    <Icon
+                      name="self-improvement"
+                      size={21}
+                      color={focusLook.ink}
+                    />
+                  </View>
+                </TouchableOpacity>
+              </View>
 
               <AddNewNoteBtn
                 renderItem={() => (
@@ -1273,6 +1548,35 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: 'black',
+  },
+  btnGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  // Why every fill in this row must be opaque: btnContainer lays out *past*
+  // playerContainer's animated height (the ViewShot above it is height:'100%'),
+  // so while a video plays it paints over container's white. Open the notes and
+  // isHidden collapses that ViewShot, the row slides up onto the black, and the
+  // same pixels sit on a dark surface. An outlined chip in white ink was
+  // invisible for the whole time a video played.
+  //
+  // alignSelf, not alignItems on btnContainer, so centring this does not change
+  // how the taller buttons beside it lay out.
+  focusPillHit: {
+    alignSelf: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 6,
+  },
+  // A circle, not the oblong the tint came from: a pill shape with one glyph
+  // rattling around in it looks like a label whose text failed to load. Fixed
+  // 32 square to sit level with addButton, which is a bare box around 16px
+  // text - a little over 24dp.
+  focusPill: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   autoAdvanceOverlay: {
     position: 'absolute',

@@ -19,6 +19,7 @@ import {useSelectionStore} from '../stores/useSelectionStore';
 import {getGoogleAccessToken} from '../auth/tokenManager';
 import useAssignmentStatusStore from '../appMentor/useAssignmentStatusStore';
 import useAssignmentInboxStore from '../appMentor/useAssignmentInboxStore';
+import useFocusModeStore from '../music/useFocusModeStore';
 
 export const fetchAssignmentsForMentee = async (
   setDriveLinksList,
@@ -109,6 +110,12 @@ export const fetchAssignmentsForMentee = async (
                 );
                 continue;
               }
+              // Nothing is recorded here for focus mode, deliberately. Each
+              // branch above has already filed the item under this mentor's
+              // category, and that membership is what getAssignedSourceIds
+              // reads - one fact in one place, with no second marker that
+              // could drift from it.
+              //
               // Only an id that got this far is acknowledged. Anything that
               // threw stays pending on the server and comes back next time,
               // rather than being silently lost.
@@ -523,6 +530,14 @@ export const syncAssignmentsOnStartup = async userInfo => {
   const inbox = useAssignmentInboxStore.getState();
   await inbox.hydrate();
 
+  // Before the early return below, not after the sync. What is already in the
+  // mentor categories is the whole history, not just what lands today - a
+  // mentee who restored a backup, or who opens the app with no network, still
+  // has assignments that focus mode has to hold shut. Waiting for a successful
+  // sync to learn about them would unlock every one of them offline.
+  const focus = useFocusModeStore.getState();
+  await focus.hydrate();
+
   if (!userInfo?.id) return;
 
   const {setDriveLinksList, setItems} = useMediaStore.getState();
@@ -535,4 +550,9 @@ export const syncAssignmentsOnStartup = async userInfo => {
     setSelectedCategory,
     userInfo,
   );
+
+  // Again, for what this run just filed. The ingestion above added those items
+  // to their mentor's category; this is what makes them visible to a player
+  // opened before the next launch.
+  await focus.hydrate();
 };

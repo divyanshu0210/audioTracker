@@ -18,6 +18,12 @@ const useSettingsStore = create((set, get) => ({
     autoplay: true,
     // Pause the media while a note is being typed, resume once typing stops.
     autoPauseOnTyping: true,
+    // Watch with the app in front and a hand on it: no background audio, no
+    // PiP, and an occasional tap to confirm someone is still there. Off by
+    // default for a person's own library - it is a discipline they opt into.
+    // Assignments ignore this and force it on until watched through once; see
+    // resolveFocusMode in music/useFocusModeStore.
+    focusModeEnabled: false,
     // Which tab the mentor/mentee drawer opens on. Whichever side of the
     // relationship someone mostly uses, that is the list they want first, and
     // it differs per person rather than having a right answer.
@@ -54,6 +60,7 @@ const useSettingsStore = create((set, get) => ({
       LAST_SPECIAL_BACKUP_KEY: null,
       autoplay: true,
       autoPauseOnTyping: true,
+      focusModeEnabled: false,
       menteesFirst: true,
     };
   },
@@ -81,6 +88,7 @@ const useSettingsStore = create((set, get) => ({
           key === 'SPECIAL_BACKUP_ALLOWED' ||
           key === 'autoplay' ||
           key === 'autoPauseOnTyping' ||
+          key === 'focusModeEnabled' ||
           typeof value === 'boolean'
         ) {
           storedValue = value ? '1' : '0';

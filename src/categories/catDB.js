@@ -38,6 +38,109 @@ const SHARED_NOTES_CATEGORY_COLOR = '#8B5CF6';
 export const getOrCreateSharedNotesCategoryId = () =>
   addCategory(SHARED_NOTES_CATEGORY, SHARED_NOTES_CATEGORY_COLOR);
 
+/**
+ * Is this the name of a category holding what a mentor sent this person?
+ *
+ * The mentee's category for a mentor is built as `${full_name} (${email})`, in
+ * two places that have to agree - fetchAssignmentsForMentee, from the server's
+ * key, and MentorMenteeDrawer, from the mentor row. So a trailing bracketed
+ * address is the shape, and recognising it needs no server call and no cached
+ * list of who this person's mentors are.
+ *
+ * The exclusion is the part that earns its place. On a device whose owner is a
+ * mentor as well, the mentee categories are
+ * `[MENTEE_CAT_Filter] Name (email) [MENTEE_CAT_Filter]` and are filled with
+ * that person's OWN library (see addItemstomenteeCategory). Treating those as
+ * assignments would lock focus mode onto everything they had ever given anyone
+ * else. The trailing tag means the address test already misses them - this says
+ * so rather than resting on it.
+ *
+ * Matched on the address rather than the whole key on purpose: a mentor who
+ * changes their display name gets a second category under the new name, and the
+ * first one keeps the items already filed in it.
+ */
+export const isMentorCategoryName = name => {
+  if (typeof name !== 'string') return false;
+  if (name.includes(MENTEE_CAT_FILTER_TAG)) return false;
+  // Ends with "(something@something)", with no nested brackets.
+  return /\([^()\s]+@[^()\s]+\)$/.test(name.trim());
+};
+
+const getLiveCategories = () => {
+  const fastdb = getDb();
+  return new Promise((resolve, reject) => {
+    fastdb.transaction(tx => {
+      tx.executeSql(
+        'SELECT id, name FROM categories WHERE deleted_at IS NULL;',
+        [],
+        (_, {rows}) => {
+          const out = [];
+          for (let i = 0; i < rows.length; i++) out.push(rows.item(i));
+          resolve(out);
+        },
+        (_, error) => reject(error),
+      );
+    });
+  });
+};
+
+const getItemIdsInCategories = categoryIds => {
+  const fastdb = getDb();
+  return new Promise((resolve, reject) => {
+    fastdb.transaction(tx => {
+      tx.executeSql(
+        `SELECT DISTINCT item_id FROM category_items
+          WHERE deleted_at IS NULL
+            AND category_id IN (${categoryIds.map(() => '?').join(',')});`,
+        categoryIds,
+        (_, {rows}) => {
+          const out = [];
+          for (let i = 0; i < rows.length; i++) out.push(rows.item(i).item_id);
+          resolve(out);
+        },
+        (_, error) => reject(error),
+      );
+    });
+  });
+};
+
+/**
+ * Every item a mentor has assigned to this mentee, as source ids.
+ *
+ * Read off the mentor categories the assignment sync already files items under,
+ * rather than a second record kept in step with those. One fact in one place:
+ * if an item sits in a mentor's category it was assigned, and there is no
+ * marker that can drift from the membership it was derived from.
+ *
+ * Deriving it locally also closes the case that is hardest to notice - a fresh
+ * install restoring a backup with no network. The categories come back with the
+ * restore, while a server-fetched mentor list would still be empty, and an empty
+ * list reads as "nothing is assigned": focus mode would unlock on exactly the
+ * assignments it exists for.
+ *
+ * Two queries rather than one join so the rule above lives in JavaScript, where
+ * it can be read and tested, instead of inside a LIKE pattern. The categories
+ * table is small - a row per list the person has ever made - and the second
+ * query is skipped entirely when none of them belongs to a mentor.
+ *
+ * Returns null, never [], if either read fails. An empty list means "nothing is
+ * assigned", which switches focus mode's lock off across the whole device, and
+ * that is the one way a transient database error must not be allowed to fail.
+ */
+export const getAssignedSourceIds = async () => {
+  try {
+    const mentorCategories = (await getLiveCategories()).filter(category =>
+      isMentorCategoryName(category.name),
+    );
+    if (!mentorCategories.length) return [];
+
+    return await getItemIdsInCategories(mentorCategories.map(c => c.id));
+  } catch (error) {
+    console.warn('Could not read the assigned items:', error?.message ?? error);
+    return null;
+  }
+};
+
 export const addCategory = (name, color) => {
   const fastdb = getDb();
   return new Promise((resolve, reject) => {

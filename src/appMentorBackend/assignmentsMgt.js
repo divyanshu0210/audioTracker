@@ -9,8 +9,6 @@ import {ToastAndroid} from 'react-native';
 import useDbStore from '../database/dbStore';
 import {BASE_URL} from './userMgt';
 import {addCategory} from '../categories/catDB';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import useNotificationStore from '../appNotification/useNotificationStore';
 import {ensureDbItem} from '../iskcon/iskconActions';
 import {iskconUrlFromSourceId} from '../iskcon/iskconAudioApi';
 import {addItemToCategory} from '../categories/catDB';
@@ -22,8 +20,6 @@ import {getGoogleAccessToken} from '../auth/tokenManager';
 import useAssignmentStatusStore from '../appMentor/useAssignmentStatusStore';
 import useAssignmentInboxStore from '../appMentor/useAssignmentInboxStore';
 
-const {setNewAssignmentsFlag} = useNotificationStore.getState();
-
 export const fetchAssignmentsForMentee = async (
   setDriveLinksList,
   setItems,
@@ -33,8 +29,6 @@ export const fetchAssignmentsForMentee = async (
 ) => {
   const {setInserting} = useDbStore.getState();
   try {
-    setNewAssignmentsFlag(false);
-
     // Ids of assignments whose items actually got built, collected across
     // every mentor so one acknowledgement covers the whole run.
     const deliveredIds = [];
@@ -312,26 +306,6 @@ const announceAssignments = added => {
   );
 };
 
-// to display the assignment btn on app start
-export const isAssignmentPending = async () => {
-  const count = await pendingAssignmentCount();
-  setNewAssignmentsFlag(count > 0);
-};
-
-export const pendingAssignmentCount = async () => {
-  const userId = await AsyncStorage.getItem('userId');
-
-  const response = await fetch(
-    `${BASE_URL}/assign/assignments-count-for-mentee/?mentee_id=${userId}`,
-  );
-  const data = await response.json();
-  // console.log(data);
-  if (response.ok) {
-    return data.pending_assignments_count;
-  }
-  return 0;
-};
-
 // The last container a mentor opened with a mentee selected, so a refresh can
 // ask about its children again. Without it a poll would answer for the
 // assigned rows and quietly strip the folder or playlist the mentor is
@@ -537,6 +511,10 @@ export const markAssignmentsSeen = async (menteeId, mentorId) => {
  * have to already be right. Reads its store setters here instead of taking
  * them as arguments, so a caller does not need to be a component.
  *
+ * Deliberately says nothing while it runs. Looking for assignments is our
+ * business, not the mentee's: the only thing worth interrupting them for is a
+ * count that turned out to be non-zero, and that shows itself.
+ *
  * Hydrates the badge counts first: they are persisted, so a mentee who was
  * shown "3 waiting" and then killed the app must still see 3 on the next
  * launch, whether or not this sync finds anything new.
@@ -550,16 +528,11 @@ export const syncAssignmentsOnStartup = async userInfo => {
   const {setDriveLinksList, setItems} = useMediaStore.getState();
   const {setCategories, setSelectedCategory} = useSelectionStore.getState();
 
-  inbox.setSyncing(true);
-  try {
-    await fetchAssignmentsForMentee(
-      setDriveLinksList,
-      setItems,
-      setCategories,
-      setSelectedCategory,
-      userInfo,
-    );
-  } finally {
-    useAssignmentInboxStore.getState().setSyncing(false);
-  }
+  await fetchAssignmentsForMentee(
+    setDriveLinksList,
+    setItems,
+    setCategories,
+    setSelectedCategory,
+    userInfo,
+  );
 };

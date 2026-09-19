@@ -115,15 +115,13 @@ export const fetchNotification = async () => {
 // costs nothing: relaunching mounts HomeScreen, which fetches both of these
 // anyway.
 const handleAssignmentNotifications = async notifications => {
-  const {setNewAssignmentsFlag} = useNotificationStore.getState();
   const notifArray = Array.isArray(notifications)
     ? notifications
     : [notifications];
 
-  const hasAssignment = notifArray.some(n => n?.type === 'assignment');
-  if (hasAssignment) {
-    setNewAssignmentsFlag(true);
-  }
+  // Only 'approved' is acted on here. An 'assignment' notification used to
+  // raise a flag for a button that no longer exists - the assignments it
+  // announces are picked up by the startup sync, which counts them itself.
   const hasNewConnections = notifArray.some(n => n?.type === 'approved');
   if (hasNewConnections) {
     await fetchNewConnections();

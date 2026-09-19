@@ -75,7 +75,7 @@ const HomeScreen = () => {
   // them: the mount effect above fires before the session is necessarily
   // restored, and a sync that skipped for a missing id would never retry.
   //
-  // Not gated on a pending count either. isAssignmentPending used to ask the
+  // Not gated on a pending count either. A separate call used to ask the
   // server whether anything was waiting so a button could appear; the sync
   // answers that question itself now, and does the work while it is there.
   useEffect(() => {

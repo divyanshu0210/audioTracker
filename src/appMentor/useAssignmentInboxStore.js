@@ -49,9 +49,6 @@ const useAssignmentInboxStore = create((set, get) => ({
   // Assignment ids already reflected in the counts above.
   countedIds: [],
   hydrated: false,
-  // True while a sync is running, so the pill can say "Checking for new
-  // assignments" rather than claiming a count it has not finished working out.
-  isSyncing: false,
 
   // Until this runs the badges do not show, which is the right failure: a
   // missing badge is quieter than a wrong one.
@@ -70,8 +67,6 @@ const useAssignmentInboxStore = create((set, get) => ({
       set({hydrated: true});
     }
   },
-
-  setSyncing: isSyncing => set({isSyncing}),
 
   /**
    * Record that these assignments arrived from this mentor.

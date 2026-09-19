@@ -112,6 +112,40 @@ class MainActivity : ReactActivity() {
     return builder.build()
   }
 
+  // ── Split screen ────────────────────────────────────────────────────────────
+  //
+  // Focus mode's other gates all rest on AppState, and AppState says nothing
+  // about this one: in split screen the app is still 'active' while sharing the
+  // display with whatever is in the other half. Playing a lecture in the top
+  // pane and scrolling something else in the bottom pane passed every check
+  // until this existed.
+  //
+  // PiP is excluded because it is reported as multi-window on some versions,
+  // and focus mode never arms PiP anyway - see FocusSignalsModule.
+  override fun onMultiWindowModeChanged(
+      isInMultiWindowMode: Boolean,
+      newConfig: Configuration
+  ) {
+    super.onMultiWindowModeChanged(isInMultiWindowMode, newConfig)
+    emitMultiWindow(isInMultiWindowMode)
+  }
+
+  /** The 24-25 spelling. Deprecated above that, and never called there. */
+  @Deprecated("Superseded by the two-argument form on API 26+")
+  override fun onMultiWindowModeChanged(isInMultiWindowMode: Boolean) {
+    @Suppress("DEPRECATION")
+    super.onMultiWindowModeChanged(isInMultiWindowMode)
+    emitMultiWindow(isInMultiWindowMode)
+  }
+
+  private fun emitMultiWindow(isInMultiWindowMode: Boolean) {
+    val inPip =
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && isInPictureInPictureMode
+    val payload = Arguments.createMap()
+    payload.putBoolean("isInMultiWindowMode", isInMultiWindowMode && !inPip)
+    ReactEmitter.emit(this, "multiWindowChanged", payload)
+  }
+
   @RequiresApi(Build.VERSION_CODES.O)
   override fun onPictureInPictureModeChanged(
       isInPictureInPictureMode: Boolean,

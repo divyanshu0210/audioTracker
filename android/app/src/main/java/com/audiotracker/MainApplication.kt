@@ -30,6 +30,7 @@ class MainApplication : Application(), ReactApplication {
               add(BackupModulePackage())
               add(PlaybackServicePackage())
               add(PipPackage())
+              add(FocusSignalsPackage())
               add(DriveStreamPackage())
               add(SplashPackage())
              //  add(RNBackgroundFetchPackage())

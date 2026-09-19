@@ -47,6 +47,7 @@ import {usePipMode} from './usePipMode';
 import SaveToListBar from '../components/SaveToListBar';
 import {isContentUri, isStreamUrl, resolvePlaybackPath} from './driveStream';
 import useFocusSession, {CHECK_GRACE_MS} from './useFocusSession';
+import useFocusSignals, {FocusSignal, isAlwaysSignal} from './useFocusSignals';
 import FocusCheck from './FocusCheck';
 // const {PipModule} = NativeModules;
 
@@ -76,6 +77,16 @@ const FOCUS_TAP_INTERVAL_MS = 700;
 // Shown when switching focus mode off. Random rather than fixed, because a
 // line you have read nine times stops being read at all. None of them scolds:
 // each is a reason to stay, not a suggestion you were wrong to reach for it.
+// What to say when a signal stops playback. Short, because these arrive
+// unasked for and the person can already see what happened.
+const FOCUS_SIGNAL_MESSAGES = {
+  becomingNoisy: 'Paused - headphones disconnected',
+  audioFocusLost: 'Paused - something else took the audio',
+  volumeZero: 'Paused - the volume is off',
+  multiWindow: 'Paused - focus mode needs the whole screen',
+  walking: 'Paused - pick it up again when you are settled',
+};
+
 const FOCUS_KEEP_ON_MESSAGES = [
   'A few focused minutes can make a bigger difference than you think.',
   'Give this your full attention for a little longer.',
@@ -344,6 +355,36 @@ const BacePlayer = () => {
   useEffect(() => {
     focusOnRef.current = focus.focusOn;
   }, [focus.focusOn]);
+
+  /**
+   * Something outside the app says nobody is listening any more.
+   *
+   * Two of these apply whatever focus mode is set to - headphones out and the
+   * audio being taken are reasons to stop a lecture for anyone. The other two
+   * are focus mode's own policy and are ignored when it is off, because a muted
+   * video or a split screen is a choice someone is entitled to make on their
+   * own library.
+   */
+  const handleFocusSignal = useCallback(
+    reason => {
+      if (!focusOnRef.current && !isAlwaysSignal(reason)) return;
+      if (isPausedRef.current) return;
+
+      pauseForFocus();
+      const message = FOCUS_SIGNAL_MESSAGES[reason];
+      if (message) ToastAndroid.show(message, ToastAndroid.SHORT);
+    },
+    [pauseForFocus],
+  );
+
+  // Listening costs an audio-focus request and two receivers, so it is held
+  // only while something is actually playing.
+  const [isPlayingForSignals, setIsPlayingForSignals] = useState(false);
+  const {checkMuted, checkMultiWindow} = useFocusSignals({
+    active: isPlayingForSignals,
+    focused: focus.focusOn,
+    onSignal: handleFocusSignal,
+  });
 
   const focusLook = focus.locked
     ? FOCUS_PILL_LOOKS.locked
@@ -824,6 +865,24 @@ const BacePlayer = () => {
       // Called rather than watched, so play/pause still costs no render here.
       focus.onPlaybackChange(paused);
 
+      // The native listeners are held only while something plays. React bails
+      // out when the value is unchanged, so this costs one render per genuine
+      // transition rather than one per report.
+      setIsPlayingForSignals(!paused);
+
+      // The volume observer only fires on the moment it reaches zero, and the
+      // multi-window callback only on the moment it changes - so neither says
+      // anything about pressing play on a phone that was already silenced, or
+      // already sharing the screen. Both are asked directly at that point.
+      if (!paused && focusOnRef.current) {
+        checkMuted().then(muted => {
+          if (muted) handleFocusSignal(FocusSignal.VOLUME_ZERO);
+        });
+        checkMultiWindow().then(shared => {
+          if (shared) handleFocusSignal(FocusSignal.MULTI_WINDOW);
+        });
+      }
+
       // Handle play/pause tracking
       if (tracker.current) {
         console.log(
@@ -840,7 +899,16 @@ const BacePlayer = () => {
         }
       }
     },
-    [tracker, TIME_FACTOR, armPip, reconcileKeepAlive, focus.onPlaybackChange],
+    [
+      tracker,
+      TIME_FACTOR,
+      armPip,
+      reconcileKeepAlive,
+      focus.onPlaybackChange,
+      checkMuted,
+      checkMultiWindow,
+      handleFocusSignal,
+    ],
   );
 
   // Focus mode resolves asynchronously, so it can come on after media has

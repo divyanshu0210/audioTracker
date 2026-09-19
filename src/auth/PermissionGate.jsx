@@ -1,7 +1,7 @@
 // PermissionGate.jsx
 //
-// The two permissions this app cannot do its job without, asked for once, in
-// one place, in words that say what they are for.
+// The permissions this app cannot do its job without, asked for once, in one
+// place, in words that say what they are for.
 //
 // Both used to be asked for wherever they happened to be needed — notifications
 // during FCM setup, media access halfway through an import — which meant a
@@ -41,12 +41,34 @@ import {
   View,
 } from 'react-native';
 import Ionicons from 'react-native-vector-icons/Ionicons';
+import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
 
 import {isAllowed} from '../appNotification/notificationPermission';
 import {
   ensureMediaReadPermission,
   hasMediaReadPermission,
 } from '../utils/mediaFile';
+import {
+  hasWalkingPermission,
+  requestWalkingPermission,
+} from '../music/useFocusSignals';
+
+/**
+ * A row's icon, from whichever set has the glyph.
+ *
+ * Ionicons carries this screen, but it has no running figure at all - walk,
+ * footsteps, body and fitness are the whole set - and the activity row wanted
+ * one. Rather than move three rows onto another font for the sake of one glyph,
+ * a row may name its set and the rest keep the default.
+ *
+ * Worth knowing when editing: a name from the wrong set does not fail, it draws
+ * nothing. 'directions-run' in an Ionicons slot is an empty square and no
+ * error anywhere.
+ */
+const RowIcon = ({set, ...props}) => {
+  const Set = set === 'material' ? MaterialIcons : Ionicons;
+  return <Set {...props} />;
+};
 
 const readNotifications = async () => {
   try {
@@ -61,6 +83,20 @@ const readNotifications = async () => {
 // never be satisfied is worse than no gate at all.
 const readMedia = async () =>
   Platform.OS === 'android' ? hasMediaReadPermission() : true;
+
+// The third permission, and required like the other two.
+//
+// Step detection is how focus mode notices someone getting up and walking off
+// mid-class, so that the time logged against a lecture is time they were
+// actually there for. Asked here rather than by a bare system dialog arriving
+// forty minutes into a class, and asked in terms of what it does for them.
+//
+// Required is a real cost: two refusals and Android stops offering the dialog,
+// and nobody gets into the app until they have been to system settings. That is
+// only survivable because of the machinery already on this screen - the button
+// becomes Settings, and the path is printed below. Adding this here without
+// adding it to settingsPaths would have made a lockout with no way out.
+const ACTIVITY = 'activity';
 
 /**
  * Where to go once the Settings button appears, for media.
@@ -109,6 +145,19 @@ const notificationSettingsSteps = () =>
     ? ['  • Notifications → Show notifications → On']
     : null;
 
+/**
+ * And for step detection.
+ *
+ * Linking.openSettings lands on the app page, same as media, so the switch is
+ * a level further in. Named as Android names it - "Physical activity" - rather
+ * than as this screen describes it, because the words on their screen are the
+ * ones they need to match.
+ */
+const activitySettingsSteps = () =>
+  Platform.OS === 'android'
+    ? ['Settings → App Permissions', '  • Physical activity → Allow']
+    : null;
+
 // A dialog the user actually saw cannot come back this fast — it waits for a
 // tap. A request that returns quicker than this and still says no is Android
 // answering on the user's behalf with nothing on screen, because it has
@@ -129,16 +178,18 @@ const PermissionGate = ({navigation}) => {
   const [exhausted, setExhausted] = useState({
     notifications: false,
     media: false,
+    [ACTIVITY]: false,
   });
 
   const [busy, setBusy] = useState(null);
 
   const check = useCallback(async () => {
-    const [notifications, media] = await Promise.all([
+    const [notifications, media, activity] = await Promise.all([
       readNotifications(),
       readMedia(),
+      hasWalkingPermission(),
     ]);
-    setGranted({notifications, media});
+    setGranted({notifications, media, activity});
   }, []);
 
   useEffect(() => {
@@ -175,10 +226,14 @@ const PermissionGate = ({navigation}) => {
         }
 
         const startedAt = Date.now();
-        const allowed =
-          key === 'notifications'
-            ? isAllowed(await notifee.requestPermission())
-            : await ensureMediaReadPermission();
+        let allowed;
+        if (key === 'notifications') {
+          allowed = isAllowed(await notifee.requestPermission());
+        } else if (key === ACTIVITY) {
+          allowed = await requestWalkingPermission();
+        } else {
+          allowed = await ensureMediaReadPermission();
+        }
         const shown = Date.now() - startedAt >= INSTANT_MS;
 
         setGranted(prev => ({...(prev || {}), [key]: allowed}));
@@ -205,7 +260,8 @@ const PermissionGate = ({navigation}) => {
   );
 
   const checked = granted !== null;
-  const satisfied = checked && granted.notifications && granted.media;
+  const satisfied =
+    checked && granted.notifications && granted.media && granted.activity;
 
   // Both granted — which can happen on arrival, if they were turned on from
   // system settings while this screen waited, or the moment the second
@@ -237,6 +293,7 @@ const PermissionGate = ({navigation}) => {
   const settingsPaths = [
     {key: 'media', lines: mediaSettingsSteps()},
     {key: 'notifications', lines: notificationSettingsSteps()},
+    {key: ACTIVITY, lines: activitySettingsSteps()},
   ];
 
   const rows = [
@@ -254,6 +311,13 @@ const PermissionGate = ({navigation}) => {
       title: 'Notifications',
       body: 'So you can keep listening with your screen off and to stay connected with your mentor.',
     },
+    {
+      key: ACTIVITY,
+      icon: 'directions-run',
+      iconSet: 'material',
+      title: 'Focus mode',
+      body: 'To allow your full attention while watching videos.',
+    },
   ];
 
   return (
@@ -266,7 +330,8 @@ const PermissionGate = ({navigation}) => {
         <>
           <Text style={styles.heading}>Let’s get AudioTracker ready</Text>
           <Text style={styles.sub}>
-            A couple of permissions help AudioTracker play your files.
+            A few permissions help AudioTracker play your files and keep you
+            with the class.
             {/* You can always change these later in system settings. */}
           </Text>
 
@@ -276,11 +341,18 @@ const PermissionGate = ({navigation}) => {
               return (
                 <View key={row.key} style={styles.row}>
                   <View style={[styles.iconWrap, ok && styles.iconWrapDone]}>
-                    <Ionicons
-                      name={ok ? 'checkmark' : row.icon}
-                      size={20}
-                      color={ok ? '#15803d' : '#334155'}
-                    />
+                    {/* The tick is always Ionicons - it belongs to this screen
+                        rather than to any one row. */}
+                    {ok ? (
+                      <Ionicons name="checkmark" size={20} color="#15803d" />
+                    ) : (
+                      <RowIcon
+                        set={row.iconSet}
+                        name={row.icon}
+                        size={20}
+                        color="#334155"
+                      />
+                    )}
                   </View>
 
                   <View style={styles.rowBody}>
@@ -291,18 +363,21 @@ const PermissionGate = ({navigation}) => {
                   {ok ? (
                     <Text style={styles.done}>Allowed</Text>
                   ) : (
-                    <TouchableOpacity
-                      style={styles.button}
-                      disabled={busy === row.key}
-                      onPress={() => request(row.key)}>
-                      {busy === row.key ? (
-                        <ActivityIndicator size="small" color="#fff" />
-                      ) : (
-                        <Text style={styles.buttonText}>
-                          {exhausted[row.key] ? 'Settings' : 'Allow'}
-                        </Text>
-                      )}
-                    </TouchableOpacity>
+                    <View style={styles.rowActions}>
+                      <TouchableOpacity
+                        style={styles.button}
+                        disabled={busy === row.key}
+                        onPress={() => request(row.key)}>
+                        {busy === row.key ? (
+                          <ActivityIndicator size="small" color="#fff" />
+                        ) : (
+                          <Text style={styles.buttonText}>
+                            {exhausted[row.key] ? 'Settings' : 'Allow'}
+                          </Text>
+                        )}
+                      </TouchableOpacity>
+
+                    </View>
                   )}
                 </View>
               );
@@ -312,7 +387,7 @@ const PermissionGate = ({navigation}) => {
           {/* Only once a dialog has stopped working. Saying it up front would
             teach every new user that there is a harder path when there is
             not. */}
-          {(exhausted.notifications || exhausted.media) && (
+          {(exhausted.notifications || exhausted.media || exhausted[ACTIVITY]) && (
             <Text style={[styles.hint, styles.hintFirst]}>
               Tap Settings above, turn it on, then come back.
             </Text>
@@ -421,6 +496,9 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
     color: '#15803d',
+  },
+  rowActions: {
+    alignItems: 'center',
   },
   // The gap belongs to the block, not to every line in it: hint carries no
   // margin of its own, so the path reads as one short list rather than three

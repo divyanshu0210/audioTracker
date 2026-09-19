@@ -14,6 +14,9 @@
          mid-playback after a few minutes. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- Focus mode only, and asked for only when it is first switched on:
+         the step detector is how it tells a study session from a walk. -->
+    <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
 

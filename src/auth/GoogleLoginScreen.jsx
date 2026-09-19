@@ -30,6 +30,7 @@ import {consumePendingRoute, landAfterLogin} from '../handlers/navigationIntent'
 import {hasMediaReadPermission} from '../utils/mediaFile';
 import notifee from '@notifee/react-native';
 import {isAllowed} from '../appNotification/notificationPermission';
+import {hasWalkingPermission} from '../music/useFocusSignals';
 import {hideSplashScreen} from '../utils/splashScreen';
 
 const GoogleLoginScreen = ({navigation}) => {
@@ -103,15 +104,18 @@ const GoogleLoginScreen = ({navigation}) => {
     }
   };
 
-  // Both of them, because the app needs both — see PermissionGate, which is
-  // where they are explained and asked for.
+  // All three, because the app needs all three — see PermissionGate, which is
+  // where they are explained and asked for. This has to agree with the gate's
+  // own `satisfied`: anything missing here is a permission the gate would sit
+  // waiting on and nobody would ever be sent to it for.
   const hasAllPermissions = async () => {
     try {
-      const [media, notifications] = await Promise.all([
+      const [media, notifications, activity] = await Promise.all([
         hasMediaReadPermission(),
         notifee.getNotificationSettings().then(isAllowed),
+        hasWalkingPermission(),
       ]);
-      return media && notifications;
+      return media && notifications && activity;
     } catch (error) {
       // Unanswerable is not the same as granted, but sending someone to the
       // gate they can satisfy is the better failure: it reads the same two

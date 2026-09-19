@@ -29,6 +29,9 @@ export const FocusSignal = {
   NOISY: 'becomingNoisy',
   // A call, an alarm, or another player took the audio.
   FOCUS_LOST: 'audioFocusLost',
+  // The phone is ringing or in a call. Read from the audio mode rather than
+  // inferred from focus, which turned out not to be reliable for this.
+  CALL: 'callActive',
   // Music stream turned all the way down.
   VOLUME_ZERO: 'volumeZero',
   // Sharing the screen with another app.
@@ -85,18 +88,24 @@ export const requestWalkingPermission = async () => {
 // The two that are ordinary media-player correctness rather than focus-mode
 // policy. A lecture should stop when the headphones come out or a call
 // arrives whether or not anyone opted into anything.
-const ALWAYS = [FocusSignal.NOISY, FocusSignal.FOCUS_LOST];
+const ALWAYS = [FocusSignal.NOISY, FocusSignal.FOCUS_LOST, FocusSignal.CALL];
 
 export const isAlwaysSignal = reason => ALWAYS.includes(reason);
 
 /**
  * Subscribe to the native signals for as long as something is playing.
  *
- * @param active   whether to listen at all - playback running
- * @param focused  whether focus mode is on, which adds walking detection
- * @param onSignal called with a FocusSignal value
+ * @param active           whether to listen at all - playback running
+ * @param focused          whether focus mode is on, which adds walking detection
+ * @param manageAudioFocus false for a player that requests focus for itself
+ * @param onSignal         called with a FocusSignal value
  */
-export const useFocusSignals = ({active, focused, onSignal}) => {
+export const useFocusSignals = ({
+  active,
+  focused,
+  manageAudioFocus = true,
+  onSignal,
+}) => {
   // The callback is read through a ref so that changing it does not tear the
   // native listeners down and build them up again.
   const handlerRef = useRef(onSignal);
@@ -108,7 +117,7 @@ export const useFocusSignals = ({active, focused, onSignal}) => {
     if (Platform.OS !== 'android' || !FocusSignalsModule) return;
     if (!active) return;
 
-    FocusSignalsModule.start().catch(error =>
+    FocusSignalsModule.start(manageAudioFocus).catch(error =>
       console.warn('Could not start focus signals:', error?.message ?? error),
     );
 
@@ -132,7 +141,7 @@ export const useFocusSignals = ({active, focused, onSignal}) => {
       windowSub.remove();
       FocusSignalsModule.stop().catch(() => {});
     };
-  }, [active]);
+  }, [active, manageAudioFocus]);
 
   // Steps are watched only while focus mode is on *and* something is playing,
   // and in its own effect so that switching focus mode mid-lecture does not

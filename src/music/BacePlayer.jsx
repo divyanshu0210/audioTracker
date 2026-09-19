@@ -74,6 +74,21 @@ const TYPING_RESUME_DELAY_MS = 700;
 // leave five cycling long after the pill settled.
 const FOCUS_TAP_INTERVAL_MS = 700;
 
+// How soon after the app comes back to the front a resume is treated as the
+// system's doing rather than the person's.
+//
+// The YouTube path is a WebView, and Chromium resumes a <video> by itself once
+// a transient audio-focus loss ends - so hanging up a call restarts the lecture
+// with nobody having touched anything. VLC does not do this, because this app
+// holds its focus and deliberately never resumes on regain.
+//
+// Nothing distinguishes that resume from a tap except when it arrives: the
+// automatic one lands in the same instant the app returns to the foreground,
+// and a person reaching for play takes longer than this. Judging it by timing
+// rather than blocking the first resume outright is what keeps a deliberate
+// press from being swallowed.
+const AUTO_RESUME_GRACE_MS = 2500;
+
 // Shown when switching focus mode off. Random rather than fixed, because a
 // line you have read nine times stops being read at all. None of them scolds:
 // each is a reason to stay, not a suggestion you were wrong to reach for it.
@@ -82,6 +97,7 @@ const FOCUS_TAP_INTERVAL_MS = 700;
 const FOCUS_SIGNAL_MESSAGES = {
   becomingNoisy: 'Paused - headphones disconnected',
   audioFocusLost: 'Paused - something else took the audio',
+  callActive: 'Paused - incoming call',
   volumeZero: 'Paused - the volume is off',
   multiWindow: 'Paused - focus mode needs the whole screen',
   walking: 'Paused - pick it up again when you are settled',
@@ -336,9 +352,16 @@ const BacePlayer = () => {
 
   // Stop playback because a focus check went unanswered. Not tracked as "ours"
   // the way the typing pause is - this one stays until someone presses play.
+  // True while a pause this feature caused is still standing. Cleared by the
+  // next resume, whoever caused it.
+  const pausedByFocusRef = useRef(false);
+  // When the app last came back to the front, for AUTO_RESUME_GRACE_MS.
+  const lastActiveAtRef = useRef(0);
+
   const pauseForFocus = useCallback(() => {
     if (!playerRef.current) return;
     if (isPausedRef.current) return;
+    pausedByFocusRef.current = true;
     playerRef.current.togglePlayPause();
   }, []);
 
@@ -383,6 +406,10 @@ const BacePlayer = () => {
   const {checkMuted, checkMultiWindow} = useFocusSignals({
     active: isPlayingForSignals,
     focused: focus.focusOn,
+    // The YouTube embed requests audio focus for itself, so this must not - two
+    // requests inside one app end with one of them pausing the other. Same
+    // reason canPlayInBackgroundRef excludes it from the foreground service.
+    manageAudioFocus: currentItem?.type !== 'youtube_video',
     onSignal: handleFocusSignal,
   });
 
@@ -750,6 +777,7 @@ const BacePlayer = () => {
       // transition — Android 12+ won't let a backgrounded process start one.
       if (nextAppState === 'active') {
         reconcileKeepAlive();
+        lastActiveAtRef.current = Date.now();
       }
 
       appState.current = nextAppState; // Update current app state
@@ -864,6 +892,25 @@ const BacePlayer = () => {
 
       // Called rather than watched, so play/pause still costs no render here.
       focus.onPlaybackChange(paused);
+
+      // Playback came back on its own, in the instant the app returned to the
+      // front, while a pause this feature caused was still standing. That is
+      // the WebView resuming itself after a call - see AUTO_RESUME_GRACE_MS -
+      // and it is the one resume nobody asked for.
+      if (
+        !paused &&
+        pausedByFocusRef.current &&
+        Date.now() - lastActiveAtRef.current < AUTO_RESUME_GRACE_MS
+      ) {
+        pauseForFocus();
+        ToastAndroid.show(
+          'Paused - press play when you are back',
+          ToastAndroid.SHORT,
+        );
+        return;
+      }
+      // Any other resume belongs to the person, and ends the pause we caused.
+      if (!paused) pausedByFocusRef.current = false;
 
       // The native listeners are held only while something plays. React bails
       // out when the value is unchanged, so this costs one render per genuine

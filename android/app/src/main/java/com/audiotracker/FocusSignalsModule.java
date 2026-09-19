@@ -57,6 +57,17 @@ public class FocusSignalsModule extends ReactContextBaseJavaModule {
     private static final String REASON_FOCUS  = "audioFocusLost";
     private static final String REASON_VOLUME = "volumeZero";
     private static final String REASON_WALKING = "walking";
+    private static final String REASON_CALL    = "callActive";
+
+    /**
+     * How often the audio mode is re-read below API 31.
+     *
+     * 31 has addOnModeChangedListener and needs no polling. Below it there is no
+     * callback at all without READ_PHONE_STATE, which is a dangerous permission
+     * to add for one signal - so the mode is read on a timer instead, and only
+     * while something is playing.
+     */
+    private static final long MODE_POLL_MS = 1500L;
 
     /**
      * What counts as walking off, rather than shifting in a chair.
@@ -80,8 +91,15 @@ public class FocusSignalsModule extends ReactContextBaseJavaModule {
     /** Timestamps of recent steps, oldest first. */
     private final ArrayDeque<Long> stepTimes = new ArrayDeque<>();
 
+    private AudioManager.OnModeChangedListener modeListener;  // API 31+
+    private Handler modeHandler;
+    private Runnable modePoll;
+    private int lastMode = AudioManager.MODE_NORMAL;
+
     private boolean listening = false;
     private boolean watchingSteps = false;
+    /** Whether this module is the one holding audio focus - see start(). */
+    private boolean holdsAudioFocus = false;
     /** So a volume change that is not a change to or from zero says nothing. */
     private boolean wasMuted = false;
 
@@ -99,9 +117,17 @@ public class FocusSignalsModule extends ReactContextBaseJavaModule {
      *
      * Idempotent: JS calls this on every play, and registering a receiver twice
      * would deliver every unplug twice and leak one of the registrations.
+     *
+     * withAudioFocus is false for the YouTube path, and has to be: that player
+     * is a WebView embed which requests audio focus for itself. Two requests
+     * inside one app fight, and both outcomes look like the same bug - either
+     * this module takes focus and the embed pauses, or the embed takes it back
+     * and this module reads its own app losing focus as another app stealing
+     * it, and pauses. The embed handles calls and other players on its own,
+     * which is the same reason it is excluded from the foreground service.
      */
     @ReactMethod
-    public void start(Promise promise) {
+    public void start(boolean withAudioFocus, Promise promise) {
         if (listening) {
             promise.resolve(true);
             return;
@@ -115,9 +141,13 @@ public class FocusSignalsModule extends ReactContextBaseJavaModule {
             }
 
             wasMuted = isStreamMuted();
-            requestAudioFocus();
+            if (withAudioFocus) {
+                requestAudioFocus();
+                holdsAudioFocus = true;
+            }
             registerNoisyReceiver(context);
             registerVolumeObserver(context);
+            watchAudioMode(context);
 
             listening = true;
             promise.resolve(true);
@@ -312,9 +342,17 @@ public class FocusSignalsModule extends ReactContextBaseJavaModule {
                     .setUsage(AudioAttributes.USAGE_MEDIA)
                     .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
                     .build();
+            // The two-argument form, with a handler on the main looper.
+            //
+            // Without it Android binds the callback to the Looper of whatever
+            // thread built the request - and start() is called over the bridge,
+            // so that is React's native-modules thread, not the main one. Focus
+            // was granted and the listener simply never fired: a call took the
+            // audio and nothing here heard about it.
             focusRequest = new AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
                     .setAudioAttributes(attributes)
-                    .setOnAudioFocusChangeListener(focusListener)
+                    .setOnAudioFocusChangeListener(
+                            focusListener, new Handler(Looper.getMainLooper()))
                     .build();
             audioManager.requestAudioFocus(focusRequest);
         } else {
@@ -326,7 +364,8 @@ public class FocusSignalsModule extends ReactContextBaseJavaModule {
     }
 
     private void abandonAudioFocus() {
-        if (audioManager == null) return;
+        if (audioManager == null || !holdsAudioFocus) return;
+        holdsAudioFocus = false;
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 if (focusRequest != null) audioManager.abandonAudioFocusRequest(focusRequest);
@@ -338,6 +377,73 @@ public class FocusSignalsModule extends ReactContextBaseJavaModule {
         }
         focusRequest = null;
         focusListener = null;
+    }
+
+    // ── Calls ───────────────────────────────────────────────────────────────
+
+    /**
+     * Watch the audio mode, which is what actually says a call is happening.
+     *
+     * Audio focus was the obvious way to catch this and it did not hold up: the
+     * request is granted, and whether the loss callback ever arrives depends on
+     * which thread registered it and on the ringtone bothering to take focus at
+     * all - a phone on silent may never do so. The mode is a direct statement
+     * about telephony instead. MODE_RINGTONE is set the moment it starts
+     * ringing, before anybody answers, which is when this should fire.
+     */
+    private void watchAudioMode(Context context) {
+        lastMode = audioManager.getMode();
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            modeListener = this::handleModeChange;
+            audioManager.addOnModeChangedListener(
+                    ContextCompat.getMainExecutor(context), modeListener);
+            return;
+        }
+
+        modeHandler = new Handler(Looper.getMainLooper());
+        modePoll = new Runnable() {
+            @Override
+            public void run() {
+                handleModeChange(audioManager.getMode());
+                modeHandler.postDelayed(this, MODE_POLL_MS);
+            }
+        };
+        modeHandler.postDelayed(modePoll, MODE_POLL_MS);
+    }
+
+    private void handleModeChange(int mode) {
+        if (mode == lastMode) return;
+        boolean wasOnCall = isCallMode(lastMode);
+        lastMode = mode;
+        // Only the way in. Coming off a call does not restart anything here,
+        // for the same reason regaining audio focus does not.
+        if (!wasOnCall && isCallMode(mode)) {
+            emit(REASON_CALL);
+        }
+    }
+
+    private static boolean isCallMode(int mode) {
+        return mode == AudioManager.MODE_RINGTONE
+                || mode == AudioManager.MODE_IN_CALL
+                || mode == AudioManager.MODE_IN_COMMUNICATION;
+    }
+
+    private void unwatchAudioMode() {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && modeListener != null) {
+                audioManager.removeOnModeChangedListener(modeListener);
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "removeOnModeChangedListener failed", e);
+        }
+        modeListener = null;
+
+        if (modeHandler != null && modePoll != null) {
+            modeHandler.removeCallbacks(modePoll);
+        }
+        modeHandler = null;
+        modePoll = null;
     }
 
     // ── Headphones ──────────────────────────────────────────────────────────
@@ -407,6 +513,7 @@ public class FocusSignalsModule extends ReactContextBaseJavaModule {
 
         Context context = getReactApplicationContext();
         abandonAudioFocus();
+        unwatchAudioMode();
 
         if (noisyReceiver != null) {
             try {

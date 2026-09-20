@@ -13,9 +13,10 @@
 // verse is stamped with the position it was heard at, so a lecture nobody
 // indexed acquires a table of contents as it plays - and every entry is a seek.
 
-import React, {useCallback, useMemo, useState} from 'react';
+import React, {useCallback, useEffect, useMemo, useState} from 'react';
 import {
   ActivityIndicator,
+  Dimensions,
   ScrollView,
   StyleSheet,
   Text,
@@ -26,6 +27,47 @@ import Icon from 'react-native-vector-icons/MaterialIcons';
 import {useShallow} from 'zustand/react/shallow';
 
 import useVerseStore from './useVerseStore';
+import {fetchPurport, mayHavePurport} from './purport';
+
+// The panel takes what is left of the screen below the player, and no more.
+//
+// Nothing here has a fixed height, and the earlier attempt to give it one was
+// working around the wrong problem. Heights were fractions of the window,
+// guessed so the panel would fit under a player whose own height animates -
+// which meant they were wrong at both ends: too short on a tall phone with an
+// audio-only player, still too tall when the video was full size.
+//
+// Now it simply shrinks. The wrapper in BacePlayer is flexShrink, this is
+// flexShrink, and the scrolling body inside is too, so the whole thing sizes to
+// its content until there is no more room and then scrolls. A short verse gets
+// a short panel; a long one with a translation gets everything down to the
+// bottom of the screen.
+//
+// The header stays outside the scrolling area, so dismiss and expand can never
+// scroll out of reach.
+const {height: SCREEN} = Dimensions.get('window');
+
+// The one thing still capped. The debug block is a diagnostic, not the point of
+// the panel, and left to itself it will happily push the verse off the top.
+const MAX_DEBUG = Math.min(130, Math.round(SCREEN * 0.16));
+
+/**
+ * Whether a line is actually in Devanagari.
+ *
+ * The corpus field is called `devanagari`, but it holds whatever script the
+ * source printed - and Caitanya-caritamrta is printed in Bengali. So every CC
+ * verse carried a Bengali block, which is not what anyone reading along wants
+ * under a Sanskrit panel.
+ *
+ * Counted rather than tested for presence, because a CC line typically has one
+ * stray Devanagari codepoint among seventy Bengali ones - a plain
+ * `/[ऀ-ॿ]/.test()` says yes to every one of them.
+ */
+const isDevanagari = line => {
+  const devanagari = (line.match(/[ऀ-ॿ]/g) || []).length;
+  const other = (line.match(/[ঀ-৿]/g) || []).length;
+  return devanagari > other;
+};
 
 const formatPosition = seconds => {
   if (!seconds || !isFinite(seconds)) return '0:00';
@@ -40,6 +82,12 @@ const formatPosition = seconds => {
 const VersePanel = ({onSeek}) => {
   const [expanded, setExpanded] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
+
+  // The purport is fetched rather than bundled - see purport.js - so it has
+  // three states the panel has to tell apart: not asked for, fetching, and
+  // fetched-but-empty. The last is ordinary; plenty of verses have no purport.
+  const [purport, setPurport] = useState(null);
+  const [purportState, setPurportState] = useState('idle');
 
   // One subscription rather than several: this sits under a player that is
   // already re-rendering on progress, and should not add to that.
@@ -62,6 +110,27 @@ const VersePanel = ({onSeek}) => {
 
   const dismiss = useVerseStore(state => state.dismiss);
 
+  const currentId = current?.id;
+
+  // A new verse is a new purport. Cleared rather than left showing, because the
+  // one thing worse than no purport is the previous verse's.
+  useEffect(() => {
+    setPurport(null);
+    setPurportState('idle');
+  }, [currentId]);
+
+  const loadPurport = useCallback(async () => {
+    if (!currentId) return;
+    setPurportState('loading');
+    try {
+      const text = await fetchPurport(currentId);
+      setPurport(text);
+      setPurportState('done');
+    } catch (err) {
+      setPurportState('failed');
+    }
+  }, [currentId]);
+
   const handleSeek = useCallback(
     entry => {
       setShowHistory(false);
@@ -83,7 +152,11 @@ const VersePanel = ({onSeek}) => {
    * close but under threshold).
    */
   const debugBlock = debug ? (
-    <View style={styles.debug}>
+    <ScrollView
+      style={styles.debug}
+      contentContainerStyle={styles.debugContent}
+      nestedScrollEnabled
+      persistentScrollbar>
       <Text style={styles.debugMeta}>
         {heardCount} heard · {listening ? 'live' : 'idle'}
       </Text>
@@ -99,7 +172,7 @@ const VersePanel = ({onSeek}) => {
       ) : (
         <Text style={styles.debugText}>(no candidates)</Text>
       )}
-    </View>
+    </ScrollView>
   ) : null;
 
   if (!enabled) return null;
@@ -107,7 +180,7 @@ const VersePanel = ({onSeek}) => {
   if (unavailable) {
     return (
       <View style={[styles.container, styles.quiet]}>
-        <Icon name="info-outline" size={16} color="#94a3b8" />
+        <Icon name="info-outline" size={16} color={C.muted} />
         <Text style={styles.quietText} numberOfLines={2}>
           {unavailable}
         </Text>
@@ -131,7 +204,7 @@ const VersePanel = ({onSeek}) => {
           </>
         ) : (
           <>
-            <ActivityIndicator size="small" color="#94a3b8" />
+            <ActivityIndicator size="small" color={C.muted} />
             <Text style={styles.quietText}>Starting to listen…</Text>
           </>
         )}
@@ -141,6 +214,10 @@ const VersePanel = ({onSeek}) => {
   }
 
   const isSong = current.kind === 'song';
+
+  // Empty for Caitanya-caritamrta, which is Bengali, and for the songs that
+  // carry no script at all. Both then show the transliteration alone.
+  const script = current.devanagari?.filter(isDevanagari) || [];
 
   return (
     <View style={styles.container}>
@@ -170,7 +247,7 @@ const VersePanel = ({onSeek}) => {
               hitSlop={{top: 8, bottom: 8, left: 8, right: 8}}
               accessibilityRole="button"
               accessibilityLabel={`${recent.length} verses heard so far`}>
-              <Icon name="list" size={18} color="#cbd5e1" />
+              <Icon name="list" size={18} color={C.body} />
               <Text style={styles.count}>{recent.length}</Text>
             </TouchableOpacity>
           )}
@@ -184,7 +261,7 @@ const VersePanel = ({onSeek}) => {
             <Icon
               name={expanded ? 'expand-less' : 'expand-more'}
               size={20}
-              color="#cbd5e1"
+              color={C.body}
             />
           </TouchableOpacity>
 
@@ -194,13 +271,16 @@ const VersePanel = ({onSeek}) => {
             hitSlop={{top: 8, bottom: 8, left: 8, right: 8}}
             accessibilityRole="button"
             accessibilityLabel="Dismiss">
-            <Icon name="close" size={18} color="#94a3b8" />
+            <Icon name="close" size={18} color={C.muted} />
           </TouchableOpacity>
         </View>
       </View>
 
       {showHistory ? (
-        <ScrollView style={styles.historyList} nestedScrollEnabled>
+        <ScrollView
+          style={styles.historyList}
+          nestedScrollEnabled
+          persistentScrollbar>
           {recent.map((entry, i) => (
             <TouchableOpacity
               key={`${entry.id}-${entry.heardAt}-${i}`}
@@ -215,8 +295,29 @@ const VersePanel = ({onSeek}) => {
         </ScrollView>
       ) : (
         <ScrollView
-          style={expanded ? styles.bodyExpanded : styles.body}
-          nestedScrollEnabled>
+          style={styles.body}
+          nestedScrollEnabled
+          persistentScrollbar>
+          {/* Devanagari above, transliteration below, the way the printed
+              editions set it - and the way anyone who reads the script expects
+              to find it. It used to be hidden behind the expand control, which
+              made the script the verse is actually written in the one thing you
+              had to ask for.
+
+              Songs are the exception rather than an oversight: most of kksongs
+              carries no Devanagari at all, and a bhajan is sung from the
+              transliteration anyway. Absent, this renders nothing and the
+              transliteration simply sits at the top. */}
+          {script.length > 0 && (
+            <View style={styles.devanagariBlock}>
+              {script.map((line, i) => (
+                <Text key={i} style={styles.devanagari}>
+                  {line}
+                </Text>
+              ))}
+            </View>
+          )}
+
           {current.lines?.map((line, i) => (
             <Text key={i} style={styles.line}>
               {line}
@@ -225,16 +326,6 @@ const VersePanel = ({onSeek}) => {
 
           {expanded && (
             <>
-              {current.devanagari?.length > 0 && (
-                <View style={styles.section}>
-                  {current.devanagari.map((line, i) => (
-                    <Text key={i} style={styles.devanagari}>
-                      {line}
-                    </Text>
-                  ))}
-                </View>
-              )}
-
               {!!current.translation && (
                 <View style={styles.section}>
                   <Text style={styles.sectionLabel}>Translation</Text>
@@ -244,6 +335,56 @@ const VersePanel = ({onSeek}) => {
                   {!!current.translator && (
                     <Text style={styles.translator}>{current.translator}</Text>
                   )}
+                </View>
+              )}
+
+              {/* Fetched on the tap, not with the verse. A purport is five
+                  hundred to fifteen hundred words and nobody reads one while a
+                  lecture is playing - so it costs a tap, and the bundled
+                  corpus stays small enough to ship. */}
+              {mayHavePurport(current.id) && (
+                <View style={styles.section}>
+                  <Text style={styles.sectionLabel}>Purport</Text>
+
+                  {purportState === 'idle' && (
+                    <TouchableOpacity
+                      onPress={loadPurport}
+                      style={styles.purportAction}
+                      accessibilityRole="button">
+                      <Icon name="menu-book" size={14} color={C.accent} />
+                      <Text style={styles.purportActionText}>
+                        Read Srila Prabhupada's purport
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+
+                  {purportState === 'loading' && (
+                    <View style={styles.purportAction}>
+                      <ActivityIndicator size="small" color={C.muted} />
+                      <Text style={styles.purportActionText}>Fetching…</Text>
+                    </View>
+                  )}
+
+                  {purportState === 'failed' && (
+                    <TouchableOpacity
+                      onPress={loadPurport}
+                      style={styles.purportAction}
+                      accessibilityRole="button">
+                      <Icon name="refresh" size={14} color={C.muted} />
+                      <Text style={styles.purportActionText}>
+                        Could not fetch it — tap to try again
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+
+                  {purportState === 'done' &&
+                    (purport ? (
+                      <Text style={styles.purport}>{purport}</Text>
+                    ) : (
+                      <Text style={styles.purportActionText}>
+                        No purport for this verse.
+                      </Text>
+                    ))}
                 </View>
               )}
 
@@ -269,9 +410,36 @@ const VersePanel = ({onSeek}) => {
   );
 };
 
+// The player's own palette, named.
+//
+// Slate, matching the dark chrome around it rather than trying to stand apart
+// from it. Two alternatives were tried in place and both were worse: warm
+// ink-and-saffron read as a different app under a video, and a deep teal that
+// looked right in the abstract did not survive being on the screen. Matching
+// the player turns out to be the point rather than the compromise.
+//
+// Named because the values repeat - `faint` alone is on five things - and a
+// panel whose colours are scattered hex is one where changing the label grey
+// means finding all five.
+const C = {
+  surface: '#1e293b',
+  border: '#334155',
+  heading: '#f8fafc',
+  script: '#f1f5f9',
+  verse: '#e2e8f0',
+  body: '#cbd5e1',
+  muted: '#94a3b8',
+  faint: '#64748b',
+  live: '#4ade80',
+  accent: '#38bdf8',
+};
+
 const styles = StyleSheet.create({
   container: {
-    backgroundColor: '#1e293b',
+    backgroundColor: C.surface,
+    // Shrinks into whatever room is left below the player; see the note at the
+    // top of the file.
+    flexShrink: 1,
     borderRadius: 8,
     marginHorizontal: 10,
     marginTop: 8,
@@ -286,8 +454,8 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   quietText: {
-    color: '#94a3b8',
-    fontSize: 13,
+    color: C.muted,
+    fontSize: 12,
     flexShrink: 1,
   },
   // A filled dot rather than a spinner: this is on for a whole lecture, and
@@ -296,7 +464,7 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: '#4ade80',
+    backgroundColor: C.live,
   },
   header: {
     flexDirection: 'row',
@@ -304,13 +472,13 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   ref: {
-    color: '#f8fafc',
-    fontSize: 14,
+    color: C.heading,
+    fontSize: 13,
     fontWeight: '600',
     flexShrink: 1,
   },
   source: {
-    color: '#64748b',
+    color: C.faint,
     fontSize: 11,
   },
   headerActions: {
@@ -325,63 +493,84 @@ const styles = StyleSheet.create({
     paddingHorizontal: 2,
   },
   count: {
-    color: '#cbd5e1',
+    color: C.body,
     fontSize: 11,
     marginLeft: 2,
   },
   body: {
-    maxHeight: 96,
     marginTop: 6,
+    // No height and no maximum: it shrinks into whatever the panel has left.
+    flexShrink: 1,
   },
-  bodyExpanded: {
-    maxHeight: 260,
-    marginTop: 6,
-  },
+  // The verse itself, and the one size that matters: a lecturer recites
+  // faster than this can be read, so more of it on screen at once beats a
+  // larger face. The line height stays generous relative to the size -
+  // diacritics sit above and below these letters and crowd at a tight leading.
   line: {
-    color: '#e2e8f0',
-    fontSize: 14,
-    lineHeight: 21,
+    color: C.verse,
+    fontSize: 12.5,
+    lineHeight: 19,
     fontStyle: 'italic',
   },
   section: {
     marginTop: 10,
   },
   sectionLabel: {
-    color: '#64748b',
+    color: C.faint,
     fontSize: 11,
     textTransform: 'uppercase',
     letterSpacing: 0.6,
     marginBottom: 3,
   },
+  devanagariBlock: {
+    marginBottom: 6,
+  },
   devanagari: {
-    color: '#f1f5f9',
-    fontSize: 16,
-    lineHeight: 26,
+    color: C.script,
+    // Larger than the transliteration even after shrinking, because the matras
+    // and conjuncts stop being distinguishable before Latin text does.
+    fontSize: 14,
+    lineHeight: 22,
   },
   translation: {
-    color: '#cbd5e1',
-    fontSize: 13,
-    lineHeight: 20,
+    color: C.body,
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  purportAction: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 4,
+  },
+  purportActionText: {
+    color: C.muted,
+    fontSize: 12,
+  },
+  purport: {
+    color: C.body,
+    fontSize: 12,
+    lineHeight: 19,
   },
   translator: {
-    color: '#64748b',
+    color: C.faint,
     fontSize: 11,
     fontStyle: 'italic',
     marginTop: 5,
   },
   alsoIn: {
-    color: '#94a3b8',
-    fontSize: 12,
-    lineHeight: 18,
+    color: C.muted,
+    fontSize: 11,
+    lineHeight: 16,
   },
   attribution: {
-    color: '#64748b',
+    color: C.faint,
     fontSize: 11,
     marginTop: 8,
   },
   historyList: {
-    maxHeight: 180,
     marginTop: 6,
+    flexShrink: 1,
   },
   historyRow: {
     flexDirection: 'row',
@@ -389,36 +578,41 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
     gap: 10,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#334155',
+    borderBottomColor: C.border,
   },
   historyTime: {
-    color: '#38bdf8',
-    fontSize: 12,
+    color: C.accent,
+    fontSize: 11,
     fontVariant: ['tabular-nums'],
     minWidth: 46,
   },
   historyRef: {
-    color: '#e2e8f0',
-    fontSize: 13,
+    color: C.verse,
+    fontSize: 12,
     flexShrink: 1,
   },
   debug: {
     // Full width so it drops onto its own line inside the wrapping quiet row.
     width: '100%',
+    maxHeight: MAX_DEBUG,
     marginTop: 8,
-    paddingTop: 6,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: '#334155',
+    borderTopColor: C.border,
+  },
+  debugContent: {
+    paddingTop: 6,
+    // Room to scroll the last candidate clear of the panel's bottom edge.
+    paddingBottom: 4,
   },
   debugMeta: {
-    color: '#38bdf8',
+    color: C.accent,
     fontSize: 10,
     marginBottom: 2,
   },
   debugText: {
-    color: '#94a3b8',
-    fontSize: 10,
-    lineHeight: 14,
+    color: C.muted,
+    fontSize: 9,
+    lineHeight: 13,
     fontFamily: 'monospace',
   },
 });

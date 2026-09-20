@@ -111,12 +111,47 @@ const decodeEntities = str =>
 // Block tags become newlines so verse structure survives; everything else is
 // dropped. Done before entity decoding, so an encoded < in the text cannot
 // turn into a tag halfway through.
+//
+// Collapsing the source's own newlines first is load-bearing, and leaving it
+// out is what made the lyrics wrong. A newline in HTML source is whitespace,
+// not a line break: kksongs wraps its lyric lines to keep the file readable,
+// so one sung line arrives split across two source lines. Treating those as
+// real breaks turned "jaya srila maharaja caranaravinda" into two lines and
+// left every song looking shredded, with a break every few words.
+//
+// Only <br> and the block tags after it produce a break, which is what the
+// markup actually means.
 const toLines = html =>
   decodeEntities(
     html
       .replace(/<script[\s\S]*?<\/script>/gi, '')
       .replace(/<style[\s\S]*?<\/style>/gi, '')
+      // These pages were saved out of Microsoft Word, which buries a block of
+      // document properties in the head inside a conditional comment - author,
+      // revision number, edit timestamps, "MicrosoftInternetExplorer4". The
+      // tag stripper below keeps the text of any element it does not know, so
+      // that metadata has always been in the extracted text; it was the source
+      // newlines between its fields that kept it on lines of its own and out of
+      // the way. Collapsing those newlines ran it straight into the song title,
+      // and 577 of 900 songs came out named "<title> Nishant B. Thakar Normal
+      // ... MicrosoftInternetExplorer4".
+      //
+      // None of it is content, so it goes before anything else looks at it.
+      //
+      // The head itself stays. It holds <title>, and the title is where a
+      // song's name actually comes from - FIELD rarely finds a "Song Name"
+      // label, so the name falls through to the first line of text, which is
+      // the title. Dropping the head named all nine hundred songs after the
+      // site banner.
+      .replace(/<!--[\s\S]*?-->/g, ' ')
+      .replace(/<xml[\s\S]*?<\/xml>/gi, ' ')
+      .replace(/\r\n?|\n/g, ' ')
       .replace(/<br\s*\/?>/gi, '\n')
+      // Deliberately no td or th. Breaking on a cell looks right and is not:
+      // the source puts a label and its value in separate cells, so a break
+      // there splits "Song Name:" from the name, FIELD's single-line match
+      // finds nothing, and every song falls back to the page banner for a
+      // title. The cells run together instead, which is what FIELD expects.
       .replace(/<\/(p|div|tr|h\d)>/gi, '\n')
       .replace(/<[^>]+>/g, ' '),
   )

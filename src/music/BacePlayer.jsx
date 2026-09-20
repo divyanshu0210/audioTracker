@@ -326,6 +326,24 @@ const BacePlayer = () => {
   // transition. Only play/pause moves it, so it costs one render per press
   // rather than one per progress tick.
   const [isPausedNow, setIsPausedNow] = useState(pauseOnStart ?? false);
+
+  // How far the button row reaches past the player container, so the verse
+  // panel below it can clear it. See the panel's mount site.
+  const [btnRowHeight, setBtnRowHeight] = useState(0);
+
+  // What floats over the bottom of the player, so the verse panel can stop
+  // above it rather than under it.
+  //
+  // The queue bar and the save bar are both position:absolute at bottom:0 -
+  // deliberately, since neither should make the three screens they appear on
+  // rearrange themselves. That was free while the verse panel overflowed its
+  // container and had no real bottom; now that it sizes into the space that is
+  // left, the space that is left has to account for them.
+  //
+  // Measured rather than declared: both are content-sized, with no height to
+  // read off a stylesheet, and the queue bar's text wraps on a narrow screen.
+  const [queueBarHeight, setQueueBarHeight] = useState(0);
+  const [saveBarHeight, setSaveBarHeight] = useState(0);
   const durationRef = useRef(0);
   // Read by handleIsPausedChange for the playback notification. Refs, not
   // dependencies: that callback is handed to a memoized player, and rebuilding
@@ -1362,6 +1380,32 @@ const BacePlayer = () => {
     return null;
   };
 
+  // A component that renders nothing cannot report a height of zero, and
+  // SaveToListBar hides itself for an item already in a list - so its last
+  // measurement would otherwise be held against the next item, which may not
+  // show the bar at all.
+  useEffect(() => {
+    setSaveBarHeight(0);
+  }, [currentItem?.id]);
+
+  // What the verse panel has to stop above.
+  //
+  // The two bars are both pinned to bottom:0, so when both are up they cover
+  // each other rather than stacking - the taller one is the whole obstruction.
+  //
+  // Each measurement is discarded when its bar is not on screen, because
+  // onLayout cannot report a height for something that is not rendered. Without
+  // that, closing the queue left a bar's worth of empty space under the panel
+  // for the rest of the session. SaveToListBar also returns null on its own for
+  // an item already in a list, which is why its height is tied to the item
+  // rather than only to the flags.
+  const queueUp = !showNotes && autoplay && !isInPip;
+  const saveBarUp = !isInPip && !showNotes;
+  const bottomOverlay = Math.max(
+    queueUp ? queueBarHeight : 0,
+    saveBarUp ? saveBarHeight : 0,
+  );
+
   return (
     <View style={styles.container}>
       {currentItem ? (
@@ -1468,7 +1512,13 @@ const BacePlayer = () => {
               </View>
             )}
 
-            <View style={[styles.btnContainer, isInPip && styles.hidden]}>
+            <View
+              style={[styles.btnContainer, isInPip && styles.hidden]}
+              // How far past the player the buttons reach, which is where the
+              // verse panel has to start. Measured rather than assumed: the row
+              // wraps to two lines on a narrow screen, and it collapses upward
+              // when isHidden zeroes the ViewShot above it.
+              onLayout={e => setBtnRowHeight(e.nativeEvent.layout.height)}>
               {/* Grouped left so the middle stays empty: space-between put the
                   pill dead centre, which is where renderDragHandle draws the
                   grab bar while notes are open. They collided. */}
@@ -1615,40 +1665,50 @@ const BacePlayer = () => {
               />
             </View>
 
-            {/* Inside the animated container, after the button row, and that
-                placement is load-bearing.
-
-                playerContainer's height is animated and its ViewShot child is
-                height:'100%', so btnContainer already lays out *past* the
-                bottom of the container - see the note on btnGroup below. A
-                sibling rendered after </Animated.View> therefore starts at the
-                container's declared height, which is above where the buttons
-                actually ended up, and lands on top of them. That is what this
-                panel did: it covered All Notes, the focus pill and +Notes.
-
-                The two components that do sit outside - PlayerQueue and
-                SaveToListBar - dodge the whole problem by being absolutely
-                positioned at bottom:0. This one cannot: it is a caption for the
-                player and has to be directly under it. So it joins the overflow
-                instead of starting after it, and flows below the buttons the
-                same way they flow below the video.
-
-                Its background must stay opaque for the same reason theirs must.
-
-                Not while notes are open - the editor owns the screen then - and
-                not in PiP. Detection keeps running through both; only the
-                display goes away, so a verse recognised while writing a note is
-                still there when the note is closed. */}
-            {!isInPip && !showNotes && (
-              <VersePanel onSeek={seekToSeconds} />
-            )}
           </Animated.View>
+
+          {/* Outside the animated container, and that placement is
+              load-bearing.
+
+              It used to be inside, after the button row, so that it flowed
+              below the buttons the way the buttons flow below the video.
+              Visually that was right and it could not be scrolled. The
+              container's height is animated and its ViewShot child is
+              height:'100%', so both the button row and this panel laid out
+              past the bottom edge - outside the parent's real bounds.
+
+              Taps survive that: React Native hit-tests its own view tree and
+              finds an overflowing child, which is why the buttons always
+              worked. Scrolling does not. A ScrollView scrolls because the
+              native Android widget receives the move events, and Android's
+              dispatch stops at the parent's bounds - so the scrollbar drew,
+              and nothing moved.
+
+              So it sits in real flow instead, pushed down by the height of the
+              button row that overlaps this space. Absolute positioning would
+              have brought the bounds problem back with it.
+
+              Not while notes are open - the editor owns the screen then - and
+              not in PiP. Detection keeps running through both; only the
+              display goes away, so a verse recognised while writing a note is
+              still there when the note is closed. */}
+          {!isInPip && !showNotes && (
+            <View
+              style={{
+                marginTop: btnRowHeight,
+                marginBottom: bottomOverlay,
+                flexShrink: 1,
+              }}>
+              <VersePanel onSeek={seekToSeconds} />
+            </View>
+          )}
 
           {!isInPip && renderPersistentBackButton()}
           {!isInPip && renderDragHandle()}
 
           {!showNotes && autoplay && !isInPip && (
             <PlayerQueue
+              onBarLayout={e => setQueueBarHeight(e.nativeEvent.layout.height)}
               playlist={playlist}
               currentIndex={currentIndex}
               currentTitle={currentItem?.title}
@@ -1676,7 +1736,12 @@ const BacePlayer = () => {
               that is already in a list. Not while notes are open: the editor
               owns the bottom of the screen then, and not in PiP, where there
               is no room for anything but the video. */}
-          {!isInPip && !showNotes && <SaveToListBar item={currentItem} />}
+          {!isInPip && !showNotes && (
+            <SaveToListBar
+              item={currentItem}
+              onBarLayout={e => setSaveBarHeight(e.nativeEvent.layout.height)}
+            />
+          )}
         </>
       ) : (
         // Nothing is loading, and nothing is going to: the player was handed

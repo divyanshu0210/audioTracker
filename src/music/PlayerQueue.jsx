@@ -31,6 +31,11 @@ const QUEUE_MAX_HEIGHT_RATIO = 0.55;
 const {height: SCREEN_HEIGHT} = Dimensions.get('window');
 
 const PlayerQueue = ({
+  // Reported so whatever is in the flow behind this can leave room for it. The
+  // bar floats at the bottom of the player and would otherwise sit on top of
+  // the verse panel's last lines. Content-sized, so there is no constant to
+  // read instead.
+  onBarLayout,
   playlist,
   currentIndex,
   currentTitle,
@@ -91,7 +96,7 @@ const PlayerQueue = ({
       {/* Docked at the very bottom of the screen (YouTube-style "up next"
           strip) rather than sitting inline under the shrinking/growing
           player, so it stays put regardless of the player's height. */}
-      <View style={styles.queueBar}>
+      <View style={styles.queueBar} onLayout={onBarLayout}>
         <TouchableOpacity
           onPress={onPrevious}
           disabled={isFirst}

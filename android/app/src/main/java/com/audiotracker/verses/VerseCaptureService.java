@@ -135,7 +135,25 @@ public class VerseCaptureService extends Service {
      */
     private final float[] ring = new float[WINDOW_SAMPLES];
     private int ringAt = 0;
+
+    /**
+     * Every sample ever written, and never reset.
+     *
+     * Monotonic on purpose. An earlier version zeroed this when playback
+     * resumed, to discard what had been heard before the pause - and the
+     * recogniser thread, which remembers where it had got to, then found itself
+     * apparently ahead of the writer. Its "has a hop arrived yet" test went
+     * negative and stayed negative, so it waited for the rest of the lecture and
+     * the panel never heard another word.
+     *
+     * Staleness is marked rather than erased: validFrom moves forward instead,
+     * and nothing before it is read. Counters that only ever increase cannot
+     * produce that class of bug at all.
+     */
     private long totalSamples = 0;
+
+    /** Samples written before this were heard before the last pause. */
+    private long validFrom = 0;
     private final Object ringLock = new Object();
     private Thread recogniser;
     private Thread worker;
@@ -261,35 +279,34 @@ public class VerseCaptureService extends Service {
     }
 
     /**
-     * Start or stop reading, without touching the projection.
+     * Start or stop recognising, without touching the projection.
      *
-     * Stopping the AudioRecord rather than reading and discarding: a paused
-     * player produces silence, and silence costs the recogniser exactly as much
-     * as speech. On a lecture left paused for an hour that is an hour of
-     * pointless work on somebody's battery.
+     * The AudioRecord keeps running throughout, and that is the point. An
+     * earlier version stopped it on pause and started it again on resume, to
+     * avoid reading silence - and after a resume nothing was ever heard again.
+     * Restarting a stopped AudioPlaybackCapture is not reliable: on some
+     * devices it returns successfully and then delivers silence forever, which
+     * looks from the outside exactly like a recogniser that has died.
+     *
+     * The battery argument for stopping it was aimed at the wrong thing
+     * anyway. Reading PCM is a few kilobytes of memcpy every fifth of a second;
+     * what costs real power is the recognition pass over it, and that is what
+     * this gates. A lecture left paused for an hour now reads and discards, and
+     * runs the model not once.
      */
     private synchronized void setCapturing(boolean want) {
-        if (!running || capturing == want || record == null) return;
-        try {
-            if (want) {
-                record.startRecording();
-                // Whatever was in the ring was heard before the pause and does
-                // not join onto what comes next.
-                synchronized (ringLock) {
-                    java.util.Arrays.fill(ring, 0f);
-                    ringAt = 0;
-                    totalSamples = 0;
-                }
-                capturing = true;
-                emitState("listening", null);
-            } else {
-                capturing = false;
-                record.stop();
-                emitState("idle", null);
+        if (!running || capturing == want) return;
+
+        if (want) {
+            // Whatever is in the ring was heard before the pause and does not
+            // join onto what comes next. Marked stale rather than cleared - see
+            // totalSamples.
+            synchronized (ringLock) {
+                validFrom = totalSamples;
             }
-        } catch (Throwable t) {
-            Log.w(TAG, "could not " + (want ? "resume" : "pause") + " capture", t);
         }
+        capturing = want;
+        emitState(want ? "listening" : "idle", null);
     }
 
     /**
@@ -302,16 +319,14 @@ public class VerseCaptureService extends Service {
         byte[] buffer = new byte[CHUNK_BYTES];
         try {
             while (running) {
-                if (!capturing) {
-                    Thread.sleep(150);
-                    continue;
-                }
+                // Read whether or not anything wants the audio. Draining the
+                // AudioRecord costs almost nothing and keeps it healthy;
+                // stopping it was what broke resuming. While paused the samples
+                // are simply dropped on the floor.
                 int n = record.read(buffer, 0, buffer.length);
                 if (n <= 0) continue;
-                append(buffer, n);
+                if (capturing) append(buffer, n);
             }
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
         } catch (Throwable t) {
             if (running) {
                 Log.e(TAG, "capture stopped", t);
@@ -352,17 +367,24 @@ public class VerseCaptureService extends Service {
             while (running) {
                 int count;
                 synchronized (ringLock) {
-                    while (running && (!capturing || totalSamples - lastAt < HOP_SAMPLES)) {
+                    while (running
+                            && (!capturing
+                                || totalSamples - lastAt < HOP_SAMPLES
+                                || totalSamples - validFrom < MIN_SAMPLES)) {
                         ringLock.wait(200);
                     }
                     if (!running) return;
 
-                    count = (int) Math.min(totalSamples, WINDOW_SAMPLES);
-                    // Oldest first. The ring's write head is the join, so the
-                    // copy starts there once it has wrapped.
-                    int from = (int) ((totalSamples < WINDOW_SAMPLES)
-                            ? 0
-                            : ringAt);
+                    // Never more than the ring holds, and never back past the
+                    // last resume.
+                    long available = Math.min(totalSamples - validFrom, WINDOW_SAMPLES);
+                    count = (int) available;
+
+                    // Oldest first. The newest sample sits just behind the
+                    // write head, so the run of `count` samples starts that far
+                    // back from it - which is right whether or not the ring has
+                    // wrapped, and needs no special case for either.
+                    int from = (ringAt - count + ring.length) % ring.length;
                     for (int i = 0; i < count; i++) {
                         snapshot[i] = ring[(from + i) % ring.length];
                     }

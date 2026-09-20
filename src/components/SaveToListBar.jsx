@@ -46,7 +46,7 @@ const listFor = (state, type) => {
   return state.items;
 };
 
-const SaveToListBar = ({item}) => {
+const SaveToListBar = ({item, onBarLayout}) => {
   const [busy, setBusy] = useState(false);
 
   // An Iskcon file has no list to join - the IDT tab is a live listing of the
@@ -106,7 +106,7 @@ const SaveToListBar = ({item}) => {
     if (isPinned) return null;
 
     return (
-      <View style={styles.bar}>
+      <View style={styles.bar} onLayout={onBarLayout}>
         <TouchableOpacity
           style={styles.addButton}
           onPress={() => togglePinFile(item)}>
@@ -120,7 +120,7 @@ const SaveToListBar = ({item}) => {
   if (!item || item.out_show === 1 || item.parent_id || inList) return null;
 
   return (
-    <View style={styles.bar}>
+    <View style={styles.bar} onLayout={onBarLayout}>
       <TouchableOpacity
         style={styles.addButton}
         onPress={handleAdd}

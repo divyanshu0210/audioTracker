@@ -77,3 +77,7 @@ yarn-error.log
 **/.bundle/
 # Databases pulled off a device by tools/db-viewer (real user data, ~13MB each)
 tools/db-viewer/*/
+
+# Fetched pages for the verse corpus build; regenerate with
+# node tools/verse-corpus/build.js
+tools/verse-corpus/.cache/

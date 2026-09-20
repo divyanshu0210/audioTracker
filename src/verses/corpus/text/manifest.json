@@ -1,0 +1,70 @@
+{
+  "bg": {
+    "count": 653,
+    "bytes": 450418
+  },
+  "sb-1": {
+    "count": 779,
+    "bytes": 595680
+  },
+  "sb-2": {
+    "count": 371,
+    "bytes": 311230
+  },
+  "sb-3": {
+    "count": 1388,
+    "bytes": 1067979
+  },
+  "sb-4": {
+    "count": 1390,
+    "bytes": 1131760
+  },
+  "sb-5": {
+    "count": 650,
+    "bytes": 785858
+  },
+  "sb-6": {
+    "count": 760,
+    "bytes": 662879
+  },
+  "sb-7": {
+    "count": 676,
+    "bytes": 598509
+  },
+  "sb-8": {
+    "count": 848,
+    "bytes": 690724
+  },
+  "sb-9": {
+    "count": 846,
+    "bytes": 674074
+  },
+  "sb-10": {
+    "count": 3572,
+    "bytes": 2212499
+  },
+  "cc-adi": {
+    "count": 2253,
+    "bytes": 1334884
+  },
+  "cc-antya": {
+    "count": 3176,
+    "bytes": 1958342
+  },
+  "cc-madhya": {
+    "count": 5930,
+    "bytes": 3757841
+  },
+  "sb-11": {
+    "count": 1244,
+    "bytes": 789612
+  },
+  "sb-12": {
+    "count": 480,
+    "bytes": 292474
+  },
+  "songs": {
+    "count": 900,
+    "bytes": 2448259
+  }
+}

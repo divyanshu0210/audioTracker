@@ -28,6 +28,11 @@ const useSettingsStore = create((set, get) => ({
     // relationship someone mostly uses, that is the list they want first, and
     // it differs per person rather than having a right answer.
     menteesFirst: true,
+    // Listen to the playback and name the verses and songs in it, under the
+    // player. Off by default and deliberately so: it holds a speech model in
+    // memory and keeps a capture running for the whole session, which is not
+    // something to spend on someone who never asked for it.
+    verseDetectionEnabled: false,
   },
 
   // Initialize the store by loading settings from database
@@ -62,6 +67,7 @@ const useSettingsStore = create((set, get) => ({
       autoPauseOnTyping: true,
       focusModeEnabled: false,
       menteesFirst: true,
+      verseDetectionEnabled: false,
     };
   },
 

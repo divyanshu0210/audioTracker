@@ -19,6 +19,22 @@
     <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!-- Verse detection only, and asked for when it is first switched on.
+
+         RECORD_AUDIO reads as "microphone" in the system dialog, which
+         overstates what happens: the capture is of this app's own playback, not
+         of the room. AudioRecord requires it either way - there is no narrower
+         permission for reading your own output - so the request explains the
+         difference before the dialog appears.
+
+         The projection pair is what the system consent dialog grants. It is
+         per-session and cannot be remembered, and Android 14 refuses the
+         projection entirely unless a foreground service of that type is already
+         running. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
+
+
 
 
     <application
@@ -166,6 +182,14 @@
     android:name=".PlaybackService"
     android:exported="false"
     android:foregroundServiceType="mediaPlayback"/>
+
+  <!-- Holds the MediaProjection while verse detection listens; see
+       VerseCaptureService.java. Its notification is how the person can tell it
+       is running, and stopping it is what releases the projection. -->
+  <service
+    android:name="com.audiotracker.verses.VerseCaptureService"
+    android:exported="false"
+    android:foregroundServiceType="mediaProjection"/>
 
     <service
     android:name="androidx.work.impl.foreground.SystemForegroundService"

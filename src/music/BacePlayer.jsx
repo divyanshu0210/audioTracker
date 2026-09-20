@@ -49,6 +49,9 @@ import {isContentUri, isStreamUrl, resolvePlaybackPath} from './driveStream';
 import useFocusSession, {CHECK_GRACE_MS} from './useFocusSession';
 import useFocusSignals, {FocusSignal, isAlwaysSignal} from './useFocusSignals';
 import FocusCheck from './FocusCheck';
+import VersePanel from '../verses/VersePanel';
+import useVerseDetection from '../verses/useVerseDetection';
+import {seekVideoTo} from './progressTrackingUtils';
 // const {PipModule} = NativeModules;
 
 // Guarded rather than assuming a string: a row off the report API spells the
@@ -318,6 +321,11 @@ const BacePlayer = () => {
   const lastTimeRef = useRef(0);
   const playbackSpeedRef = useRef(1);
   const isPausedRef = useRef(pauseOnStart ?? false);
+  // The same fact in state, because verse detection reacts to it rather than
+  // reading it from a callback - the capture is paused and resumed on this
+  // transition. Only play/pause moves it, so it costs one render per press
+  // rather than one per progress tick.
+  const [isPausedNow, setIsPausedNow] = useState(pauseOnStart ?? false);
   const durationRef = useRef(0);
   // Read by handleIsPausedChange for the playback notification. Refs, not
   // dependencies: that callback is handed to a memoized player, and rebuilding
@@ -371,6 +379,45 @@ const BacePlayer = () => {
     duration: knownDuration || currentItem?.duration || 0,
     onMissedCheck: pauseForFocus,
   });
+
+  // Listening to the playback and naming the verses and songs in it. Off
+  // unless the person switched it on; see useVerseDetection for what starting
+  // it actually costs.
+  const verses = useVerseDetection({
+    sourceId: currentItem?.source_id,
+    // Read for a verse reference - these recordings are usually named after
+    // the verse they are about, which fills the panel before anything is heard.
+    title: currentItem?.title,
+    path: currentItem?.file_path,
+    isPaused: isPausedNow,
+    isPlaybackReady: isDataLoaded && !!currentItem,
+  });
+
+  // Pulled out by name because both are stable across renders while `verses`
+  // itself is not - see handleCurrentTimeChange.
+  const {reportPosition: reportVersePosition, onSeek: onVerseSeek} = verses;
+
+  /**
+   * Jump to where a verse was heard.
+   *
+   * The same split RichTextEditor's timestamp links make: VLC takes
+   * milliseconds through its imperative handle, and the YouTube WebView takes
+   * seconds through injected script. The store holds seconds either way.
+   */
+  const seekToSeconds = useCallback(
+    seconds => {
+      if (typeof seconds !== 'number' || !isFinite(seconds)) return;
+      if (source_type === 'youtube_video') {
+        seekVideoTo(playerRef.current?.webViewRef, seconds);
+      } else {
+        playerRef.current?.handleSeek(seconds * 1000);
+      }
+      // Everything in the heard window describes a part of the recording that
+      // is no longer playing.
+      onVerseSeek();
+    },
+    [source_type, onVerseSeek],
+  );
 
   // A ref because reconcileKeepAlive and the PiP arming read it from callbacks
   // handed to memoized players, which must not gain a dependency.
@@ -854,13 +901,28 @@ const BacePlayer = () => {
 
       currentTimeRef.current = time;
       lastTimeRef.current = time;
+
+      // Normalised to seconds here, because this is the one place that knows
+      // which player is running - VLC counts milliseconds and the YouTube
+      // WebView counts seconds. Stamps the position onto a verse when one is
+      // recognised; does not touch React state.
+      //
+      // Depends on the function, not on `verses`: the hook returns a fresh
+      // object every render, and taking that as a dependency would rebuild
+      // this callback each time - which is exactly what the memoized players
+      // below must not see.
+      reportVersePosition(time / TIME_FACTOR);
     },
-    [tracker, TIME_FACTOR, source_type],
+    [tracker, TIME_FACTOR, source_type, reportVersePosition],
   );
 
   const handleIsPausedChange = useCallback(
     paused => {
       isPausedRef.current = paused;
+      // Mirrored into state for verse detection, which pauses and resumes the
+      // capture on this. Set unconditionally rather than only while the feature
+      // is on, so switching it on mid-lecture already knows.
+      setIsPausedNow(paused);
 
       // Playback resumed while we were holding a typing-pause — since our own
       // resume clears the flag *before* toggling, this can only be the user
@@ -1463,6 +1525,63 @@ const BacePlayer = () => {
                     />
                   </View>
                 </TouchableOpacity>
+
+                {/* Listening for verses. Beside the focus pill because the two
+                    are the same kind of thing - a mode for this session, set
+                    here rather than buried in Settings - and drawn the same
+                    way so the row does not acquire a second visual language.
+
+                    Hidden entirely where it cannot work, rather than shown
+                    disabled: below Android 10 there is no playback capture at
+                    all, and a permanently dead control invites tapping. */}
+                {verses.available && (
+                  <TouchableOpacity
+                    style={styles.focusPillHit}
+                    onPress={verses.toggle}
+                    // Holding it shows what the recogniser is actually
+                    // producing. Not behind __DEV__ because the question it
+                    // answers - is this hearing nothing, hearing nonsense, or
+                    // hearing fine and failing to match - only arises on a real
+                    // recording, on somebody's own phone.
+                    onLongPress={verses.toggleDebug}
+                    delayLongPress={650}
+                    disabled={verses.preparing}
+                    accessibilityRole="switch"
+                    accessibilityState={{checked: verses.enabled}}
+                    accessibilityLabel="Verse detection"
+                    accessibilityHint={
+                      verses.enabled
+                        ? 'Double tap to stop listening for verses, or double tap and hold to show what it is hearing'
+                        : 'Double tap to name the verses and songs in this recording'
+                    }>
+                    <View
+                      style={[
+                        styles.focusPill,
+                        {
+                          backgroundColor: verses.enabled ? '#1e293b' : '#3f3f46',
+                        },
+                      ]}>
+                      {verses.preparing ? (
+                        <ActivityIndicator size="small" color="#e2e8f0" />
+                      ) : (
+                        <Icon
+                          name={verses.enabled ? 'hearing' : 'hearing-disabled'}
+                          size={20}
+                          // Green while it is actually hearing something, so
+                          // the pill answers "is this working" without the
+                          // panel having to be open.
+                          color={
+                            verses.enabled
+                              ? verses.listening
+                                ? '#4ade80'
+                                : '#94a3b8'
+                              : '#a1a1aa'
+                          }
+                        />
+                      )}
+                    </View>
+                  </TouchableOpacity>
+                )}
               </View>
 
               <AddNewNoteBtn
@@ -1495,10 +1614,39 @@ const BacePlayer = () => {
                 disabled={isCreatingNote}
               />
             </View>
+
+            {/* Inside the animated container, after the button row, and that
+                placement is load-bearing.
+
+                playerContainer's height is animated and its ViewShot child is
+                height:'100%', so btnContainer already lays out *past* the
+                bottom of the container - see the note on btnGroup below. A
+                sibling rendered after </Animated.View> therefore starts at the
+                container's declared height, which is above where the buttons
+                actually ended up, and lands on top of them. That is what this
+                panel did: it covered All Notes, the focus pill and +Notes.
+
+                The two components that do sit outside - PlayerQueue and
+                SaveToListBar - dodge the whole problem by being absolutely
+                positioned at bottom:0. This one cannot: it is a caption for the
+                player and has to be directly under it. So it joins the overflow
+                instead of starting after it, and flows below the buttons the
+                same way they flow below the video.
+
+                Its background must stay opaque for the same reason theirs must.
+
+                Not while notes are open - the editor owns the screen then - and
+                not in PiP. Detection keeps running through both; only the
+                display goes away, so a verse recognised while writing a note is
+                still there when the note is closed. */}
+            {!isInPip && !showNotes && (
+              <VersePanel onSeek={seekToSeconds} />
+            )}
           </Animated.View>
 
           {!isInPip && renderPersistentBackButton()}
           {!isInPip && renderDragHandle()}
+
           {!showNotes && autoplay && !isInPip && (
             <PlayerQueue
               playlist={playlist}

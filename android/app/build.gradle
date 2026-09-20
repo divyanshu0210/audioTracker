@@ -147,6 +147,18 @@ dependencies {
    // Backport of the Android 12 splash screen API, down to minSdk 24.
    implementation("androidx.core:core-splashscreen:1.0.1")
 
+   // Offline speech recognition. Chosen over the platform SpeechRecognizer
+   // because that one only ever listens to a microphone - there is no way to
+   // hand it a buffer - and what has to be recognised here is the app's own
+   // playback. Vosk takes raw PCM, which is what AudioPlaybackCapture produces.
+   //
+   // No @aar classifier, and that is load-bearing: with one, Gradle treats this
+   // as artifact-only, never hands the AAR to the Android plugin, and the four
+   // libvosk.so inside are fetched and silently dropped. The build succeeds and
+   // the device throws UnsatisfiedLinkError on the first Model.
+   implementation("com.alphacephei:vosk-android:0.3.47")
+
+
     if (hermesEnabled.toBoolean()) {
         implementation("com.facebook.react:hermes-android")
     } else {

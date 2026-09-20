@@ -10,38 +10,68 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
-import java.util.zip.ZipEntry;
-import java.util.zip.ZipInputStream;
 
 /**
- * The speech model: Vosk's Hindi one, and only that one.
+ * The speech model: Su-srota, a Sanskrit recogniser.
  *
- * The choice is deliberate and slightly counter-intuitive, so it is worth
- * setting down. The obvious model for these recordings is English, because most
- * of the talking is English - and that is exactly why it is the wrong one. An
- * English model transcribes the talking, which is the part nobody wants, and
- * cannot hear the Sanskrit, which is the only part anybody wants. Every word of
- * a forty-minute lecture became something for the matcher to trip over, and the
- * one passage that mattered produced nothing.
+ * Three models have been tried here and the first two failed for the same
+ * reason, which is worth setting down so it is not tried a third time.
  *
- * The Hindi model inverts that. Sanskrit shares Devanagari and most of its
- * phonetics with Hindi, so a recitation comes through recognisably; English
- * commentary, fed to a model that knows no English, comes through as whatever
- * Hindi words happen to fit - which almost never resembles a verse. The signal
- * gets louder and the noise gets quieter at the same time.
+ * An English model was the obvious choice, because most of the talking in these
+ * recordings is English - and that is exactly why it was wrong. It transcribed
+ * the commentary, which nobody wants, and could not hear the Sanskrit, which is
+ * the only part anybody wants. A Hindi model inverted that and was better in
+ * principle: Sanskrit shares Devanagari and much of its phonetics with Hindi,
+ * so recitation ought to come through while English commentary does not. In
+ * practice it produced fluent Hindi nonsense on Sanskrit chanting, because
+ * "close to Sanskrit" is not Sanskrit.
  *
- * It returns Devanagari, which is why devanagari.js exists: it transliterates
- * so that what the recogniser says and what the corpus holds can be compared at
- * all.
+ * This one is trained on the material itself. Su-srota is AI4Bharat's
+ * IndicConformer-CTC finetuned for shastric and recitational Sanskrit by Prof.
+ * Prathosh A P at IISc, on scholar recordings of the Bhagavata Purana,
+ * Upanisads and stotras, plus Gita and Rgveda recitation - very nearly this
+ * app's own corpus. It reports 6.0% character error on Bhagavata chant.
+ *
+ * Read the character error rate and ignore the word error rate, which looks
+ * far worse. Sanskrit word boundaries are orthographic - sandhi fuses words -
+ * so about half of that model's word error is disagreement about spacing.
+ * phonetics.js discards word boundaries before it matches anything, so that
+ * half of the error does not exist for us.
+ *
+ * Three files rather than an archive, and no unpacking:
+ *
+ *   ctc         the recogniser. INT8, and already restricted to the Sanskrit
+ *               slice of IndicConformer's multilingual vocabulary, so nothing
+ *               here has to know about the other twenty-one languages.
+ *   preprocessor  16 kHz PCM to an 80-bin log-mel spectrogram. Tiny, and a
+ *               separate graph because that is how the export was made.
+ *   vocab       257 output classes to Devanagari, which is what devanagari.js
+ *               then transliterates so the recogniser and the corpus can be
+ *               compared at all.
  */
 public class VerseModelStore {
 
     private static final String TAG = "VerseModel";
 
-    private static final String MODEL_URL =
-            "https://alphacephei.com/vosk/models/vosk-model-small-hi-0.22.zip";
+    private static final String BASE =
+            "https://huggingface.co/gnumanth/sushrota-sanskrit-asr-onnx/resolve/main/";
 
-    private static final String MODEL_DIR = "vosk-model-small-hi-0.22";
+    private static final String MODEL_DIR = "sushrota-sa-v13b";
+
+    public static final String CTC = "sushrota_sanskrit_ctc_int8.onnx";
+    public static final String PREPROCESSOR = "preprocessor.onnx";
+    public static final String VOCAB = "sanskrit_vocab.json";
+
+    private static final String[] FILES = {CTC, PREPROCESSOR, VOCAB};
+
+    /**
+     * Roughly what the three come to, for the progress fraction.
+     *
+     * Only the first is worth counting - the other two together are under two
+     * hundred kilobytes - but the total has to be known before the first
+     * response arrives, and a redirect to a CDN does not always carry a length.
+     */
+    private static final long APPROX_TOTAL_BYTES = 188L * 1024 * 1024;
 
     /** Written last, so a directory that exists but is incomplete is not taken for a model. */
     private static final String STAMP = ".complete";
@@ -54,38 +84,53 @@ public class VerseModelStore {
         return new File(context.getFilesDir(), MODEL_DIR);
     }
 
+    public static File file(Context context, String name) {
+        return new File(modelDir(context), name);
+    }
+
     public static boolean isReady(Context context) {
         return new File(modelDir(context), STAMP).exists();
     }
 
     /**
-     * Fetch and unpack the model, unless it is already here.
+     * Fetch the model, unless it is already here.
      *
-     * Blocking: callers run this off the main thread. Throws on any failure -
-     * a partially-present model is not something to carry on from.
+     * Blocking: callers run this off the main thread. Throws on any failure - a
+     * partially-present model is not something to carry on from.
      */
     public static synchronized void ensure(Context context, Progress progress) throws IOException {
         if (isReady(context)) return;
 
-        File target = modelDir(context);
-        // A previous attempt that died between unpacking and stamping.
-        if (target.exists()) deleteRecursively(target);
+        File dir = modelDir(context);
+        // A previous attempt that died partway. Downloading into a directory
+        // holding half a model is how a truncated file survives to be loaded.
+        if (dir.exists()) deleteRecursively(dir);
+        if (!dir.mkdirs()) throw new IOException("could not create " + dir);
 
-        File zip = new File(context.getCacheDir(), "vosk-model.zip");
-        if (zip.exists() && !zip.delete()) Log.w(TAG, "could not clear a stale download");
+        long done = 0;
+        for (String name : FILES) {
+            File target = new File(dir, name);
+            // Each file is written under a temporary name and moved into place
+            // once whole, so nothing in the directory is ever a partial file.
+            File part = new File(dir, name + ".part");
+            long before = done;
 
-        download(MODEL_URL, zip, progress);
-        try {
-            unzip(zip, context.getFilesDir());
-            if (!target.isDirectory()) {
-                throw new IOException("the archive did not contain " + MODEL_DIR);
+            download(BASE + name, part, (read, total) -> {
+                if (progress != null) {
+                    progress.onProgress(before + read, APPROX_TOTAL_BYTES);
+                }
+            });
+
+            if (!part.renameTo(target)) {
+                throw new IOException("could not put " + name + " into place");
             }
-            if (!new File(target, STAMP).createNewFile()) {
-                throw new IOException("could not stamp the unpacked model");
-            }
-        } finally {
-            if (zip.exists() && !zip.delete()) Log.w(TAG, "could not delete the archive");
+            done += target.length();
         }
+
+        if (!new File(dir, STAMP).createNewFile()) {
+            throw new IOException("could not stamp the model");
+        }
+        Log.i(TAG, "model ready: " + (done / (1024 * 1024)) + " MB");
     }
 
     private static void download(String from, File to, Progress progress) throws IOException {
@@ -97,12 +142,10 @@ public class VerseModelStore {
         try {
             int code = conn.getResponseCode();
             if (code != HttpURLConnection.HTTP_OK) {
-                throw new IOException("HTTP " + code + " fetching the speech model");
+                throw new IOException("HTTP " + code + " fetching " + to.getName());
             }
 
-            long total = conn.getContentLengthLong();
             long read = 0;
-
             try (InputStream in = conn.getInputStream();
                  OutputStream out = new FileOutputStream(to)) {
                 byte[] buffer = new byte[64 * 1024];
@@ -110,48 +153,11 @@ public class VerseModelStore {
                 while ((n = in.read(buffer)) != -1) {
                     out.write(buffer, 0, n);
                     read += n;
-                    if (progress != null) progress.onProgress(read, total);
+                    if (progress != null) progress.onProgress(read, -1);
                 }
             }
         } finally {
             conn.disconnect();
-        }
-    }
-
-    private static void unzip(File zip, File into) throws IOException {
-        try (ZipInputStream zis = new ZipInputStream(
-                new java.io.BufferedInputStream(new java.io.FileInputStream(zip)))) {
-
-            ZipEntry entry;
-            byte[] buffer = new byte[64 * 1024];
-
-            while ((entry = zis.getNextEntry()) != null) {
-                File out = new File(into, entry.getName());
-
-                // Zip-slip: an archive can name an entry "../../something" and
-                // walk out of the directory it is meant to unpack into. This
-                // archive is not hostile, but the check costs nothing and the
-                // failure mode is writing chosen bytes to a chosen path.
-                if (!out.getCanonicalPath().startsWith(into.getCanonicalPath() + File.separator)) {
-                    throw new IOException("archive entry escapes its directory: " + entry.getName());
-                }
-
-                if (entry.isDirectory()) {
-                    if (!out.isDirectory() && !out.mkdirs()) {
-                        throw new IOException("could not create " + out);
-                    }
-                } else {
-                    File parent = out.getParentFile();
-                    if (parent != null && !parent.isDirectory() && !parent.mkdirs()) {
-                        throw new IOException("could not create " + parent);
-                    }
-                    try (OutputStream os = new FileOutputStream(out)) {
-                        int n;
-                        while ((n = zis.read(buffer)) != -1) os.write(buffer, 0, n);
-                    }
-                }
-                zis.closeEntry();
-            }
         }
     }
 

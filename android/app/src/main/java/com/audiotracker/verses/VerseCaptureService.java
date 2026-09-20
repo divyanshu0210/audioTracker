@@ -25,9 +25,7 @@ import com.audiotracker.bridge.ReactEmitter;
 import com.facebook.react.bridge.Arguments;
 import com.facebook.react.bridge.WritableMap;
 
-import org.json.JSONObject;
-import org.vosk.Model;
-import org.vosk.Recognizer;
+import ai.onnxruntime.OrtException;
 
 /**
  * Listening to what the player is playing, as it plays.
@@ -50,9 +48,16 @@ import org.vosk.Recognizer;
  *
  * One model, and no language probe. An earlier version carried English and
  * Hindi and spent two hundred lines choosing between them per recording; the
- * choice turned out not to be worth making, because English was never the right
- * answer - see VerseModelStore for why the Hindi model alone does better on
- * material that is mostly English.
+ * choice turned out not to be worth making, because neither was ever the right
+ * answer. The model here recognises Sanskrit and nothing else, which is the
+ * whole of what the panel wants - see VerseModelStore.
+ *
+ * Two threads, and that is the one structural thing to know: this recogniser
+ * reads a buffer rather than a stream, and a pass takes seconds. One thread
+ * reads audio and does nothing else, the other recognises whatever has
+ * accumulated. Doing both on one thread leaves AudioRecord unattended for the
+ * length of every pass, and what gets lost is precisely the audio that arrives
+ * while the previous window is being recognised.
  *
  * Nothing here decides anything. What comes out is a guess at words, and
  * useVerseStore is what turns a stream of those into a verse.
@@ -80,28 +85,62 @@ public class VerseCaptureService extends Service {
     private static final int NOTIFICATION_ID = 8821;
 
     /**
-     * Vosk's models are trained at 16kHz, and feeding one anything else gets
-     * quietly poor results rather than an error. The capture resamples to this
-     * on the way out, so the rate here and the rate given to the Recognizer are
-     * the same number for a reason.
+     * The model is trained at 16kHz, and feeding one anything else gets quietly
+     * poor results rather than an error. The capture resamples to this on the
+     * way out.
      */
     private static final int SAMPLE_RATE = 16000;
 
-    /**
-     * A fifth of a second. Short enough that a partial result arrives while a
-     * line is still being recited, long enough not to spend the whole budget on
-     * call overhead.
-     */
+    /** A fifth of a second of PCM, which is how much is read at a time. */
     private static final int CHUNK_BYTES = SAMPLE_RATE * 2 / 5;
+
+    /**
+     * How much audio is read at once, and how often.
+     *
+     * The recogniser is not a streaming one - it reads a whole buffer - so
+     * these two numbers are the whole of the latency design.
+     *
+     * Ten seconds is about half a verse, which is more than the matcher needs:
+     * a run of twenty-six characters is its threshold and half a line clears
+     * that. Longer would recognise more per pass and report it later, and the
+     * store is already accumulating twenty-five seconds of these, so there is
+     * nothing to gain by making each one bigger.
+     *
+     * The hop has to exceed how long a pass actually takes, or the reader gets
+     * ahead of the recogniser for the whole lecture. Five seconds against a
+     * ten-second window means the model must run at better than half real time,
+     * which it does comfortably - it is quoted at thirty times real time on a
+     * laptop CPU. The consequence of being wrong about that is mild: passes get
+     * skipped, not queued.
+     */
+    private static final int WINDOW_SAMPLES = SAMPLE_RATE * 10;
+    private static final int HOP_SAMPLES = SAMPLE_RATE * 5;
+
+    /** Below this there is not enough context to recognise anything. */
+    private static final int MIN_SAMPLES = SAMPLE_RATE * 2;
 
     private MediaProjection projection;
     private AudioRecord record;
-    private Recognizer recognizer;
-    private Model model;
+    private SanskritRecognizer recognizer;
+
+    /**
+     * The last WINDOW_SAMPLES of audio, oldest overwritten first.
+     *
+     * A ring rather than a queue, and read by a second thread rather than the
+     * one doing the reading, because a pass over ten seconds of audio takes
+     * seconds. Doing it on the reading thread would leave AudioRecord
+     * unattended for that whole time, and its buffer holds under a second -
+     * every pass would lose audio, and the part lost is the part that arrives
+     * while the model is busy recognising the part before it.
+     */
+    private final float[] ring = new float[WINDOW_SAMPLES];
+    private int ringAt = 0;
+    private long totalSamples = 0;
+    private final Object ringLock = new Object();
+    private Thread recogniser;
     private Thread worker;
     private volatile boolean running;
     private volatile boolean capturing;
-    private String lastPartial = "";
 
     private static volatile boolean active = false;
 
@@ -207,8 +246,7 @@ public class VerseCaptureService extends Service {
                 .setAudioPlaybackCaptureConfig(config)
                 .build();
 
-        model = new Model(VerseModelStore.modelDir(this).getAbsolutePath());
-        recognizer = new Recognizer(model, SAMPLE_RATE);
+        recognizer = new SanskritRecognizer(this);
 
         record.startRecording();
         running = true;
@@ -216,8 +254,10 @@ public class VerseCaptureService extends Service {
         active = true;
         emitState("listening", null);
 
-        worker = new Thread(this::loop, "verse-capture");
+        worker = new Thread(this::readLoop, "verse-capture");
         worker.start();
+        recogniser = new Thread(this::recogniseLoop, "verse-recognise");
+        recogniser.start();
     }
 
     /**
@@ -233,9 +273,13 @@ public class VerseCaptureService extends Service {
         try {
             if (want) {
                 record.startRecording();
-                // Whatever half-utterance was in flight when playback stopped
-                // is not the start of what comes next.
-                if (recognizer != null) recognizer.reset();
+                // Whatever was in the ring was heard before the pause and does
+                // not join onto what comes next.
+                synchronized (ringLock) {
+                    java.util.Arrays.fill(ring, 0f);
+                    ringAt = 0;
+                    totalSamples = 0;
+                }
                 capturing = true;
                 emitState("listening", null);
             } else {
@@ -248,46 +292,106 @@ public class VerseCaptureService extends Service {
         }
     }
 
-    private void loop() {
+    /**
+     * Read PCM as fast as it arrives and put it in the ring. Nothing else.
+     *
+     * Deliberately trivial: anything expensive here is time AudioRecord spends
+     * unattended, and its buffer is under a second deep.
+     */
+    private void readLoop() {
         byte[] buffer = new byte[CHUNK_BYTES];
         try {
             while (running) {
                 if (!capturing) {
                     Thread.sleep(150);
-                    lastPartial = "";
                     continue;
                 }
                 int n = record.read(buffer, 0, buffer.length);
                 if (n <= 0) continue;
-                consume(buffer, n);
+                append(buffer, n);
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         } catch (Throwable t) {
             if (running) {
-                Log.e(TAG, "recognition stopped", t);
-                fail("recognition stopped unexpectedly");
+                Log.e(TAG, "capture stopped", t);
+                fail("capture stopped unexpectedly");
             }
         } finally {
             close();
         }
     }
 
-    private void consume(byte[] buffer, int n) {
-        if (recognizer.acceptWaveForm(buffer, n)) {
-            String text = textFrom(recognizer.getResult(), "text");
-            if (!text.isEmpty()) {
-                emitSpeech(text, true);
-                lastPartial = "";
+    /** 16-bit little-endian PCM into the ring, as floats in -1..1. */
+    private void append(byte[] buffer, int bytes) {
+        synchronized (ringLock) {
+            for (int i = 0; i + 1 < bytes; i += 2) {
+                int sample = (buffer[i] & 0xff) | (buffer[i + 1] << 8);
+                ring[ringAt] = sample / 32768f;
+                ringAt = (ringAt + 1) % ring.length;
+                totalSamples++;
             }
-        } else {
-            String partial = textFrom(recognizer.getPartialResult(), "partial");
-            // Vosk repeats the same partial until something changes; forwarding
-            // every repeat would have the store counting one guess as many,
-            // which is exactly the corroboration it uses to decide it is sure.
-            if (!partial.isEmpty() && !partial.equals(lastPartial)) {
-                emitSpeech(partial, false);
-                lastPartial = partial;
+            ringLock.notifyAll();
+        }
+    }
+
+    /**
+     * Every hop, read the whole ring and recognise it.
+     *
+     * Takes whatever is in the ring at the moment it asks rather than queueing
+     * work, so a pass that runs long costs a skipped hop and never builds a
+     * backlog. On a lecture that plays for an hour, a backlog would mean the
+     * panel drifting further behind the audio all the way through.
+     */
+    private void recogniseLoop() {
+        float[] snapshot = new float[WINDOW_SAMPLES];
+        long lastAt = 0;
+        String previous = "";
+
+        try {
+            while (running) {
+                int count;
+                synchronized (ringLock) {
+                    while (running && (!capturing || totalSamples - lastAt < HOP_SAMPLES)) {
+                        ringLock.wait(200);
+                    }
+                    if (!running) return;
+
+                    count = (int) Math.min(totalSamples, WINDOW_SAMPLES);
+                    // Oldest first. The ring's write head is the join, so the
+                    // copy starts there once it has wrapped.
+                    int from = (int) ((totalSamples < WINDOW_SAMPLES)
+                            ? 0
+                            : ringAt);
+                    for (int i = 0; i < count; i++) {
+                        snapshot[i] = ring[(from + i) % ring.length];
+                    }
+                    lastAt = totalSamples;
+                }
+
+                if (count < MIN_SAMPLES) continue;
+
+                String text = recognizer.transcribe(snapshot, count);
+                if (text.isEmpty()) continue;
+
+                // Windows overlap, so a passage that spans two of them comes
+                // back twice. Forwarding the repeat would have the store
+                // counting one reading as two, which is exactly the
+                // corroboration it uses to decide it is sure.
+                if (text.equals(previous)) continue;
+                previous = text;
+
+                emitSpeech(text, true);
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } catch (OrtException e) {
+            Log.e(TAG, "recognition failed", e);
+            fail("the recogniser stopped: " + e.getMessage());
+        } catch (Throwable t) {
+            if (running) {
+                Log.e(TAG, "recognition stopped", t);
+                fail("recognition stopped unexpectedly");
             }
         }
     }
@@ -297,21 +401,10 @@ public class VerseCaptureService extends Service {
             if (recognizer != null) recognizer.close();
         } catch (Throwable ignored) {
         }
-        try {
-            if (model != null) model.close();
-        } catch (Throwable ignored) {
+        synchronized (ringLock) {
+            ringLock.notifyAll();
         }
         recognizer = null;
-        model = null;
-    }
-
-    private static String textFrom(String json, String key) {
-        if (json == null) return "";
-        try {
-            return new JSONObject(json).optString(key, "").trim();
-        } catch (Exception e) {
-            return "";
-        }
     }
 
     private void emitSpeech(String text, boolean isFinal) {

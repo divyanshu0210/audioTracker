@@ -18,10 +18,11 @@ evaluate.js     JSONL  -> what the panel would have shown
 
 ```sh
 python -m venv .venv
-.venv/Scripts/python -m pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
-.venv/Scripts/python -m pip install transformers imageio-ffmpeg numpy soundfile
-.venv/Scripts/python -m pip install "nemo_toolkit[asr]"     # sushrota only
+.venv/Scripts/python -m pip install onnxruntime numpy imageio-ffmpeg
 ```
+
+No PyTorch, no NeMo, no transformers. The model is published as ONNX, and
+onnxruntime is all that runs it — the same thing the phone does.
 
 `imageio-ffmpeg` ships a static ffmpeg, so nothing has to be installed
 system-wide. It is needed because the library's recordings are mp3, m4a and opus
@@ -31,20 +32,29 @@ and the models all want 16 kHz mono PCM.
 
 ```sh
 .venv/Scripts/python transcribe.py ~/clips/bg-lecture.mp3
-node evaluate.js out/bg-lecture.sushrota.sa.ctc.jsonl
+node evaluate.js out/bg-lecture.jsonl
 ```
 
-The first run downloads the checkpoint. Transcription is roughly real-time on a
-CPU, so a forty minute lecture takes about forty minutes — start it and go away.
+The first run downloads about 190 MB of model. After that it is quick — the
+model is quoted at thirty times real time on a laptop CPU, so a forty minute
+lecture takes a couple of minutes.
 
-## The models
+`transcribe.py` windows the audio exactly as `VerseCaptureService.java` does —
+ten seconds at a time, five seconds apart — and decodes it exactly as
+`SanskritRecognizer.java` does. That is deliberate and worth preserving: it
+means a disagreement between this and the phone is a bug in the app's audio
+capture, not a difference of method.
 
-**`--backend sushrota`** (the default) is
+## The model
+
 [Su-śrotā](https://huggingface.co/prathoshap/sushrota-sanskrit-asr), AI4Bharat's
 IndicConformer-CTC finetuned for śāstric and recitational Sanskrit by Prof.
-Prathosh A P at IISc. About 129M parameters. Its training data is close to this
-app's corpus: Bhāgavata Purāṇa, Upaniṣad and stotra recordings from 21 reciters,
-plus Gītā and Ṛgveda recitation.
+Prathosh A P at IISc, in the
+[ONNX export](https://huggingface.co/gnumanth/sushrota-sanskrit-asr-onnx) by
+gnumanth. About 115M active parameters, INT8, Apache-2.0.
+
+Its training data is close to this app's corpus: Bhāgavata Purāṇa, Upaniṣad and
+stotra recordings from 21 reciters, plus Gītā and Ṛgveda recitation.
 
 Reported: **6.0% CER on Bhāgavata chant**, 4.36% on in-the-wild phone
 recordings, 7.2% on Vedānta prose.
@@ -56,13 +66,11 @@ before matching anything, so that half of the error does not exist for us. This
 is the rare case where a model's headline weakness is irrelevant to the
 application.
 
-**`--backend indic`** is
-[IndicConformer 600M multilingual](https://huggingface.co/ai4bharat/indic-conformer-600m-multilingual),
-Su-śrotā's base model, covering all 22 scheduled languages. Not specialised for
-recitation, so mainly a baseline — but it is the one that can also read the
-Hindi commentary, which matters for the citation path (a lecturer saying
-"Bhagavad-gītā, chapter two, verse thirteen" is the strongest signal the feature
-has, and a Sanskrit-only model cannot hear it).
+It hears Sanskrit and nothing else, which is the point — an English model
+transcribed the commentary and missed the verse, and a Hindi model produced
+fluent nonsense on chanting. The cost is that it cannot hear a spoken citation
+("Bhagavad-gītā, chapter two, verse thirteen"), which was a real second source
+of matches. Whether that is worth a second model is still open.
 
 ## What to look at
 
@@ -76,13 +84,8 @@ that look identical from the count alone:
 - **something reasonable declined** — the near-miss list will show runs sitting
   just under the gates. That is tunable, in `matcher.js`.
 
-## If the numbers are good
+## On the device
 
-The route to the device is
-[sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx), which runs NeMo CTC models
-natively and has React Native bindings. NeMo exports ONNX itself
-(`model.export("sushrota.onnx")`), and at 129M parameters the quantised result
-should be comparable to the Vosk model it replaces.
-
-Nothing downstream of "text arrives" needs to change. That side is already
-tested.
+Already wired up: `onnxruntime-android` runs the same two graphs, and
+`SanskritRecognizer.java` holds the decode. Nothing downstream of "text arrives"
+changed, because that side was already tested.

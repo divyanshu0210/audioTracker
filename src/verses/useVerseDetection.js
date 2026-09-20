@@ -9,7 +9,8 @@
 //
 // Three things gate it: the preference, something actually playing, and the
 // platform. Switching it on the first time is not free - a permission prompt, a
-// system consent dialog and a forty megabyte download - so `toggle` reports
+// system consent dialog and a hundred and ninety megabyte download - so
+// `toggle` reports
 // what it is doing rather than appearing to hang.
 
 import {useCallback, useEffect, useRef, useState} from 'react';
@@ -172,7 +173,7 @@ const useVerseDetection = ({sourceId, title, path, isPaused, isPlaybackReady}) =
       const caps = await capabilities();
       if (!caps.modelReady) {
         ToastAndroid?.show?.(
-          'Downloading the speech model — about 40 MB, once',
+          'Downloading the Sanskrit speech model — about 190 MB, once',
           ToastAndroid.LONG,
         );
       }

@@ -88,3 +88,4 @@ tools/verse-corpus/.cache/
 tools/verse-asr-eval/.venv/
 tools/verse-asr-eval/.cache/
 tools/verse-asr-eval/out/
+tools/verse-asr-eval/__pycache__/

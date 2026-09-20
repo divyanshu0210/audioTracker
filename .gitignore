@@ -81,3 +81,10 @@ tools/db-viewer/*/
 # Fetched pages for the verse corpus build; regenerate with
 # node tools/verse-corpus/build.js
 tools/verse-corpus/.cache/
+
+# Desktop model evaluation: a venv, multi-GB checkpoints, decoded audio and
+# transcripts of whatever was being tested. The scripts are tracked, the
+# outputs are not. See tools/verse-asr-eval/README.md
+tools/verse-asr-eval/.venv/
+tools/verse-asr-eval/.cache/
+tools/verse-asr-eval/out/

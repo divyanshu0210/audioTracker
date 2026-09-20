@@ -98,8 +98,18 @@ it('still finds a record from a few seconds of damaged audio', () => {
 
   // A clean window of a dozen words is the easy case, and has to be near
   // perfect.
+  //
+  // It was 95% before the gap penalty went into the matcher and is 93.6% after
+  // - a deliberate trade, and the threshold is lowered rather than the penalty
+  // softened. What the penalty bought is the whole reason the feature was
+  // unusable on a device: free gaps let a run crawl through unrelated speech
+  // and five percent of windows of pure Devanagari soup produced a confident
+  // verse. Every window lost here is lost to no-match, never to a wrong answer
+  // - the `wrong` assertions below are what actually matter, and they held at
+  // zero throughout. See MISS_PENALTY in matcher.js for the measured curve.
   const clean = evaluateWindow('BG  ', bg, 250, 12, 0, 0);
-  expect(clean.right / clean.n).toBeGreaterThan(0.95);
+  expect(clean.right / clean.n).toBeGreaterThan(0.93);
+  expect(clean.wrong).toBe(0);
 
   // Damaged, it is not. A single window is weak evidence and recall drops a
   // long way - which is exactly why useVerseStore accumulates across windows

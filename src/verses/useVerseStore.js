@@ -38,6 +38,19 @@ const STRONG_RUN_CHARS = 55;
 // How many separate windows have to agree before a weaker match is shown.
 const CORROBORATION = 2;
 
+// How far apart two of those windows have to be to count as separate.
+//
+// Without this the corroboration rule corroborates nothing. The recogniser
+// returns partial results several times a second and the window is twenty-five
+// seconds long, so two consecutive ingests share almost all of their text - the
+// second "agreeing" with the first is the same evidence read twice, and a
+// weak match reached its two votes in about half a second.
+//
+// A quarter of the window, so that by the second vote a good deal of what
+// produced the first has aged out and the match has had to survive on material
+// heard since.
+const VOTE_SPACING_MS = 6000;
+
 // Once something is displayed, evidence for the next thing has to be more
 // recent than this - otherwise a verse the lecture has moved past could be
 // re-shown because an old fragment is still sitting in the window.
@@ -84,7 +97,8 @@ const useVerseStore = create((set, get) => ({
 
   // Recent recogniser output: [{text, at}], trimmed to WINDOW_MS.
   _window: [],
-  // id -> how many separate ingests have named it since the last commit.
+  // id -> {count, at}: how many *separate* windows have named it since the last
+  // commit, and when the last one that counted arrived.
   _votes: new Map(),
   _lastCommitAt: 0,
 
@@ -163,8 +177,17 @@ const useVerseStore = create((set, get) => ({
     if (get().current && at - get()._lastCommitAt < REPLACE_COOLDOWN_MS) return;
 
     const votes = new Map(get()._votes);
-    const count = (votes.get(hit.id) || 0) + 1;
-    votes.set(hit.id, count);
+    const prior = votes.get(hit.id);
+
+    // Only a vote from a meaningfully different window counts. Anything sooner
+    // is the same few seconds of audio being matched again - see
+    // VOTE_SPACING_MS.
+    const count =
+      prior && at - prior.at < VOTE_SPACING_MS
+        ? prior.count
+        : (prior?.count || 0) + 1;
+
+    votes.set(hit.id, {count, at: prior && count === prior.count ? prior.at : at});
     set({_votes: votes});
 
     if (hit.runChars >= STRONG_RUN_CHARS || count >= CORROBORATION) {

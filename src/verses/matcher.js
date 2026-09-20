@@ -36,22 +36,35 @@ const RERANK_DEPTH = 12;
 // recordings.
 export const MIN_RUN_CHARS = 26;
 
-// How many query positions a run may skip over and still be one run.
+// What a position that is not in this record costs a run in progress.
 //
-// Without this the match has to be perfectly contiguous, and that is not a
-// condition real recognition ever meets. A recogniser under a PA system drops
-// a word here and mangles one there, and each of those severs the run at that
-// point - so a verse that was plainly recited comes back as two runs of
-// fifteen characters, neither of which clears MIN_RUN_CHARS, and the panel
-// shows nothing. Measured against degraded input, contiguous-only matching
-// recognised about one recitation in eight.
+// This is the number that decides whether the panel can be trusted, and the
+// reason is not obvious. Matching a window of speech against a verse is local
+// alignment, and the first version scored it with no penalty for a gap: a run
+// could skip up to six positions for free and pick up on the seventh. That
+// tolerance is necessary - a recogniser under a PA system drops a word here and
+// mangles one there, and without it a verse that was plainly recited comes back
+// as two half-runs that each clear nothing.
 //
-// A dropped word does not cost as much as it looks like it should: with the
-// stream already joined, only the four or five grams straddling the seam are
-// junk, and the alignment picks straight back up afterwards. Six covers that
-// and leaves no room to wander - the gap is skipped, never counted, so a run
-// stitched across one is worth exactly the characters actually heard.
-const MAX_GAP = 6;
+// But free gaps are sustainable gaps. At one hit in seven, a run crawls forever
+// through material that has nothing to do with it, gaining a character each
+// time, and forty characters collected across six hundred is indistinguishable
+// from forty characters actually recited. That is where the false verses came
+// from - measured on Devanagari soup, five percent of windows produced a
+// confident match, and the rate rose with window length.
+//
+// Charging for the gap fixes it at the root, because it makes the crawl
+// *lose*. At this penalty a run sustains roughly one miss for every third
+// position, so a mangled recitation survives comfortably while soup at one in
+// seven drifts negative and dies within a few characters. When the score goes
+// negative the run is abandoned and the next hit starts a fresh one, which is
+// what stops the alignment wandering out of the verse into the commentary
+// either side of it.
+//
+// Lowering it makes the panel eager and wrong; raising it starts rejecting
+// recitations with a dropped word in them. It is the one number worth tuning on
+// real recordings.
+const MISS_PENALTY = 0.34;
 
 // How much of a run has to be this record specifically.
 //
@@ -207,25 +220,67 @@ export const matchHashes = (queryHashes, minRun = MIN_RUN_CHARS) => {
 
   const wanted = new Set(shortlist);
 
-  // For each shortlisted verse, the longest stretch of query positions landing
-  // in it - allowing for short interruptions. See MAX_GAP.
-  // `solid` counts the positions in a run that were real hits on this record,
-  // as opposed to neutral grams that merely passed through it. See the note on
-  // MIN_SOLID_RATIO.
+  // For each shortlisted verse, the best-scoring local alignment between the
+  // query and that record - the longest stretch of query positions landing in
+  // it, with short interruptions tolerated but paid for. See MISS_PENALTY.
+  //
+  // `solid` counts the positions in that alignment that were real hits on this
+  // record, as opposed to neutral grams that merely passed through it or misses
+  // it absorbed. See the note on MIN_SOLID_RATIO.
   const runs = new Map(
     shortlist.map(ordinal => [
       ordinal,
-      {best: 0, current: 0, gap: 0, endsAt: -1, solid: 0, bestSolid: 0},
+      {
+        // The running alignment score, and the best one seen. Fractional,
+        // because a miss costs less than a hit earns - see MISS_PENALTY.
+        score: 0,
+        best: 0,
+        solid: 0,
+        bestSolid: 0,
+        // Where the current run began and where the best one did. A run is
+        // abandoned the moment its score goes negative, so these move.
+        startsAt: -1,
+        bestStart: -1,
+        endsAt: -1,
+      },
     ]),
   );
 
-  const extend = (run, q, isSolid) => {
-    run.current++;
-    if (isSolid) run.solid++;
-    run.gap = 0;
-    if (run.current > run.best) {
-      run.best = run.current;
+  // One step of the alignment for one record.
+  //
+  //   solid   a gram of this record, and the only thing that earns anything
+  //   neutral a gram too common to identify anything. It really was heard and
+  //           really is in the verse, so it keeps a run alive and counts
+  //           towards its length - but it earns nothing, because a run built
+  //           out of syllables every verse shares is evidence of Sanskrit in
+  //           general and not of this verse.
+  //   miss    a gram belonging to other records or to none. Costs.
+  const step = (run, q, kind) => {
+    if (run.score <= 0) {
+      // Nothing in progress. Only a solid hit may open a run; starting one on
+      // a neutral gram is how an alignment begins in the middle of nowhere.
+      if (kind !== 'solid') return;
+      run.score = 1;
+      run.solid = 1;
+      run.startsAt = q;
+    } else if (kind === 'solid') {
+      run.score += 1;
+      run.solid += 1;
+    } else if (kind === 'miss') {
+      run.score -= MISS_PENALTY;
+      if (run.score <= 0) {
+        // Abandoned. Whatever it had is already banked in `best`.
+        run.score = 0;
+        run.solid = 0;
+        run.startsAt = -1;
+        return;
+      }
+    }
+
+    if (run.score > run.best) {
+      run.best = run.score;
       run.bestSolid = run.solid;
+      run.bestStart = run.startsAt;
       run.endsAt = q;
     }
   };
@@ -233,16 +288,8 @@ export const matchHashes = (queryHashes, minRun = MIN_RUN_CHARS) => {
   for (let q = 0; q < queryHashes.length; q++) {
     const range = rangeAt[q];
 
-    // A gram that was too common to index carries no opinion about any verse.
-    // It extends whatever run it sits inside - those characters really were
-    // heard, and really are in the verse - but it cannot start one, because a
-    // run built only out of syllables every verse shares is not evidence of
-    // this verse.
     if (range === 'neutral') {
-      for (const ordinal of shortlist) {
-        const run = runs.get(ordinal);
-        if (run.current > 0) extend(run, q, false);
-      }
+      for (const ordinal of shortlist) step(runs.get(ordinal), q, 'neutral');
       continue;
     }
 
@@ -254,26 +301,7 @@ export const matchHashes = (queryHashes, minRun = MIN_RUN_CHARS) => {
       }
     }
     for (const ordinal of shortlist) {
-      const run = runs.get(ordinal);
-      if (hitHere.has(ordinal)) {
-        // Re-joining across a gap costs the gap: those positions were not
-        // heard in this verse and must not be counted as though they were.
-        if (run.gap > MAX_GAP) {
-          run.current = 1;
-          run.solid = 1;
-        } else {
-          run.current++;
-          run.solid++;
-        }
-        run.gap = 0;
-        if (run.current > run.best) {
-          run.best = run.current;
-          run.bestSolid = run.solid;
-          run.endsAt = q;
-        }
-      } else if (run.current > 0) {
-        run.gap++;
-      }
+      step(runs.get(ordinal), q, hitHere.has(ordinal) ? 'solid' : 'miss');
     }
   }
 
@@ -281,12 +309,20 @@ export const matchHashes = (queryHashes, minRun = MIN_RUN_CHARS) => {
     .map(ordinal => {
       const run = runs.get(ordinal);
       const doc = docs[ordinal];
-      // A run of N consecutive 5-grams covers N + 4 characters of stream.
-      const runChars = run.best ? run.best + gramSize - 1 : 0;
+      // How many query positions the winning alignment actually spanned, and
+      // how much stream that is: N overlapping 5-grams cover N + 4 characters.
+      //
+      // Measured from the span rather than from the score, and that is only
+      // honest because of the gap penalty - a run can no longer reach across
+      // material it did not match, so its extent and its content are the same
+      // thing again. Under the old free-gap scoring these two numbers could
+      // differ by a factor of fifteen.
+      const positions = run.best > 0 ? run.endsAt - run.bestStart + 1 : 0;
+      const runChars = positions ? positions + gramSize - 1 : 0;
       const coverage = doc.len ? Math.min(1, runChars / doc.len) : 0;
       // What share of the run was this record being recognised, rather than
-      // syllables so common they belong to everything.
-      const solidRatio = run.best ? run.bestSolid / run.best : 0;
+      // syllables so common they belong to everything, or tolerated misses.
+      const solidRatio = positions ? run.bestSolid / positions : 0;
       return {
         ...doc,
         ordinal,

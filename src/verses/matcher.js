@@ -21,6 +21,7 @@
 import {Buffer} from 'buffer';
 
 import {phoneticStream, grams, hashGram} from './phonetics';
+import {isPenalised, tuning} from './tuning';
 
 // Kept small on purpose. Counting hits is cheap; measuring runs is not, so
 // only the best few by raw count are looked at properly.
@@ -34,6 +35,9 @@ const RERANK_DEPTH = 12;
 // Raising it makes the panel slower to appear and more often right; lowering
 // it makes it eager and wrong. It is the one number worth tuning on real
 // recordings.
+// The shipped value. Read through tuning() at the point of use so a server can
+// correct it - see tuning.js. Exported because tests and the corpus builder
+// want the number the app ships with, not whatever a device has been told.
 export const MIN_RUN_CHARS = 26;
 
 // What a position that is not in this record costs a run in progress.
@@ -63,8 +67,10 @@ export const MIN_RUN_CHARS = 26;
 //
 // Lowering it makes the panel eager and wrong; raising it starts rejecting
 // recitations with a dropped word in them. It is the one number worth tuning on
-// real recordings.
-const MISS_PENALTY = 0.34;
+// real recordings, which is precisely why it is no longer written here.
+// The number itself lives in tuning.js, so that a value tuned on synthetic
+// soup can be corrected by one measured on real recordings without an APK.
+// What is above is the reasoning behind the value it ships with.
 
 // How much of a run has to be this record specifically.
 //
@@ -95,7 +101,7 @@ const MISS_PENALTY = 0.34;
 // everything. At 0.5 every mangled verse and every half-line was rejected. At
 // this value a recitation scores 46-52% and passes comfortably, while the cost
 // to recall is under one percent.
-const MIN_SOLID_RATIO = 0.22;
+// Also in tuning.js - see the note under MISS_PENALTY above.
 
 // Both the parse and the decode happen once, on first use, rather than at
 // import.
@@ -175,8 +181,14 @@ let touched = [];
  *                    the near-misses, which is the difference between "heard
  *                    nothing" and "nearly had it".
  */
-export const matchHashes = (queryHashes, minRun = MIN_RUN_CHARS) => {
+export const matchHashes = (queryHashes, minRun) => {
   const {docs, common, hashes, starts, postings, gramSize} = load();
+
+  // Read once per query rather than per position: this loop runs over every
+  // gram of every window, several times a second, for as long as a lecture
+  // plays.
+  const {missPenalty, minSolidRatio, minRunChars} = tuning();
+  const floor = minRun === undefined ? minRunChars : minRun;
 
   if (!counts || counts.length !== docs.length) counts = new Int32Array(docs.length);
 
@@ -267,7 +279,7 @@ export const matchHashes = (queryHashes, minRun = MIN_RUN_CHARS) => {
       run.score += 1;
       run.solid += 1;
     } else if (kind === 'miss') {
-      run.score -= MISS_PENALTY;
+      run.score -= missPenalty;
       if (run.score <= 0) {
         // Abandoned. Whatever it had is already banked in `best`.
         run.score = 0;
@@ -353,7 +365,7 @@ export const matchHashes = (queryHashes, minRun = MIN_RUN_CHARS) => {
         endsAt: run.endsAt,
       };
     })
-    .filter(c => c.runChars >= minRun && c.solidRatio >= MIN_SOLID_RATIO)
+    .filter(c => c.runChars >= floor && c.solidRatio >= minSolidRatio)
     .sort((a, b) => b.score - a.score);
 };
 
@@ -365,10 +377,19 @@ export const matchHashes = (queryHashes, minRun = MIN_RUN_CHARS) => {
  * cannot tell which one it is without already knowing the answer.
  */
 export const identify = text => {
-  const stream = phoneticStream(text);
-  if (stream.length < MIN_RUN_CHARS) return null;
+  const {minRunChars, ambiguityMargin, penaltyFactor} = tuning();
 
-  const results = matchHashes(grams(stream, load().gramSize).map(hashGram));
+  const stream = phoneticStream(text);
+  if (stream.length < minRunChars) return null;
+
+  const all = matchHashes(grams(stream, load().gramSize).map(hashGram));
+
+  // Verses that many people have reported as wrong have to work harder. They
+  // are real records and any of them can genuinely be recited, so this raises
+  // the bar rather than removing them - see tuning.js.
+  const results = all.filter(
+    c => !isPenalised(c.id) || c.runChars >= minRunChars * penaltyFactor,
+  );
   if (!results.length) return null;
 
   const [best, runnerUp] = results;
@@ -376,7 +397,11 @@ export const identify = text => {
   // Two verses matching almost equally well usually means the run landed on
   // something they share - a repeated epithet, or one of the many verses that
   // open the same way. Naming either one would be a coin toss.
-  if (runnerUp && runnerUp.score >= best.score * 0.92 && runnerUp.id !== best.id) {
+  if (
+    runnerUp &&
+    runnerUp.score >= best.score * ambiguityMargin &&
+    runnerUp.id !== best.id
+  ) {
     return null;
   }
 

@@ -17,6 +17,8 @@ import {useCallback, useEffect, useRef, useState} from 'react';
 import {ToastAndroid} from 'react-native';
 
 import useSettingsStore from '../Settings/settingsStore';
+import {flush, flushWhenOnline} from './feedback';
+import {loadTuning, refreshTuning} from './tuning';
 import useVerseStore, {setVersePosition} from './useVerseStore';
 import {verseFromTitle} from './verseTitle';
 import {
@@ -69,6 +71,19 @@ const useVerseDetection = ({sourceId, title, path, isPaused, isPlaybackReady}) =
   useEffect(() => {
     pausedRef.current = isPaused;
   }, [isPaused]);
+
+  // Anything recorded while offline goes up now, and again whenever a
+  // connection comes back. Opening the player is a good moment for it: there is
+  // a network in use already, and nothing here blocks anything.
+  useEffect(() => {
+    flushWhenOnline();
+    flush();
+
+    // Whatever this device last learned, then whatever the server knows now.
+    // In that order: the cached values are available immediately and work
+    // offline, and the fetch corrects them a moment later if it can.
+    loadTuning().then(refreshTuning);
+  }, []);
 
   // A new recording is a new table of contents.
   useEffect(() => {

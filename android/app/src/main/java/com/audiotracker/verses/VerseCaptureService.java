@@ -107,14 +107,19 @@ public class VerseCaptureService extends Service {
      * nothing to gain by making each one bigger.
      *
      * The hop has to exceed how long a pass actually takes, or the reader gets
-     * ahead of the recogniser for the whole lecture. Five seconds against a
-     * ten-second window means the model must run at better than half real time,
+     * ahead of the recogniser for the whole lecture. Four seconds against a
+     * ten-second window means the model must run at better than 0.4 real time,
      * which it does comfortably - it is quoted at thirty times real time on a
      * laptop CPU. The consequence of being wrong about that is mild: passes get
      * skipped, not queued.
+     *
+     * It is also half of the panel's latency. A verse cannot appear before the
+     * hop that first covers it, and a verse needing corroboration cannot appear
+     * before the second - so every second here costs two on screen. Anything
+     * below about three would start racing the inference on a slow device.
      */
     private static final int WINDOW_SAMPLES = SAMPLE_RATE * 10;
-    private static final int HOP_SAMPLES = SAMPLE_RATE * 5;
+    private static final int HOP_SAMPLES = SAMPLE_RATE * 4;
 
     /** Below this there is not enough context to recognise anything. */
     private static final int MIN_SAMPLES = SAMPLE_RATE * 2;
@@ -393,7 +398,8 @@ public class VerseCaptureService extends Service {
 
                 if (count < MIN_SAMPLES) continue;
 
-                String text = recognizer.transcribe(snapshot, count);
+                SanskritRecognizer.Heard heard = recognizer.transcribe(snapshot, count);
+                String text = heard.text;
                 if (text.isEmpty()) continue;
 
                 // Windows overlap, so a passage that spans two of them comes
@@ -403,7 +409,7 @@ public class VerseCaptureService extends Service {
                 if (text.equals(previous)) continue;
                 previous = text;
 
-                emitSpeech(text, true);
+                emitSpeech(text, heard.confidence);
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -429,10 +435,14 @@ public class VerseCaptureService extends Service {
         recognizer = null;
     }
 
-    private void emitSpeech(String text, boolean isFinal) {
+    private void emitSpeech(String text, float confidence) {
         WritableMap payload = Arguments.createMap();
         payload.putString("text", text);
-        payload.putBoolean("isFinal", isFinal);
+        payload.putDouble("confidence", confidence);
+        // Always final now. The recogniser reads whole windows rather than
+        // streaming, so there is no such thing as a partial result any more -
+        // kept in the payload because the JS side still reads it.
+        payload.putBoolean("isFinal", true);
         ReactEmitter.emit(this, EVENT_SPEECH, payload);
     }
 

@@ -160,8 +160,8 @@ export const startListening = async () => {
 
   const bus = getEmitter();
   subscriptions = [
-    bus.addListener('verseSpeech', ({text}) => {
-      useVerseStore.getState().ingest(text);
+    bus.addListener('verseSpeech', ({text, confidence}) => {
+      useVerseStore.getState().ingest(text, confidence);
     }),
     bus.addListener('verseCaptureState', ({state, reason}) => {
       const current = useVerseStore.getState();

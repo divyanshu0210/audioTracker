@@ -93,11 +93,12 @@ const VersePanel = ({onSeek}) => {
   // already re-rendering on progress, and should not add to that.
   const {
     enabled, listening, unavailable, current, history,
-    debug, heardCount, lastHeard, candidates,
+    debug, heardCount, lastHeard, lastConfidence, candidates,
   } = useVerseStore(
     useShallow(state => ({
       enabled: state.enabled,
       listening: state.listening,
+      lastConfidence: state.lastConfidence,
       unavailable: state.unavailable,
       current: state.current,
       history: state.history,
@@ -109,6 +110,8 @@ const VersePanel = ({onSeek}) => {
   );
 
   const dismiss = useVerseStore(state => state.dismiss);
+  const rate = useVerseStore(state => state.rate);
+  const noteRevisit = useVerseStore(state => state.noteRevisit);
 
   const currentId = current?.id;
 
@@ -133,10 +136,13 @@ const VersePanel = ({onSeek}) => {
 
   const handleSeek = useCallback(
     entry => {
+      // Going back to a verse is the strongest evidence the match was right,
+      // and it costs nobody anything to give. See feedback.js.
+      noteRevisit(entry.key);
       setShowHistory(false);
       onSeek?.(entry.at);
     },
-    [onSeek],
+    [noteRevisit, onSeek],
   );
 
   // Newest first: the thing just heard is the thing most likely wanted.
@@ -157,8 +163,12 @@ const VersePanel = ({onSeek}) => {
       contentContainerStyle={styles.debugContent}
       nestedScrollEnabled
       persistentScrollbar>
+      {/* conf is the number to watch when tuning MIN_CONFIDENCE: compare what
+          a real recitation scores against what the commentary between verses
+          scores, and put the threshold between them. */}
       <Text style={styles.debugMeta}>
-        {heardCount} heard · {listening ? 'live' : 'idle'}
+        {heardCount} heard · {listening ? 'live' : 'idle'} · conf{' '}
+        {lastConfidence ? lastConfidence.toFixed(2) : '—'}
       </Text>
       <Text style={styles.debugText} numberOfLines={3}>
         {lastHeard || '(nothing yet)'}
@@ -172,6 +182,7 @@ const VersePanel = ({onSeek}) => {
       ) : (
         <Text style={styles.debugText}>(no candidates)</Text>
       )}
+
     </ScrollView>
   ) : null;
 
@@ -239,6 +250,45 @@ const VersePanel = ({onSeek}) => {
             : 'heard'}
         </Text>
 
+        {/* Was this right?
+            
+            Only for something matched from the sound. A verse named in the
+            title, or a citation read out loud, was not a judgement the matcher
+            made - rating those would produce rows that no threshold controls.
+
+            Asked once. Having answered, the thumb stays as a record of what was
+            said rather than becoming a control to fiddle with. */}
+        {current.source === 'heard' && (
+          <View style={styles.rateGroup}>
+            {current.rated ? (
+              <Icon
+                name={current.rated === 'right' ? 'thumb-up' : 'thumb-down'}
+                size={14}
+                color={C.faint}
+              />
+            ) : (
+              <>
+                <TouchableOpacity
+                  onPress={() => rate('right')}
+                  style={styles.iconBtn}
+                  hitSlop={{top: 8, bottom: 8, left: 6, right: 6}}
+                  accessibilityRole="button"
+                  accessibilityLabel="This verse is right">
+                  <Icon name="thumb-up-off-alt" size={15} color={C.muted} />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => rate('wrong')}
+                  style={styles.iconBtn}
+                  hitSlop={{top: 8, bottom: 8, left: 6, right: 6}}
+                  accessibilityRole="button"
+                  accessibilityLabel="This verse is wrong">
+                  <Icon name="thumb-down-off-alt" size={15} color={C.muted} />
+                </TouchableOpacity>
+              </>
+            )}
+          </View>
+        )}
+
         <View style={styles.headerActions}>
           {recent.length > 1 && (
             <TouchableOpacity
@@ -283,7 +333,7 @@ const VersePanel = ({onSeek}) => {
           persistentScrollbar>
           {recent.map((entry, i) => (
             <TouchableOpacity
-              key={`${entry.id}-${entry.heardAt}-${i}`}
+              key={entry.key || `${entry.id}-${entry.heardAt}-${i}`}
               style={styles.historyRow}
               onPress={() => handleSeek(entry)}>
               <Text style={styles.historyTime}>{formatPosition(entry.at)}</Text>
@@ -481,10 +531,15 @@ const styles = StyleSheet.create({
     color: C.faint,
     fontSize: 11,
   },
+  rateGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    marginLeft: 'auto',
+  },
   headerActions: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginLeft: 'auto',
     gap: 4,
   },
   iconBtn: {

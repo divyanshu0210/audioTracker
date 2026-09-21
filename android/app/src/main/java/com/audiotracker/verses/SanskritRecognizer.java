@@ -81,15 +81,37 @@ public class SanskritRecognizer implements AutoCloseable {
         return out;
     }
 
+    /** What one pass heard, and how sure it was of it. */
+    public static final class Heard {
+        public final String text;
+
+        /**
+         * Mean probability of the characters actually emitted, 0..1.
+         *
+         * Averaged over emitted frames only. Most frames of any window are
+         * blank - the gaps between letters - and the model is extremely sure
+         * about those, so including them pins every window near 1.0 and
+         * measures nothing.
+         */
+        public final float confidence;
+
+        Heard(String text, float confidence) {
+            this.text = text;
+            this.confidence = confidence;
+        }
+    }
+
+    private static final Heard NOTHING = new Heard("", 0f);
+
     /**
      * Read a buffer of 16 kHz mono samples.
      *
      * @param samples normalised to -1..1
      * @param count   how many of them are real; the array may be longer
-     * @return what was heard, in Devanagari, or "" for silence
+     * @return what was heard, in Devanagari, with "" for silence
      */
-    public synchronized String transcribe(float[] samples, int count) throws OrtException {
-        if (count <= 0) return "";
+    public synchronized Heard transcribe(float[] samples, int count) throws OrtException {
+        if (count <= 0) return NOTHING;
 
         long[] audioShape = {1, count};
         float[] trimmed = samples.length == count
@@ -131,15 +153,38 @@ public class SanskritRecognizer implements AutoCloseable {
      * wants is what the model actually heard, including the parts it heard
      * badly; smoothing those towards real words is how a half-heard verse turns
      * into a confident, wrong one.
+     *
+     * The probabilities are kept rather than discarded. A model asked to read
+     * Sanskrit out of English commentary, or out of a kirtan with a mrdanga
+     * over it, still returns its best guess at Devanagari - and that guess is
+     * what the matcher then tries to find a verse in. The difference between
+     * that and a real recitation is not in the text, which looks equally like
+     * Sanskrit either way. It is in how sure the model was.
      */
-    private String decode(OnnxTensor logits) throws OrtException {
+    private Heard decode(OnnxTensor logits) throws OrtException {
         // [batch, frames, classes]
         float[][][] scores = (float[][][]) logits.getValue();
-        if (scores.length == 0) return "";
+        if (scores.length == 0) return NOTHING;
         float[][] frames = scores[0];
+        if (frames.length == 0) return NOTHING;
+
+        // NeMo's exports differ in where they stop: some graphs end in a
+        // log_softmax and some in a bare linear layer. Log probabilities are
+        // never positive, so one look at a frame separates them - and guessing
+        // wrong would not fail loudly, it would just make every confidence
+        // meaningless.
+        boolean logProbs = true;
+        for (float v : frames[0]) {
+            if (v > 0f) {
+                logProbs = false;
+                break;
+            }
+        }
 
         StringBuilder text = new StringBuilder();
         int previous = -1;
+        double total = 0;
+        int emitted = 0;
 
         for (float[] frame : frames) {
             int best = 0;
@@ -153,11 +198,28 @@ public class SanskritRecognizer implements AutoCloseable {
 
             if (best != previous && best != BLANK && best < vocab.length) {
                 text.append(vocab[best]);
+                total += logProbs ? Math.exp(bestScore) : softmaxOfMax(frame, bestScore);
+                emitted++;
             }
             previous = best;
         }
 
-        return text.toString().replace(WORD_START, " ").trim();
+        return new Heard(
+                text.toString().replace(WORD_START, " ").trim(),
+                emitted > 0 ? (float) (total / emitted) : 0f);
+    }
+
+    /**
+     * The winning class's probability, for a frame of raw scores.
+     *
+     * Shifted by the maximum before exponentiating, which is the usual guard
+     * against overflow - and since the maximum is the winner, the whole
+     * expression collapses to one over the sum.
+     */
+    private static double softmaxOfMax(float[] frame, float best) {
+        double sum = 0;
+        for (float v : frame) sum += Math.exp(v - best);
+        return 1.0 / sum;
     }
 
     @Override

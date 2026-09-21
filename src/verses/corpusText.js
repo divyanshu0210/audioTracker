@@ -55,7 +55,13 @@ const loaded = new Map();
 export const shardFor = id => {
   if (!id) return null;
   if (id.startsWith('bg-')) return 'bg';
-  if (id.startsWith('song-')) return 'songs';
+  // Both song sources live in the same shard. `songbook-` has to be named
+  // explicitly: it does not start with `song-`, and when it was added this
+  // returned undefined for every one of its records. They matched perfectly and
+  // then vanished - lookup found no text, the commit was skipped, and nothing
+  // said so. A verse the matcher names and the panel never shows is the worst
+  // failure this code has, because every part of it reports success.
+  if (id.startsWith('song-') || id.startsWith('songbook-')) return 'songs';
   if (id.startsWith('cc-')) return `cc-${id.split('-')[1]}`;
   if (id.startsWith('sb-')) return `sb-${id.slice(3).split('.')[0]}`;
   return null;

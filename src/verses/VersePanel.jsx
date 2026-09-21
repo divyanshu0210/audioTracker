@@ -93,12 +93,13 @@ const VersePanel = ({onSeek}) => {
   // already re-rendering on progress, and should not add to that.
   const {
     enabled, listening, unavailable, current, history,
-    debug, heardCount, lastHeard, lastConfidence, candidates,
+    debug, heardCount, lastHeard, lastConfidence, candidates, why,
   } = useVerseStore(
     useShallow(state => ({
       enabled: state.enabled,
       listening: state.listening,
       lastConfidence: state.lastConfidence,
+      why: state.why,
       unavailable: state.unavailable,
       current: state.current,
       history: state.history,
@@ -193,10 +194,20 @@ const VersePanel = ({onSeek}) => {
       <Text style={styles.debugText} numberOfLines={3}>
         {lastHeard || '(nothing yet)'}
       </Text>
+
+      {/* Why nothing is on screen. The candidates below clear the display
+          gates only, so one can look unanswerable there and still be refused -
+          this is the line that says which gate did it. */}
+      {!!why && (
+        <Text style={styles.debugWhy} numberOfLines={2}>
+          {why}
+        </Text>
+      )}
       {candidates.length > 0 ? (
         candidates.map(c => (
           <Text key={c.ref} style={styles.debugText}>
-            {c.runChars}ch {Math.round((c.solidRatio || 0) * 100)}% {c.ref}
+            {c.runChars}ch {Math.round((c.solidRatio || 0) * 100)}% s
+            {Math.round(c.score || 0)} {c.ref}
           </Text>
         ))
       ) : (
@@ -819,6 +830,12 @@ const styles = StyleSheet.create({
     color: C.accent,
     fontSize: 10,
     marginBottom: 2,
+  },
+  debugWhy: {
+    color: C.accent,
+    fontSize: 9,
+    lineHeight: 13,
+    fontFamily: 'monospace',
   },
   debugText: {
     color: C.muted,

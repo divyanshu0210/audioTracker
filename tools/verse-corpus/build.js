@@ -36,7 +36,38 @@ require('@babel/register')({
   presets: [['@babel/preset-env', {targets: {node: 'current'}}]],
   only: [path.join(__dirname, '..', '..', 'src', 'verses')],
 });
-const {phoneticStream, grams, hashGram, GRAM_SIZE} = require('../../src/verses/phonetics');
+const {phoneticStream, grams, hashGram, neutralise, GRAM_SIZE} = require('../../src/verses/phonetics');
+
+// How much of a record has to change before a flattened copy is worth indexing.
+//
+// Zero, now that the flattened copies live in their own half of the index and
+// are only ever searched by a flattened query. While they shared the index with
+// the originals a near-duplicate was harmful - shorter after its doubles
+// collapse, so higher coverage for the same run, letting a wrong record's copy
+// outscore a right record's original - and this was raised to 0.08 to suppress
+// them. That cost more than it saved: it left two thirds of the
+// Caitanya-caritamrta with no flattened form at all, so a sung query had
+// nothing to find.
+const MIN_SHIFT = 0;
+
+/** Whether a record is sung or recited in Bengali rather than Sanskrit. */
+const isBengali = record =>
+  record.book === 'cc' || /bengali/i.test(record.language || '');
+
+/**
+ * A flattened copy of a record, when there is enough shift to be worth one.
+ *
+ * Returns nothing for a line that Bengali pronounces much as it is written,
+ * which is a great many of the short ones. See MIN_SHIFT.
+ */
+const alternate = (record, stream) => {
+  const shifted = (stream.match(/[ovy]/g) || []).length;
+  if (!stream.length || shifted / stream.length < MIN_SHIFT) return [];
+
+  const flat = neutralise(stream);
+  return flat && flat !== stream ? [{record, stream: flat}] : [];
+};
+
 
 const OUT_DIR = path.join(__dirname, '..', '..', 'src', 'verses', 'corpus');
 const TEXT_DIR = path.join(OUT_DIR, 'text');
@@ -51,6 +82,11 @@ const SOURCES = {
   // archive above therefore does not carry. Marked with its translators.
   sbCompletion: require('./sources/sbCompletion'),
   songs: require('./sources/songs'),
+  // The curated set, and the one that decides whether a bhajan is found at
+  // all - see sources/songbook.js. Listed after kksongs so that where the two
+  // carry the same song, the indexer's duplicate collapse keeps one of them
+  // and records the other as an alias rather than indexing both.
+  songbook: require('./sources/songbook'),
 };
 
 // A gram in more than this many verses is not evidence of anything. Sanskrit
@@ -138,6 +174,74 @@ async function main() {
     records.push(...loaded);
   }
 
+  // The same song from two sources is one song.
+  //
+  // kksongs and the song book overlap heavily, and their transliterations
+  // differ just enough that the indexer's exact-text fold does not catch them -
+  // `sri` against `sri`, a hyphen moved, an extra stanza. Left in, the two sit
+  // in the index scoring almost identically, and the ambiguity gate then
+  // refuses to name either. Measured: whole-song accuracy fell from 98.8% to
+  // 88.8%, entirely into no-match, by *adding* songs.
+  //
+  // The book wins where both have a song. It is the curated text, it is what
+  // the temple actually sings, and its stanza numbering is the one a congregation
+  // follows.
+  // Keyed on how the song *sounds*, not on what it is called.
+  //
+  // Titles were tried first and caught only 68 of them: the two sources spell
+  // the same song differently - "(Ami) Jamuna Puline" against "Ami Jamuna
+  // Puline", a hyphen moved, a diacritic dropped - and an exact title match
+  // misses every one of those. The phonetic stream already discards precisely
+  // those differences, which makes its opening a far better identity than the
+  // name: two records that begin with the same forty characters of sound are
+  // the same song, whatever either source chose to call it.
+  const songKey = record => phoneticStream(record.lines.join(' ')).slice(0, 40);
+
+  // Matched on sound *or* on name. The stream catches the same song spelled
+  // differently; the title catches the same song recorded at different lengths,
+  // where the openings diverge before forty characters and the streams never
+  // meet - which is how three records for Jaya Radha Madhava survived.
+  const titleKey = ref =>
+    (ref || '')
+      .normalize('NFD')
+      .replace(/[̀-ͯ]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, '');
+
+  const bookStreams = new Set(
+    records
+      .filter(r => r.id.startsWith('songbook-'))
+      .map(songKey)
+      .filter(k => k.length >= 40),
+  );
+  const bookTitles = new Set(
+    records
+      .filter(r => r.id.startsWith('songbook-') && (r.translation || '').length > 40)
+      .map(r => titleKey(r.ref))
+      .filter(Boolean),
+  );
+
+  // Only a book record that *has* a translation may supersede one, so the
+  // curated lyrics never arrive at the cost of losing the meaning.
+  const fromBook = {
+    has: record => bookStreams.has(songKey(record)) || bookTitles.has(titleKey(record.ref)),
+  };
+  const beforeDedupe = records.length;
+  const deduped = records.filter(
+    r =>
+      r.kind !== 'song' ||
+      r.id.startsWith('songbook-') ||
+      !fromBook.has(r),
+  );
+  if (deduped.length !== beforeDedupe) {
+    console.log(
+      `
+  ${beforeDedupe - deduped.length} song(s) superseded by the song book's text`,
+    );
+  }
+  records.length = 0;
+  records.push(...deduped);
+
   if (!records.length) {
     console.error('nothing loaded; refusing to overwrite the corpus with an empty one');
     process.exit(1);
@@ -208,8 +312,47 @@ async function main() {
   const docs = [];
   const byGram = new Map(); // hash -> doc ordinals
 
-  indexed.forEach((record, ordinal) => {
-    const stream = streamOf.get(record);
+  // Most records are indexed once. The Bengali ones are indexed twice: as
+  // written, and as sung.
+  //
+  // More than half the songs here are Bengali - 512 of 900 - and so is the
+  // whole Caitanya-caritamrta. They are written in Sanskrit transliteration and
+  // sung in Bengali, which are different sounds: `vande` is sung `bonde`,
+  // `govinda` is `gobindo`, `jaya` is `joy`. Measured on the corpus's own
+  // lyrics, applying that shift dropped matching from 97.6% to 24.0% - nearly
+  // every Bengali song became unfindable the moment somebody sang it.
+  //
+  // Collapsing the difference in phonetics.js fixes the songs and costs the
+  // verses: merging a with o and v with b shrank the alphabet by a third and
+  // took Bhagavad-gita accuracy from 99.2% to 93.6%. The problem is specific to
+  // one language, so the fix is too. A second entry costs one document and its
+  // grams, and leaves every Sanskrit record exactly as it was.
+  // Primaries first, then every alternate. The order is load-bearing: it lets
+  // the matcher tell one kind from the other by ordinal alone, so a Sanskrit
+  // query can ignore the flattened half of the index without a lookup per
+  // posting.
+  //
+  // They have to be ignorable. Left visible to every query, four thousand extra
+  // documents in a coarser alphabet are four thousand extra chances for
+  // Devanagari soup to find something - measured, they put verses back on
+  // screen for pure nonsense, which is the failure this matcher was rebuilt to
+  // stop.
+  const primaries = indexed.map(record => ({record, stream: streamOf.get(record)}));
+  const alternates = [];
+  for (const record of indexed) {
+    if (isBengali(record)) {
+      alternates.push(...alternate(record, streamOf.get(record)));
+    }
+  }
+  const forms = [...primaries, ...alternates];
+
+  if (alternates.length) {
+    console.log(
+      `  ${alternates.length} record(s) also indexed flattened, for Bengali`,
+    );
+  }
+
+  forms.forEach(({record, stream}, ordinal) => {
     docs.push({
       id: record.id,
       ref: record.ref,
@@ -238,10 +381,22 @@ async function main() {
 
   // Sorted by hash so the device can binary-search a flat array instead of
   // building a Map of half a million entries at startup.
+  // "Too common" is judged on the records as written, not on the flattened
+  // copies as well.
+  //
+  // The two halves of the index are two readings of the same corpus, so a gram
+  // appearing in both is one fact about one record counted twice. Counting them
+  // together inflated every frequency, pushed 2,700 more grams over the
+  // threshold into the neutral bucket, and quietly weakened discrimination for
+  // every query in the corpus - including Sanskrit ones that never touch the
+  // flattened half. That is what put verses back on screen for nonsense and
+  // took a point off the Bhagavad-gita: not the alternates being matched, but
+  // the alternates being counted.
   const kept = [];
   const common = [];
   for (const entry of byGram.entries()) {
-    (entry[1].length <= maxDf ? kept : common).push(entry);
+    const df = entry[1].reduce((n, ordinal) => n + (ordinal < primaries.length ? 1 : 0), 0);
+    (df <= maxDf ? kept : common).push(entry);
   }
   kept.sort((a, b) => a[0] - b[0]);
   common.sort((a, b) => a[0] - b[0]);
@@ -259,6 +414,9 @@ async function main() {
   const index = {
     version: 1,
     gramSize: GRAM_SIZE,
+    // Ordinals below this are records as written; at or above it they are the
+    // flattened copies. See the note where `forms` is built.
+    primaryCount: primaries.length,
     builtAt: new Date().toISOString(),
     maxDf,
     docs,

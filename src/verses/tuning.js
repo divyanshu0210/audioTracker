@@ -41,7 +41,7 @@ const SETTINGS = {
 
   // useVerseStore.js
   minConfidence: {value: 0.35, min: 0, max: 0.9},
-  strongRunChars: {value: 55, min: 30, max: 120},
+  strongRunChars: {value: 55, min: 20, max: 120},
   strongSolidRatio: {value: 0.35, min: 0.1, max: 0.8},
   corroboration: {value: 2, min: 1, max: 4},
   voteSpacingMs: {value: 3000, min: 500, max: 20000},

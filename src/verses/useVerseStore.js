@@ -19,7 +19,7 @@
 
 import {create} from 'zustand';
 
-import {identify, nearMisses} from './matcher';
+import {identifyDetailed, nearMisses} from './matcher';
 import {enqueue, flush, isStronger} from './feedback';
 import {tuning} from './tuning';
 import {lastCitation} from './citations';
@@ -151,6 +151,16 @@ const useVerseStore = create((set, get) => ({
   lastConfidence: 0,
   candidates: [],
 
+  // Why the last window did not put anything on screen.
+  //
+  // The single most asked question about this feature, and until now
+  // unanswerable from the outside: the debug list shows candidates that clear
+  // the *display* gates, so a match can look unanswerable there and still be
+  // refused - for a near-tie, for wanting a second window to agree, or for
+  // arriving inside the cooldown after something else. All of those look
+  // identical from an empty panel.
+  why: '',
+
   setEnabled: enabled => {
     if (!enabled) get().reset();
     set({enabled, unavailable: null});
@@ -192,6 +202,7 @@ const useVerseStore = create((set, get) => ({
     if (confidence < minConfidence) {
       if (get().debug) {
         set({
+          why: `unsure ${confidence.toFixed(2)} < ${minConfidence}`,
           lastHeard: `(unsure ${confidence.toFixed(2)}) ${text}`.slice(0, 180),
         });
       }
@@ -206,12 +217,22 @@ const useVerseStore = create((set, get) => ({
 
     const heard = window_.map(entry => entry.text).join(' ');
 
-    // The expensive part - a second pass over the index for the near-misses -
-    // stays behind the flag.
+    // Decided once, here, and every debug field below is filled from this same
+    // call.
+    //
+    // They used to be computed at different points - the candidate list where
+    // the window was built, the reason wherever the logic happened to give up -
+    // so the panel could show a reason from one window beside candidates from
+    // another. That is worse than showing nothing: it reads as a contradiction
+    // and sends whoever is looking at it after the wrong thing. It sent me
+    // after the wrong thing.
+    const decision = identifyDetailed(heard);
+
     if (get().debug) {
       set({
         lastHeard: heard.length > 180 ? `…${heard.slice(-180)}` : heard,
         candidates: nearMisses(heard),
+        why: decision.why,
       });
     }
 
@@ -229,13 +250,19 @@ const useVerseStore = create((set, get) => ({
       }
     }
 
-    const hit = identify(heard);
+    const {hit} = decision;
     if (!hit) return;
-    if (hit.id === get().current?.id) return;
+    if (hit.id === get().current?.id) {
+      if (get().debug) set({why: 'already showing'});
+      return;
+    }
 
     // Something already on screen is not replaced on the strength of evidence
     // that could be an echo of what is still sitting in the window.
-    if (get().current && at - get()._lastCommitAt < REPLACE_COOLDOWN_MS) return;
+    if (get().current && at - get()._lastCommitAt < REPLACE_COOLDOWN_MS) {
+      if (get().debug) set({why: 'cooldown'});
+      return;
+    }
 
     const votes = new Map(get()._votes);
     const prior = votes.get(hit.id);
@@ -254,15 +281,35 @@ const useVerseStore = create((set, get) => ({
     // Two ways to be believed: one window that was unmistakable, or two
     // windows that agreed.
     //
-    // The strong path also asks for solidity, which it did not before. Run
-    // length alone says a long stretch lined up; it does not say the stretch
-    // was *this* record rather than syllables every verse shares. A single
-    // window committing on length alone is the remaining source of false
-    // matches, because nothing else has to agree with it - measured on real
-    // recitation, solidity sits between 0.39 and 0.63, so this rejects very
-    // little of what is genuine.
+    // Unmistakable asks for length *and* solidity, each on its own.
+    //
+    // A single measure combining them was tried - run length times solid ratio,
+    // so that a long run at modest solidity could pay for itself - and on the
+    // corpus of the day it looked better. It is not, on this one: measured over
+    // 392 matched windows from 48 recordings, the pair fast-commits about 15
+    // correct windows for every wrong one, and the combined measure about 9.
+    //
+    // That difference matters more than the ratio suggests, because this is the
+    // only path a one-off wrong window can reach the screen by. Corroboration
+    // would refuse it - it needs two windows to agree - so every error admitted
+    // here is one the system would otherwise have caught.
+    //
+    // The lesson is in how the first answer went stale rather than in either
+    // number: it was measured, then the song book added 183 records and
+    // superseded 119, and nobody measured again. A threshold is only as current
+    // as the corpus it was fitted to.
     const unmistakable =
       hit.runChars >= strongRunChars && hit.solidRatio >= strongSolidRatio;
+
+    if (get().debug && !unmistakable && count < corroboration) {
+      set({
+        why:
+          `${hit.ref}: ${hit.runChars}ch x ${Math.round(100 * hit.solidRatio)}% = ` +
+          `${Math.round(hit.runChars * hit.solidRatio)} solid ` +
+          `(need ${strongRunChars}ch & ${strongSolidRatio}), ` +
+          `votes ${count}/${corroboration}`,
+      });
+    }
 
     if (unmistakable || count >= corroboration) {
       const record = lookup(hit.id);
@@ -441,6 +488,7 @@ const useVerseStore = create((set, get) => ({
       heardCount: 0,
       lastHeard: '',
       lastConfidence: 0,
+      why: '',
       candidates: [],
     });
   },

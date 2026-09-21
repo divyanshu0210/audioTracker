@@ -135,23 +135,48 @@ class Recognizer:
         )
         logits = self.ctc.run(None, {"audio_signal": feats, "length": lengths})[0]
 
+        # Whether the graph ends in a log_softmax or a bare linear, decided the
+        # same way SanskritRecognizer.java decides it: log probabilities are
+        # never positive.
+        log_probs = bool((logits <= 0).all())
+
         # Greedy, not a beam search, and for the same reason the app is: a beam
         # prefers sequences that look like real Sanskrit, which is exactly the
         # wrong bias. What the matcher wants is what the model actually heard,
         # including the parts it heard badly.
         out, previous = [], -1
-        for token in np.argmax(logits[0], axis=-1):
+        total, emitted = 0.0, 0
+        frames = logits[0]
+        for i, token in enumerate(np.argmax(frames, axis=-1)):
             token = int(token)
             if token != previous and token != BLANK:
                 out.append(self.vocab[token])
+                row = frames[i]
+                peak = float(row.max())
+                # Mean probability of the characters actually emitted, exactly
+                # as the app computes it - blanks excluded, or every window
+                # would sit near 1.0 and the number would mean nothing.
+                total += np.exp(peak) if log_probs else 1.0 / np.exp(row - peak).sum()
+                emitted += 1
             previous = token
-        return "".join(out).replace(WORD_START, " ").strip()
+        text = "".join(out).replace(WORD_START, " ").strip()
+        return text, (total / emitted if emitted else 0.0)
 
 
-def windows(audio):
-    """The app's windowing: ten seconds at a time, five seconds apart."""
+def windows(audio, hop_seconds=None, max_seconds=None):
+    """The app's windowing: ten seconds at a time, four seconds apart.
+
+    Both can be overridden, and for building a confusion table both should be.
+    The overlap exists to mirror how quickly the panel reacts, which costs two
+    and a half times the compute for audio that has already been read; and a
+    bhajan's first few minutes give as many aligned windows as anyone needs. For
+    measuring what the model mishears, neither buys anything.
+    """
+    if max_seconds:
+        audio = audio[: int(max_seconds * SAMPLE_RATE)]
+
     window = int(WINDOW_SECONDS * SAMPLE_RATE)
-    hop = int(HOP_SECONDS * SAMPLE_RATE)
+    hop = int((hop_seconds or HOP_SECONDS) * SAMPLE_RATE)
     minimum = int(MIN_SECONDS * SAMPLE_RATE)
 
     at = 0
@@ -167,6 +192,14 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("audio", nargs="+", help="lecture files, any format")
     ap.add_argument("--out-dir", default="out")
+    ap.add_argument(
+        "--hop", type=float, default=None,
+        help="seconds between windows; pass 10 for no overlap",
+    )
+    ap.add_argument(
+        "--minutes", type=float, default=None,
+        help="stop after this much of each recording",
+    )
     args = ap.parse_args()
 
     here = os.path.dirname(os.path.abspath(__file__))
@@ -182,10 +215,19 @@ def main():
         stem = os.path.splitext(os.path.basename(path))[0]
         out = os.path.join(out_dir, f"{stem}.jsonl")
 
+        # Already done. Makes a run resumable, which matters when the work is
+        # hours long and split across several processes - each one can be given
+        # the whole list and will simply skip what another has finished.
+        if os.path.exists(out) and os.path.getsize(out) > 0:
+            print('  (done already)', flush=True)
+            continue
+
         with open(out, "w", encoding="utf-8") as fh:
             previous = ""
-            for start, end, chunk in windows(audio):
-                text = recognise(chunk)
+            for start, end, chunk in windows(
+                audio, args.hop, args.minutes and args.minutes * 60
+            ):
+                text, confidence = recognise(chunk)
                 # Skipped for the same reason the app skips it: overlapping
                 # windows return the same passage twice, and forwarding both
                 # would have the store counting one reading as two.
@@ -195,7 +237,15 @@ def main():
 
                 fh.write(
                     json.dumps(
-                        {"start": round(start, 2), "end": round(end, 2), "text": text},
+                        {
+                            "start": round(start, 2),
+                            "end": round(end, 2),
+                            "text": text,
+                            # What the app gates on before the matcher ever
+                            # sees the window. Recorded because it was set
+                            # without a single measurement.
+                            "confidence": round(float(confidence), 3),
+                        },
                         ensure_ascii=False,
                     )
                     + "\n"

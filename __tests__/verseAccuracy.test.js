@@ -107,8 +107,20 @@ it('still finds a record from a few seconds of damaged audio', () => {
   // verse. Every window lost here is lost to no-match, never to a wrong answer
   // - the `wrong` assertions below are what actually matter, and they held at
   // zero throughout. See MISS_PENALTY in matcher.js for the measured curve.
+  // 95% before the gap penalty, 93.6% after, 92.8% once the Vaishnava song
+  // book was added. Each step was paid for knowingly and this is the third:
+  // a hundred and fifty-nine more records is more competition for a short
+  // window, and a short window is where competition decides things.
+  //
+  // What it bought is not visible in this file at all. Half of what devotees
+  // actually sing was missing from the corpus, and a missing song does not fail
+  // quietly - four bhajans put through the real pipeline produced ten confident
+  // matches between them, of which one was right. Three of those four are now
+  // found. Trading a fifth of a point here for that is not a close call.
+  //
+  // The assertion that matters is the one below: no wrong answers.
   const clean = evaluateWindow('BG  ', bg, 250, 12, 0, 0);
-  expect(clean.right / clean.n).toBeGreaterThan(0.93);
+  expect(clean.right / clean.n).toBeGreaterThan(0.92);
   expect(clean.wrong).toBe(0);
 
   // Damaged, it is not. A single window is weak evidence and recall drops a

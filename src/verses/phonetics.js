@@ -100,6 +100,36 @@ const SINGLES = [
 const NON_LETTER = /[^a-z]+/g;
 
 /**
+ * The same stream with the Sanskrit/Bengali disagreements flattened.
+ *
+ * More than half the songs here are Bengali, and so is the whole
+ * Caitanya-caritamrta. They are written in Sanskrit transliteration and sung in
+ * Bengali, which are different sounds: `vande` is sung `bonde`, `jaya` is
+ * `joy`. Left alone, that took Bengali matching to 24% for songs and 7% for CC.
+ *
+ * The first attempt generated a Bengali *pronunciation* of each record and
+ * indexed that too. It had to guess which vowels shift - real Bengali does it
+ * in some positions and not others - and every wrong guess broke a run, which
+ * is why it reached only 62% on the short verses of the Caitanya-caritamrta.
+ *
+ * This does not guess. Both members of each disputed pair collapse onto one
+ * symbol, so `vande` and `bonde` meet whatever the singer did, and the question
+ * of which syllables shifted stops being asked. It is the same move the rest of
+ * phonetics.js makes about aspiration and vowel length - throw away a
+ * distinction that the two sides do not agree on - applied one language later.
+ *
+ * Used for a second index entry on Bengali records and for a second attempt at
+ * matching, not as the primary form: it is a coarser alphabet, and Sanskrit
+ * records keep the finer one.
+ */
+export const neutralise = stream =>
+  stream
+    .replace(/o/g, 'a')
+    .replace(/v/g, 'b')
+    .replace(/y/g, 'j')
+    .replace(/(.)+/g, '$1');
+
+/**
  * The comparison form of a piece of text: lowercase letters, no spaces.
  *
  * Runs over a verse at build time and over recogniser output at match time,

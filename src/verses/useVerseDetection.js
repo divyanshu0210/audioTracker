@@ -20,7 +20,7 @@ import useSettingsStore from '../Settings/settingsStore';
 import {flush, flushWhenOnline} from './feedback';
 import {loadTuning, refreshTuning} from './tuning';
 import useVerseStore, {setVersePosition} from './useVerseStore';
-import {verseFromTitle} from './verseTitle';
+import {songFromTitle, verseFromTitle} from './verseTitle';
 import {
   capabilities,
   enableListening,
@@ -109,6 +109,11 @@ const useVerseDetection = ({sourceId, title, path, isPaused, isPlaybackReady}) =
     // Anything actually heard replaces it.
     const named = verseFromTitle(title, path);
     if (named) useVerseStore.getState().seedFromTitle(named, named.id);
+
+    // A recording named after a song is that song, whatever is happening in the
+    // first minute of it. Noted rather than shown - see expectSong.
+    const song = songFromTitle(title, path);
+    useVerseStore.getState().expectSong(song, song?.id);
   }, [sourceId, title, path]);
 
   // The preference is the person's answer; the store's `enabled` is what the

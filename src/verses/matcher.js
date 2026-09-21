@@ -56,17 +56,40 @@ const FLAT_SOLID = 1.15;
 const BENGALI_HINT = 0.16;
 
 // How much of the stream has to line up before this is willing to name a
-// verse. Twenty-six characters is roughly six or seven syllables - about a
-// half-line - which is the point where a run stops being something two
-// unrelated verses could share by accident.
+// verse. Twenty-two characters is five or six syllables - about half a line -
+// which is where a run stops being something two unrelated verses could share
+// by accident.
 //
-// Raising it makes the panel slower to appear and more often right; lowering
-// it makes it eager and wrong. It is the one number worth tuning on real
-// recordings.
+// It was twenty-six, reasoned rather than measured, and it was costing on both
+// sides at once. Over 48 real recordings, and over 300 windows of random
+// Devanagari soup that is no verse at all:
+//
+//   floor   found   named the wrong song   named something in soup
+//     26    62.5%          4.2%                  0 of 300
+//     24    66.7%          2.1%                  0
+//     22    68.8%          2.1%                  0
+//     20    70.8%          6.3%                  2
+//     16    79.2%         10.4%                 13
+//
+// Twenty-two finds six more recordings than twenty-six *and* halves the wrong
+// answers, which is not a trade at all - the old value was simply too high.
+// Runs between twenty-two and twenty-six turn out to be mostly real, and
+// refusing them did not buy precision, it just meant a song went unnamed and
+// some later window named a worse one.
+//
+// Twenty is where it becomes a trade and stops being worth it: soup starts
+// matching, and wrong answers triple.
+//
+// Checked against speech as well as song, because a floor this low is only
+// safe if a lecture does not trip it. Over a ten-minute English lecture put
+// through the Sanskrit model - 145 windows of English rendered phonetically in
+// Devanagari, which is the worst adversary this has - nothing was named at any
+// floor from 26 down to 16.
+//
 // The shipped value. Read through tuning() at the point of use so a server can
 // correct it - see tuning.js. Exported because tests and the corpus builder
 // want the number the app ships with, not whatever a device has been told.
-export const MIN_RUN_CHARS = 26;
+export const MIN_RUN_CHARS = 22;
 
 // What a position that is not in this record costs a run in progress.
 //

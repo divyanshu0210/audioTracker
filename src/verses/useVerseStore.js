@@ -24,6 +24,7 @@ import {enqueue, flush, isStronger} from './feedback';
 import {tuning} from './tuning';
 import {lastCitation} from './citations';
 import {lookup} from './corpusText';
+import {explains, follow, isFollowable} from './follow';
 
 // How much recent speech is matched against at once.
 //
@@ -70,6 +71,154 @@ const WINDOW_MS = 25000;
 // recent than this - otherwise a verse the lecture has moved past could be
 // re-shown because an old fragment is still sitting in the window.
 const REPLACE_COOLDOWN_MS = 4000;
+
+// How many windows in a row may fail to find the song on screen before it is
+// let go.
+//
+// While a song is being followed the corpus is not consulted at all, so this is
+// also how long a genuinely new song waits before it can be named. That is the
+// deliberate half of the trade: the complaint this answers is that a correct
+// song already on screen kept being replaced by the matcher's next guess, and
+// being slow to hand over is the price of not doing that.
+//
+// Three, from simulating this loop over 2839 windows of real recogniser
+// output. Letting go is much more often a mistake than holding on is:
+//
+//   after   drops a song still playing   windows holding one that stopped
+//     3            2.1 per recording                 20.0%
+//     4            1.3 per recording                 27.5%
+//
+// The right-hand column is the smaller cost and largely not this constant's
+// doing - the window is still full of the previous song for twenty-five
+// seconds after it ends, which is most of what that figure measures. It is
+// also paid only when a wrong song is on screen at all, which the bench puts
+// at one recording in twenty-four.
+//
+// Windows the model was unsure of never reach here; the confidence gate above
+// drops those. So these are windows where something was clearly heard and it
+// was not this song.
+const GIVE_UP_WINDOWS = 3;
+
+// How much better a challenger has to explain the window than the song already
+// on screen before the panel changes.
+//
+// Above one because the two are not symmetrical: what is showing is there on
+// evidence that was good enough once, and swapping back and forth between two
+// records that both half-fit is worse for the person than staying on either.
+//
+// Measured over 48 recordings, by what the panel does after it has found the
+// song, and by whether it can still leave the pranama mantras for the song
+// sung after them:
+//
+//   1.0    85.8% marked   6.0% showing the wrong song   handover 32/32
+//   1.15   87.7%          2.7%                          32/32
+//   1.8    88.6%          1.8%                          32/32
+//   4.0    88.6%          1.8%                          32/32
+//   8.0    88.5%          1.8%                          handover 22/32
+//
+// Everything from 1.8 to 4.0 is the same answer, which says the comparison is
+// usually not close: a song being sung scores far above one that merely shares
+// its vocabulary. 1.8 is the least restrictive value that reaches that plateau,
+// and it is a long way from the cliff at the other end where a song that has
+// genuinely ended can no longer be let go of.
+const SWITCH_MARGIN = 1.8;
+
+// How much of the window counts as "now" when choosing between two records.
+//
+// Long enough to hold a line or two of singing, so the comparison has something
+// to weigh; short enough that a song which stopped ten seconds ago stops
+// winning. See where it is used.
+const RECENT_MS = 10000;
+
+// What the recording's own name is worth, once the matcher proposes the song it
+// names.
+//
+// A file called "Jaya Radha Madhava" is that song. What comes first is a
+// pranama, or somebody introducing it, or two minutes of tuning - so the title
+// is no reason to put anything on screen, and this never does. It is a reason
+// to be ready: when the matcher eventually proposes that record on its own
+// evidence, two independent things now agree, and it should not have to argue
+// as hard as a record nothing else expected.
+//
+// Deliberately unable to invent a match. Every gate the matcher applies still
+// applies; these only change which of two candidates it has already produced
+// wins, and how many windows it takes. A wrong title can therefore cost time
+// and the occasional wrong switch, but it can never name a record the sound
+// does not support.
+const EXPECTED_EASE = 2;
+const EXPECTED_HOLD = 2;
+
+// How clearly the song a recording is named after has to account for the last
+// few seconds before the panel accepts that it has started.
+//
+// This exists because of what the window costs at a handover. The matcher is
+// asked about the last twenty-five seconds, so for twenty-five seconds after
+// the pranamas end they remain the best answer to that question - correctly,
+// and in general there is nothing to be done about it. Measured, that was the
+// whole of the delay: the panel took a median of eight windows, thirty-two
+// seconds, to leave the pranamas for the bhajan that had already started.
+//
+// It is not the general case here. The recording's name already said which song
+// this is; the only open question was when it starts, and ten seconds of it
+// being plainly sung answers that without waiting for the window to forget what
+// came before.
+//
+// Measured over 48 recordings, against a deliberately *wrong* expectation as
+// well as the right one, because a shortcut that only ever helps when it is
+// right is not worth having:
+//
+//            correct title                       wrong title
+//          found  marked  wrong  handover      wrong-song
+//   0.20   45/48  85.1%   0.7%   median 1        4.2%
+//   0.30   44/48  86.5%   0.9%   median 1        2.2%
+//   0.40   41/48  87.1%   1.4%   median 2        2.2%
+//
+// 0.30, because it is where a wrong title stops costing anything: 2.2% is what
+// the panel does with no expectation at all, to the decimal. At 0.20 a wrong
+// title doubles the time spent on the wrong song, and that is a real price
+// paid by anyone whose file is named after a song it does not contain.
+//
+// Not a low bar despite the appearance. Genuine singing scores a median of
+// about 0.185 against its own record over a full window, so 0.30 over ten
+// seconds is the song being sung clearly and continuously, not a passing
+// resemblance.
+//
+// Nothing else may be committed this way. `explains` on its own is a
+// similarity score and would put a record on screen that merely sounds like
+// what is being sung; what makes it evidence here is the file's own name
+// independently saying the same thing.
+const EXPECTED_ARRIVES = 0.3;
+
+// No special case for what a programme opens with.
+//
+// Tried, because classes almost always begin with the pranama mantras and very
+// often with Jaya Radha Madhava, and knowing that in advance is the same kind of
+// prior the recording's own name gives. It does not work, and the two reasons
+// are worth keeping so nobody spends the afternoon on it again.
+//
+// The pranamas need no help. Put through a real lecture they were named in
+// every window of the recitation, on runs of 125 characters against a floor of
+// 22. Adding them only cost: they are fifty-nine lines of the most generic
+// devotional Sanskrit there is, so a bar low enough to help anything else is one
+// they clear against almost any audio, and they began appearing at the top of
+// recordings that never contained them.
+//
+// Jaya Radha Madhava cannot be helped this way. A prior can only favour a record
+// the matcher has already proposed, and for this song it proposes nothing: the
+// model emits a median of five to fourteen characters a window against the
+// twenty-two a run needs, because it is sung slowly over a drone and each window
+// catches a fragment. Lowering the bar to catch it finds it in one recording of
+// eight at every value tried, while the share of windows sitting on the wrong
+// song rises from 1.0% to 3.6%.
+//
+//   bar    Jaya Radha Madhava found    windows on the wrong song
+//   0.30            1/8                        1.0%
+//   0.20            1/8                        1.3%
+//   0.12            1/8                        2.5%
+//   0.08            1/8                        3.6%
+//
+// It is a recognition problem, not a threshold one, and the place to fix it is
+// the model or the recording, not here.
 
 // How sure the recogniser has to have been of a window for it to count.
 //
@@ -124,6 +273,19 @@ const useVerseStore = create((set, get) => ({
   //           'title' - named in the recording's own title
   current: null,
 
+  // The song the recording's name says this is, if it names one.
+  //
+  // Not shown, and not evidence on its own - see EXPECTED_EASE. It is a prior:
+  // something to be ready for while the pranamas and the introductions happen,
+  // and something to hold onto once it arrives.
+  expected: null,
+
+  // Which line of `current` is being sung, or null if the place is not known.
+  //
+  // Only ever set for songs. A verse is four lines and already entirely on
+  // screen, so there is no place to point at - see follow.js.
+  followLine: null,
+
   // Everything recognised this session, oldest first. The panel offers this as
   // a list, and each entry carries the position it was heard at - which makes
   // it a table of contents for a lecture nobody indexed.
@@ -134,6 +296,8 @@ const useVerseStore = create((set, get) => ({
   // id -> {count, at}: how many *separate* windows have named it since the last
   // commit, and when the last one that counted arrived.
   _votes: new Map(),
+  // Consecutive windows that could not be placed inside the song on screen.
+  _lostWindows: 0,
 
   // key -> the row that will be sent about this match, once it is settled. See
   // feedback.js. Held rather than sent immediately because the verdict is not
@@ -217,23 +381,24 @@ const useVerseStore = create((set, get) => ({
 
     const heard = window_.map(entry => entry.text).join(' ');
 
-    // Decided once, here, and every debug field below is filled from this same
-    // call.
+    // The last few seconds on their own.
     //
-    // They used to be computed at different points - the candidate list where
-    // the window was built, the reason wherever the logic happened to give up -
-    // so the panel could show a reason from one window beside candidates from
-    // another. That is worse than showing nothing: it reads as a contradiction
-    // and sends whoever is looking at it after the wrong thing. It sent me
-    // after the wrong thing.
-    const decision = identifyDetailed(heard);
+    // Not used for choosing between two records: tried, and scoring that
+    // comparison on ten seconds instead of the window quadrupled the rate at
+    // which the panel sat on the wrong song, from 2.2% of windows to 8.8%, and
+    // did not speed the handover up by a single window. Ten seconds is thin
+    // evidence and the comparison flipped on noise.
+    //
+    // It is used for one thing only, below: noticing that the song this
+    // recording is named after has started, while the window is still full of
+    // whatever came before it.
+    const recent = window_
+      .filter(entry => at - entry.at <= RECENT_MS)
+      .map(entry => entry.text)
+      .join(' ');
 
     if (get().debug) {
-      set({
-        lastHeard: heard.length > 180 ? `…${heard.slice(-180)}` : heard,
-        candidates: nearMisses(heard),
-        why: decision.why,
-      });
+      set({lastHeard: heard.length > 180 ? `…${heard.slice(-180)}` : heard});
     }
 
     // The citation path first. A lecturer naming a verse is the strongest
@@ -248,6 +413,121 @@ const useVerseStore = create((set, get) => ({
         get().commitRecord(record, cited.id, 'cited', {confidence});
         return;
       }
+    }
+
+    // Following, in place of identifying again.
+    //
+    // Up to here every window has asked the same question - which of twenty-six
+    // thousand records is this - and gone on asking it long after the answer
+    // was settled and on screen. That is not only wasted work. It is the one
+    // way a correct song gets replaced by a wrong one: the matcher is still
+    // guessing, and eventually a guess clears the gates.
+    //
+    // Once a song is up the useful question is where in it the singing has
+    // reached. See follow.js: it is a smaller question, it cannot name anything
+    // else, and for a bhajan that runs for minutes the line being sung is most
+    // of what the panel is for.
+    //
+    // A title seed is excluded. It says what the recording is *about* rather
+    // than what is being sung, and letting it capture the follower would give
+    // the weakest source in the system the power to hold the panel shut.
+    const expectedId = get().expected?.id;
+
+    // The song this recording is named after, starting.
+    //
+    // Judged on the last few seconds rather than the window, because the point
+    // is to notice it before the window has finished with the previous song.
+    // Nothing else may be committed this way: `explains` alone is a similarity
+    // score, and on its own it would put a record on screen that merely sounds
+    // like what is being sung. What makes it evidence here is that the file's
+    // own name independently said the same thing.
+    if (
+      expectedId &&
+      expectedId !== get().current?.id &&
+      at - get()._lastCommitAt >= REPLACE_COOLDOWN_MS
+    ) {
+      const record = lookup(expectedId);
+      const fit = record ? explains(record, recent) : 0;
+      if (fit >= EXPECTED_ARRIVES) {
+        get().commitRecord(record, expectedId, 'heard', {
+          confidence,
+          fit: Math.round(100 * fit) / 100,
+          fromTitle: true,
+        });
+        if (get().debug) {
+          set({why: `${record.ref} has started (${fit.toFixed(2)}, named in the title)`});
+        }
+        return;
+      }
+    }
+
+    const showing = get().current;
+    const following =
+      !!showing && showing.source !== 'title' && isFollowable(showing);
+
+    let heldFit = 0;
+    if (following) {
+      const where = follow(showing, heard);
+
+      if (where) {
+        // `line` is null when the song is still playing but the last few
+        // seconds could not be placed in it. The marker stays where it was:
+        // the singer has not gone anywhere, and one that lags is better than
+        // one that blinks out whenever a few seconds come out badly.
+        set(state => ({
+          _lostWindows: 0,
+          followLine: where.line === null ? state.followLine : where.line,
+        }));
+        heldFit = explains(showing, heard);
+      } else {
+        const lost = get()._lostWindows + 1;
+        // Out of patience: drop the marker. What is on screen stays until
+        // something below replaces it.
+        set(
+          lost >= GIVE_UP_WINDOWS
+            ? {_lostWindows: 0, followLine: null}
+            : {_lostWindows: lost},
+        );
+      }
+
+      if (get().debug) {
+        const line = get().followLine;
+        set({
+          why:
+            `following ${showing.ref}: ` +
+            (line === null ? 'place unknown' : `line ${line + 1}/${showing.lines.length}`) +
+            ` fit ${heldFit.toFixed(2)}`,
+        });
+      }
+    }
+
+    // What else this could be, asked on every window whether or not something
+    // is being followed.
+    //
+    // Following and identifying are not alternatives, and treating them as
+    // alternatives is what went wrong twice. Silence the matcher while a song
+    // is up and the next song can never arrive. Make the follower timid enough
+    // that the matcher is rarely silenced, and the marker suffers for a
+    // problem that was never the marker's.
+    //
+    // So both run, always, and the two answers are compared below. Following
+    // can then be as generous as it likes: being sure where the singing is
+    // inside this record does not prevent another record turning out to
+    // explain the sound better.
+    //
+    // Decided once, here, and every debug field below is filled from this same
+    // call.
+    //
+    // They used to be computed at different points - the candidate list where
+    // the window was built, the reason wherever the logic happened to give up -
+    // so the panel could show a reason from one window beside candidates from
+    // another. That is worse than showing nothing: it reads as a contradiction
+    // and sends whoever is looking at it after the wrong thing. It sent me
+    // after the wrong thing.
+    const decision = identifyDetailed(heard);
+
+    if (get().debug) {
+      set({candidates: nearMisses(heard), why: decision.why});
     }
 
     const {hit} = decision;
@@ -275,6 +555,20 @@ const useVerseStore = create((set, get) => ({
         ? prior.count
         : (prior?.count || 0) + 1;
 
+    // The recording's own name counts as one of the agreeing windows.
+    //
+    // Corroboration exists because one window is weak evidence. For the song
+    // the file is named after it is not the only evidence - the name already
+    // said so, from a different direction entirely - and making it wait for a
+    // second window is asking the same source twice.
+    // The recording's own name counts as one of the agreeing windows.
+    //
+    // Corroboration exists because one window is weak evidence. For the song
+    // the file is named after it is not the only evidence - the name already
+    // said so, from a different direction entirely - and making it wait for a
+    // second window is asking the same source twice.
+    const needed = hit.id === expectedId ? 1 : corroboration;
+
     votes.set(hit.id, {count, at: prior && count === prior.count ? prior.at : at});
     set({_votes: votes});
 
@@ -301,18 +595,54 @@ const useVerseStore = create((set, get) => ({
     const unmistakable =
       hit.runChars >= strongRunChars && hit.solidRatio >= strongSolidRatio;
 
-    if (get().debug && !unmistakable && count < corroboration) {
+    if (get().debug && !unmistakable && count < needed) {
       set({
         why:
           `${hit.ref}: ${hit.runChars}ch x ${Math.round(100 * hit.solidRatio)}% = ` +
           `${Math.round(hit.runChars * hit.solidRatio)} solid ` +
           `(need ${strongRunChars}ch & ${strongSolidRatio}), ` +
-          `votes ${count}/${corroboration}`,
+          `votes ${count}/${needed}` +
+          (hit.id === expectedId ? ' (named in the title)' : ''),
       });
     }
 
-    if (unmistakable || count >= corroboration) {
+    if (unmistakable || count >= needed) {
       const record = lookup(hit.id);
+
+      // Does this actually explain the singing better than what is up?
+      //
+      // The last thing asked before the panel changes, and the only one that
+      // compares the two candidates on the same terms. The matcher's gates say
+      // whether a record is a good enough answer on its own; they cannot say
+      // whether it is a better answer than the record already showing, because
+      // they never look at that one.
+      //
+      // Both scored by how much of this window one stretch of them accounts
+      // for - see `explains`. A song being sung scores far above a song that
+      // merely shares its vocabulary, and the margin is what keeps a run of
+      // ordinary windows from shuffling the panel between two plausible
+      // records.
+      if (following && record) {
+        const theirs = explains(record, heard);
+        // Easier to arrive at the song the recording is named after, and harder
+        // to be talked out of it once there.
+        const margin =
+          hit.id === expectedId
+            ? SWITCH_MARGIN / EXPECTED_EASE
+          : showing.id === expectedId
+            ? SWITCH_MARGIN * EXPECTED_HOLD
+            : SWITCH_MARGIN;
+        if (theirs < heldFit * margin) {
+          if (get().debug) {
+            set({
+              why:
+                `keeping ${showing.ref} (${heldFit.toFixed(2)}) over ` +
+                `${hit.ref} (${theirs.toFixed(2)})`,
+            });
+          }
+          return;
+        }
+      }
       // The evidence travels with the record. The moment it was decided is the
       // only moment these numbers exist - by the time anybody dismisses it or
       // seeks back to it, the window has moved on.
@@ -336,6 +666,20 @@ const useVerseStore = create((set, get) => ({
    * cited replaces it. It never enters the history, because the history records
    * moments in the recording and this belongs to no moment.
    */
+  /**
+   * Note the song the recording is named after, without showing it.
+   *
+   * The difference from seedFromTitle is the whole point. A lecture titled
+   * "BG 2.13" is *about* that verse and may never recite it, so showing it is
+   * a reasonable guess at what somebody wants on screen. A recording called
+   * "Jaya Radha Madhava" *is* that song, and showing it before it starts would
+   * be wrong in a more specific way: the panel would be right about the
+   * recording and wrong about the moment, and there would be a marked line
+   * claiming to be where the singing is while nobody is singing.
+   */
+  expectSong: (record, id) =>
+    set({expected: record && id ? {id, ref: record.ref} : null}),
+
   seedFromTitle: (record, id) =>
     set(state =>
       state.current ? {} : {current: {...record, id, source: 'title', at: 0}},
@@ -373,6 +717,10 @@ const useVerseStore = create((set, get) => ({
         history: [...state.history, entry],
         _votes: new Map(),
         _lastCommitAt: nowMs(),
+        // A new record is a new place to find. Carrying the old line number
+        // over would highlight a line of this song chosen by the last one.
+        followLine: null,
+        _lostWindows: 0,
       };
     }),
 
@@ -415,7 +763,13 @@ const useVerseStore = create((set, get) => ({
   showFromHistory: entry =>
     set(() => {
       if (!entry) return {};
-      return {current: entry, _votes: new Map(), _lastCommitAt: nowMs()};
+      return {
+        current: entry,
+        _votes: new Map(),
+        _lastCommitAt: nowMs(),
+        followLine: null,
+        _lostWindows: 0,
+      };
     }),
 
   /**
@@ -436,7 +790,7 @@ const useVerseStore = create((set, get) => ({
   dismiss: () =>
     set(state => {
       if (state.current) get().recordVerdict(state.current.key, 'dismissed');
-      return {current: null, _votes: new Map()};
+      return {current: null, _votes: new Map(), followLine: null, _lostWindows: 0};
     }),
 
   toggleDebug: () => set(state => ({debug: !state.debug})),
@@ -481,9 +835,12 @@ const useVerseStore = create((set, get) => ({
     return set({
       _rows: new Map(),
       current: null,
+      expected: null,
+      followLine: null,
       history: [],
       _window: [],
       _votes: new Map(),
+      _lostWindows: 0,
       _lastCommitAt: 0,
       heardCount: 0,
       lastHeard: '',
@@ -500,7 +857,7 @@ const useVerseStore = create((set, get) => ({
    * What is on screen stays. It was right about somewhere, and blanking the
    * panel on every scrub would make it useless for looking around a lecture.
    */
-  onSeek: () => set({_window: [], _votes: new Map()}),
+  onSeek: () => set({_window: [], _votes: new Map(), followLine: null}),
 }));
 
 export default useVerseStore;

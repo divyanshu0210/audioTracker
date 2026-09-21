@@ -88,5 +88,10 @@ tools/verse-corpus/.cache/
 tools/verse-asr-eval/.venv/
 tools/verse-asr-eval/.cache/
 tools/verse-asr-eval/out/
+# Transcripts and audio from other recordings, kept the same way: they are
+# large, they are somebody's copy of a lecture, and they are reproducible from
+# the source recording with transcribe.py.
+tools/verse-asr-eval/out-*/
+tools/verse-asr-eval/audio/
 tools/verse-asr-eval/__pycache__/
 tools/verse-corpus/__pycache__/

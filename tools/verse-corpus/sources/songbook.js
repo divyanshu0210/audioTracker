@@ -59,6 +59,10 @@ module.exports = async ({onProgress} = {}) => {
       ref: song.ref,
       title: song.ref,
       lines,
+      // Where each prayer starts, for the one record that is a sequence rather
+      // than a song - see combine_prayers in songbook.py. Absent on everything
+      // else, and the panel renders nothing when it is.
+      ...(song.sections ? {sections: song.sections} : {}),
       devanagari: null,
       // Carried, but never indexed. Only `lines` reaches the matcher - English
       // prose in this corpus is what once made the panel name a song every few

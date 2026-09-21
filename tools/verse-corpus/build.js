@@ -197,6 +197,14 @@ async function main() {
   // the same song, whatever either source chose to call it.
   const songKey = record => phoneticStream(record.lines.join(' ')).slice(0, 40);
 
+  // One line's sound, for comparing records line by line. Short lines are
+  // dropped by the caller: a handful of characters is shared by too much to
+  // mean two records are the same thing.
+  const lineKey = line => {
+    const stream = phoneticStream(line);
+    return stream.length >= 12 ? stream : '';
+  };
+
   // Matched on sound *or* on name. The stream catches the same song spelled
   // differently; the title catches the same song recorded at different lengths,
   // where the openings diverge before forty characters and the streams never
@@ -226,12 +234,41 @@ async function main() {
   const fromBook = {
     has: record => bookStreams.has(songKey(record)) || bookTitles.has(titleKey(record.ref)),
   };
+  // A record that is a handful of lines out of the book's pranama sequence is
+  // a fragment of it, not a song of its own.
+  //
+  // kksongs carries one: three lines called "ISKCON Pranamas", of which the
+  // first is the heading `Sri Guru Pranama` kept as though it were sung and the
+  // other two are the first mantra. It is the whole sequence's worth of ground
+  // covered one seventeenth of the way, and because it is short and its text is
+  // the most recited Sanskrit there is, it beat the full sequence whenever that
+  // mantra was recited on its own - which is exactly the splitting that joining
+  // the prayers was meant to end.
+  //
+  // Compared line by line rather than as one string, because that stray heading
+  // sits in the middle of its text and defeats any substring test. Measured
+  // over the whole corpus, this folds that record and nothing else at any
+  // threshold from a half upwards; two thirds already folds nothing, since the
+  // one record it should catch is two lines out of three.
+  const sequences = records
+    .filter(r => r.sections && r.lines)
+    .map(r => new Set(r.lines.map(lineKey).filter(Boolean)));
+
+  const fragmentOfSequence = record => {
+    const lines = (record.lines || []).map(lineKey).filter(Boolean);
+    if (!lines.length) return false;
+    return sequences.some(
+      seq => lines.filter(l => seq.has(l)).length / lines.length >= 0.6,
+    );
+  };
+
   const beforeDedupe = records.length;
   const deduped = records.filter(
     r =>
       r.kind !== 'song' ||
-      r.id.startsWith('songbook-') ||
-      !fromBook.has(r),
+      (r.id.startsWith('songbook-')
+        ? false
+        : fromBook.has(r) || fragmentOfSequence(r)) === false,
   );
   if (deduped.length !== beforeDedupe) {
     console.log(
@@ -290,9 +327,11 @@ async function main() {
   }
 
   const indexed = [];
-  for (const group of byStream.values()) {
+  const chosenOf = new Map(); // stream -> the record that represents it
+  for (const [stream, group] of byStream) {
     if (group.length === 1) {
       indexed.push(group[0]);
+      chosenOf.set(stream, group[0]);
       continue;
     }
     // Stable within a book, so a rebuild picks the same canonical record and
@@ -302,7 +341,31 @@ async function main() {
     );
     const [chosen, ...others] = sorted;
     chosen.alsoIn = others.map(r => r.ref);
+    chosenOf.set(stream, chosen);
     indexed.push(chosen);
+  }
+
+  // A prayer inside a sequence is often also scripture under its own citation.
+  //
+  // Five of the pranama mantras are verses of Caitanya-caritamrta, and while
+  // each was a record of its own the fold above noticed and said so. Joining
+  // the prayers into one record broke that: the sequence is fifty lines and
+  // matches no single verse, so five verses quietly lost the note saying where
+  // else they are found.
+  //
+  // That note is how somebody reciting the Panca-tattva pranama, who is shown
+  // CC Adi 1.14 because it is the better answer - a real citation, with a
+  // purport - finds out that it is also the sequence they are part way through.
+  for (const record of records) {
+    if (!record.sections) continue;
+    record.sections.forEach((section, i) => {
+      const to = record.sections[i + 1]?.at ?? record.lines.length;
+      const chosen = chosenOf.get(
+        phoneticStream(record.lines.slice(section.at, to).join(' ')),
+      );
+      if (!chosen || chosen === record) return;
+      chosen.alsoIn = [...new Set([...(chosen.alsoIn || []), record.ref])];
+    });
   }
   const collapsed = records.length - indexed.length;
   if (collapsed) {
@@ -361,6 +424,22 @@ async function main() {
       // Length of the stream, so scoring can ask what fraction of a verse was
       // heard without loading the verse.
       len: stream.length,
+      // Not scored against the length of one prayer, for a record that is a
+      // sequence of them.
+      //
+      // Tried, and it is worse. Coverage is what separates a verse from a
+      // compilation that quotes it, and joining seventeen prayers into one
+      // record does put that mechanism on the wrong side of what it protects:
+      // reciting the Prabhupada pranati is reciting a whole prayer, and it
+      // scores as two percent of a compilation. Measuring against a typical
+      // prayer instead raises the sequence's score, which is the intended
+      // effect and the wrong outcome - five of these prayers are also verses
+      // of Caitanya-caritamrta, and lifting the sequence brings it level with
+      // them. Level is a tie, and a tie shows nothing at all.
+      //
+      // Measured: prayers recited alone that named anything fell from 16 of 17
+      // to 11. The sequence being the quieter answer is what lets the verse be
+      // the loud one.
     });
 
     // De-duplicated per document: a gram appearing twice in one verse is one

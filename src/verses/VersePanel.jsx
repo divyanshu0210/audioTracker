@@ -13,7 +13,7 @@
 // verse is stamped with the position it was heard at, so a lecture nobody
 // indexed acquires a table of contents as it plays - and every entry is a seek.
 
-import React, {useCallback, useEffect, useMemo, useState} from 'react';
+import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
   ActivityIndicator,
   Dimensions,
@@ -92,11 +92,13 @@ const VersePanel = ({onSeek}) => {
   // One subscription rather than several: this sits under a player that is
   // already re-rendering on progress, and should not add to that.
   const {
-    enabled, listening, unavailable, current, history,
+    enabled, listening, unavailable, current, history, followLine, expected,
     debug, heardCount, lastHeard, lastConfidence, candidates, why,
   } = useVerseStore(
     useShallow(state => ({
       enabled: state.enabled,
+      expected: state.expected,
+      followLine: state.followLine,
       listening: state.listening,
       lastConfidence: state.lastConfidence,
       why: state.why,
@@ -116,6 +118,35 @@ const VersePanel = ({onSeek}) => {
   const showFromHistory = useVerseStore(state => state.showFromHistory);
 
   const currentId = current?.id;
+
+  // Bringing the marked line into view.
+  //
+  // Without this the marker is only useful for songs short enough to fit,
+  // and the songs worth following are the long ones - Bhaja Bhakata Vatsala
+  // is thirty-five lines, and the panel shows about eight.
+  const bodyRef = useRef(null);
+  // line index -> its offset inside the scroll content, filled in by onLayout.
+  const lineTops = useRef([]);
+  // When the person last dragged the panel themselves.
+  const draggedAt = useRef(0);
+
+  useEffect(() => {
+    lineTops.current = [];
+  }, [currentId]);
+
+  useEffect(() => {
+    if (followLine === null || followLine === undefined) return;
+    const y = lineTops.current[followLine];
+    if (y === undefined) return;
+    // Somebody who has just scrolled is reading something, quite possibly the
+    // translation further down. Yanking them back to the marker every few
+    // seconds would make the panel unusable for the one thing people do with
+    // it by hand, so the follower yields for a while after any drag.
+    if (Date.now() - draggedAt.current < 8000) return;
+    // A little above the line rather than flush to the top, so there is
+    // somewhere for the eye to have come from.
+    bodyRef.current?.scrollTo({y: Math.max(0, y - 28), animated: true});
+  }, [followLine, currentId]);
 
   // A new verse is a new purport. Cleared rather than left showing, because the
   // one thing worse than no purport is the previous verse's.
@@ -168,6 +199,28 @@ const VersePanel = ({onSeek}) => {
 
   // Newest first: the thing just heard is the thing most likely wanted.
   const recent = useMemo(() => [...history].reverse(), [history]);
+
+  // Line index -> the name of the prayer starting there.
+  //
+  // Only the pranama mantras have these. They are one sequence recited in one
+  // order, so the corpus holds them as one record rather than seventeen - see
+  // combine_prayers in songbook.py - and without their names it would be sixty
+  // lines of undifferentiated Sanskrit.
+  //
+  // The names are not lines of the record and are not drawn as lines. Nothing
+  // sings them, so they are not in the phonetic stream, and the marker can
+  // never come to rest on one.
+  //
+  // Up here with the other hooks, and reading `current` defensively, because
+  // there are three early returns below this point - no panel, no recogniser,
+  // nothing matched yet - and a hook underneath any of them runs on some
+  // renders and not others. React counts hooks per render and fails the whole
+  // tree when the count changes.
+  const sectionAt = useMemo(() => {
+    const byLine = {};
+    for (const section of current?.sections || []) byLine[section.at] = section.title;
+    return byLine;
+  }, [current]);
 
   /**
    * What the recogniser is actually producing.
@@ -230,6 +283,20 @@ const VersePanel = ({onSeek}) => {
         style={styles.historyList}
         nestedScrollEnabled
         persistentScrollbar>
+        {/* What the recording is called, before anything has been heard.
+            
+            It sits in the list rather than on screen as a match, and it is
+            labelled rather than timed, because it is not a moment in the
+            recording - it is a thing known about the whole of it. Everything
+            below it was actually heard, and has a time to prove it. */}
+        {!!expected && (
+          <View style={[styles.historyRow, styles.expectedRow]}>
+            <Text style={styles.expectedTag}>title</Text>
+            <Text style={styles.historyRef} numberOfLines={1}>
+              {expected.ref}
+            </Text>
+          </View>
+        )}
         {recent.map((entry, i) => (
           <View
             key={entry.key || `${entry.id}-${entry.heardAt}-${i}`}
@@ -282,11 +349,16 @@ const VersePanel = ({onSeek}) => {
   // recording's whole table of contents by closing one verse is not a thing
   // anybody means to do.
   if (!current) {
-    if (showHistory && recent.length > 0) {
+    if (showHistory && (recent.length > 0 || expected)) {
       return (
         <View style={styles.container}>
           <View style={styles.header}>
-            <Text style={styles.ref}>Heard so far</Text>
+            {/* Only "heard" if something was. Opened before anything has
+                matched, the single row in this list is the recording's own
+                name, which nobody heard. */}
+            <Text style={styles.ref}>
+              {recent.length > 0 ? 'Heard so far' : 'This recording'}
+            </Text>
             <View style={styles.headerActions}>
               <TouchableOpacity
                 onPress={() => setShowHistory(false)}
@@ -310,7 +382,9 @@ const VersePanel = ({onSeek}) => {
           <>
             <View style={styles.pulse} />
             <Text style={styles.quietText}>
-              Listening — verses and songs will appear here
+              {expected
+                ? `Listening for ${expected.ref}`
+                : 'Listening — verses and songs will appear here'}
             </Text>
           </>
         ) : (
@@ -321,16 +395,27 @@ const VersePanel = ({onSeek}) => {
         )}
 
         {/* The way back to what was already heard. Without it, dismissing a
-            verse strands the list until the next one happens to match. */}
-        {recent.length > 0 && (
+            verse strands the list until the next one happens to match.
+
+            Also the way *in*, before anything has been heard at all, when the
+            recording's name has already said which song this is. That case
+            used to be unreachable: the list held something worth seeing from
+            the first second and nothing offered to open it. */}
+        {(recent.length > 0 || !!expected) && (
           <TouchableOpacity
             onPress={() => setShowHistory(true)}
             style={styles.quietHistory}
             hitSlop={{top: 8, bottom: 8, left: 8, right: 8}}
             accessibilityRole="button"
-            accessibilityLabel={`${recent.length} verses heard so far`}>
+            accessibilityLabel={
+              recent.length > 0
+                ? `${recent.length} verses heard so far`
+                : `Expecting ${expected.ref}`
+            }>
             <Icon name="list" size={16} color={C.body} />
-            <Text style={styles.count}>{recent.length}</Text>
+            {recent.length > 0 && (
+              <Text style={styles.count}>{recent.length}</Text>
+            )}
           </TouchableOpacity>
         )}
 
@@ -393,8 +478,12 @@ const VersePanel = ({onSeek}) => {
         historyList
       ) : (
         <ScrollView
+          ref={bodyRef}
           style={styles.body}
           nestedScrollEnabled
+          onScrollBeginDrag={() => {
+            draggedAt.current = Date.now();
+          }}
           persistentScrollbar>
           {/* Devanagari above, transliteration below, the way the printed
               editions set it - and the way anyone who reads the script expects
@@ -416,10 +505,32 @@ const VersePanel = ({onSeek}) => {
             </View>
           )}
 
+          {/* The line being sung, marked while it is known.
+
+              A bhajan runs for minutes and the panel used to show all of it at
+              once with no indication of where in it anybody was - which for a
+              song, unlike a verse, is most of the question. The bar is drawn on
+              every line and only coloured on one, so nothing moves when the
+              place changes; the text shifting sideways under a marker that
+              appears and disappears is worse than no marker.
+
+              followLine is null whenever the place is not known, which includes
+              every verse - so this renders exactly as it did before for them. */}
           {current.lines?.map((line, i) => (
-            <Text key={i} style={styles.line}>
-              {line}
-            </Text>
+            <React.Fragment key={i}>
+              {!!sectionAt[i] && (
+                <Text style={styles.prayerName}>{sectionAt[i]}</Text>
+              )}
+              <View
+                onLayout={e => {
+                  lineTops.current[i] = e.nativeEvent.layout.y;
+                }}
+                style={[styles.lineRow, i === followLine && styles.lineRowHere]}>
+                <Text style={[styles.line, i === followLine && styles.lineHere]}>
+                  {line}
+                </Text>
+              </View>
+            </React.Fragment>
           ))}
 
           {expanded && (
@@ -715,11 +826,31 @@ const styles = StyleSheet.create({
   // faster than this can be read, so more of it on screen at once beats a
   // larger face. The line height stays generous relative to the size -
   // diacritics sit above and below these letters and crowd at a tight leading.
+  prayerName: {
+    color: C.faint,
+    fontSize: 10.5,
+    letterSpacing: 0.4,
+    marginTop: 9,
+    marginBottom: 2,
+  },
+  lineRow: {
+    borderLeftWidth: 2,
+    borderLeftColor: 'transparent',
+    paddingLeft: 6,
+  },
+  lineRowHere: {
+    borderLeftColor: C.accent,
+    backgroundColor: 'rgba(56, 189, 248, 0.10)',
+  },
   line: {
     color: C.verse,
     fontSize: 12.5,
     lineHeight: 19,
     fontStyle: 'italic',
+  },
+  lineHere: {
+    color: C.heading,
+    fontStyle: 'normal',
   },
   section: {
     marginTop: 10,
@@ -780,6 +911,21 @@ const styles = StyleSheet.create({
   historyList: {
     marginTop: 6,
     flexShrink: 1,
+  },
+  expectedRow: {
+    // Set apart from the heard entries, because it is a different kind of
+    // claim: this one is what the file is called, not what anybody sang.
+    borderBottomWidth: 1,
+    borderBottomColor: C.border,
+    paddingBottom: 6,
+    marginBottom: 2,
+  },
+  expectedTag: {
+    color: C.faint,
+    fontSize: 9.5,
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+    width: 42,
   },
   historyRow: {
     flexDirection: 'row',

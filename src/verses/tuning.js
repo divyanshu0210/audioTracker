@@ -34,7 +34,7 @@ const storage = () => require('@react-native-async-storage/async-storage').defau
  */
 const SETTINGS = {
   // matcher.js
-  minRunChars: {value: 26, min: 15, max: 60},
+  minRunChars: {value: 22, min: 15, max: 60},
   missPenalty: {value: 0.34, min: 0.1, max: 1},
   minSolidRatio: {value: 0.22, min: 0.05, max: 0.6},
   ambiguityMargin: {value: 0.92, min: 0.6, max: 0.99},

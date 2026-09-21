@@ -45,15 +45,15 @@
   },
   "cc-adi": {
     "count": 2253,
-    "bytes": 1335009
+    "bytes": 1334968
   },
   "cc-antya": {
     "count": 3176,
-    "bytes": 1958362
+    "bytes": 1958363
   },
   "cc-madhya": {
     "count": 5930,
-    "bytes": 3757883
+    "bytes": 3757873
   },
   "sb-11": {
     "count": 1244,
@@ -64,7 +64,7 @@
     "bytes": 292474
   },
   "songs": {
-    "count": 964,
-    "bytes": 2572705
+    "count": 948,
+    "bytes": 2559034
   }
 }

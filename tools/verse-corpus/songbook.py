@@ -313,6 +313,21 @@ def parse_prayers(text):
     marker, taking lines until one ends like a sentence; the first line taken
     is the prayer's name.
     """
+    # Everything above the section heading is the cover and the table of
+    # contents, and none of it is a prayer.
+    #
+    # Without this the first prayer in the book is lost, and only the first.
+    # Each of the others is bounded above by the previous prayer's translation,
+    # which ends in a full stop; Sri Guru Pranama has nothing above it but the
+    # contents index, whose lines end in a page number. So the backward scan
+    # ran up through four hundred lines of index, blew the twelve-line limit,
+    # and discarded the block - taking with it `om ajnana-timirandhasya`, which
+    # is the single most recited piece of Sanskrit in the library and the
+    # example in this function's own docstring.
+    heading = re.search(r'^\s*Pranama Mantras\s*$', text, flags=re.MULTILINE)
+    if heading:
+        text = text[heading.end():]
+
     prayers = []
 
     for chunk in re.split(r'^\s*TRANSLATION.*$', text, flags=re.MULTILINE):
@@ -333,7 +348,33 @@ def parse_prayers(text):
                 break
 
         block.reverse()
-        if len(block) < 3:
+        if not block:
+            continue
+
+        # A capital letter begins a title and nothing else.
+        #
+        # Several of these prayers run to two, three or four couplets, and the
+        # book gives each couplet its own TRANSLATION - so a prayer is not one
+        # block, and only its first block carries the name. Requiring a title
+        # plus two lines threw every later couplet away: four of them, which is
+        # half of Srila Prabhupada's pranati (`namas te sarasvate deve`) and
+        # three quarters of Srila Bhaktisiddhanta Sarasvati's. People recite
+        # all of it.
+        #
+        # Capitalisation separates the two cleanly, and unlike the content
+        # signals this function's docstring warns about, it was checked before
+        # being relied on: over this section every one of the 17 titles begins
+        # with a capital and not one of the 60 sung lines does. The IAST in
+        # this book is uniformly lower case, and the titles are set in title
+        # case.
+        #
+        # The one lower-case-less exception is `Temple Program Prayers`, the
+        # heading of the section after this one, and it falls out for free -
+        # it is a capitalised line with nothing under it, which is not a
+        # prayer.
+        if not block[0][:1].isupper():
+            if prayers:
+                prayers[-1]['lines'].extend(block)
             continue
 
         title, lines = block[0], block[1:]
@@ -350,12 +391,57 @@ def parse_prayers(text):
     return prayers
 
 
+def combine_prayers(prayers):
+    """The praṇāma mantras as one record rather than sixteen.
+
+    They are not sixteen songs. They are one thing people recite, in this
+    order, at the start of a programme - and whoever is following along wants
+    the next one as much as the one being said.
+
+    Sixteen records served that badly in both directions. Each was two to four
+    lines, which is little enough that it is as much coincidence as evidence,
+    and none was long enough to follow through: the panel would name Sri Guru
+    Pranama, sit on two lines while five more mantras were recited, and then
+    have to identify each of the rest from scratch. Joined, any one of them
+    reaching the matcher puts the whole sequence on screen and the follower
+    walks down it.
+
+    `sections` records where each prayer begins, so the panel can still show
+    their names. They are deliberately not lines: a title is not sung, and
+    putting it in `lines` would index it as though it were and let the marker
+    come to rest on it.
+    """
+    if not prayers:
+        return []
+
+    lines = []
+    sections = []
+    for prayer in prayers:
+        sections.append({'title': prayer['ref'], 'at': len(lines)})
+        lines.extend(prayer['lines'])
+
+    return [{
+        'ref': 'Praṇāma Mantras',
+        'author': '',
+        'bookName': 'Pranama Mantras',
+        'lines': lines,
+        'sections': sections,
+    }]
+
+
 def main():
+    # Every title in this book carries diacritics, and a Windows console
+    # defaults to a codepage that has none of them - so the run wrote its JSON,
+    # reached the summary, and died on the first title it printed, with a
+    # traceback that looks like a parsing failure and is not one.
+    if hasattr(sys.stdout, 'reconfigure'):
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+
     text = '\n'.join(pages(fetch()))
     # The front matter and the songs are two different layouts in one file:
     # everything before the first `Song Name:` is prayers without headers.
     split_at = text.find('Song Name:')
-    prayers = parse_prayers(text[:split_at]) if split_at > 0 else []
+    prayers = combine_prayers(parse_prayers(text[:split_at])) if split_at > 0 else []
     if split_at > 0:
         text = text[split_at:]
 

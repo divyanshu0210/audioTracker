@@ -189,6 +189,16 @@ def windows(audio, hop_seconds=None, max_seconds=None):
 
 
 def main():
+    # Devanagari to a console that cannot encode it.
+    #
+    # Windows defaults to a codepage with none of these characters, so the
+    # first line of Sanskrit this printed killed the run - after writing one
+    # window, and with a traceback about codecs that looks nothing like what
+    # went wrong. The transcript is the point of the program; the progress
+    # printing is not, and it should never be able to stop it.
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
     ap = argparse.ArgumentParser()
     ap.add_argument("audio", nargs="+", help="lecture files, any format")
     ap.add_argument("--out-dir", default="out")

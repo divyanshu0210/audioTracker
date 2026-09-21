@@ -354,6 +354,24 @@ const useVerseStore = create((set, get) => ({
     }),
 
   /**
+   * Put a verse from the history back on screen.
+   *
+   * Tapping one used to seek the media and nothing else, so the panel went on
+   * showing whatever had been matched most recently - the player jumped to the
+   * right place and the text under it disagreed with the audio.
+   *
+   * The cooldown is stamped as though this were a fresh commit. Without it the
+   * next window to arrive could replace this within a second, and what the
+   * person asked to see would be gone before they had read it - which looks
+   * exactly like the bug this fixes.
+   */
+  showFromHistory: entry =>
+    set(() => {
+      if (!entry) return {};
+      return {current: entry, _votes: new Map(), _lastCommitAt: nowMs()};
+    }),
+
+  /**
    * Somebody seeking to a verse from the history.
    *
    * The strongest signal available and the only one nobody has to be asked
@@ -375,6 +393,25 @@ const useVerseStore = create((set, get) => ({
     }),
 
   toggleDebug: () => set(state => ({debug: !state.debug})),
+
+  /**
+   * Put what has been decided somewhere that survives the process.
+   *
+   * Until this runs, a lecture's matches exist only in the map above - and a
+   * process that is swiped away or killed for memory takes them with it.
+   * Somebody who plays one lecture and closes the app would otherwise produce
+   * no data at all, which is exactly the person worth hearing from.
+   *
+   * Deliberately does not clear what it wrote. A verse still on screen can
+   * still be rated, and that later verdict has to be able to overwrite this
+   * one - the rows are keyed, the queue keeps the newest, and the server
+   * upserts, so sending a row twice settles on the stronger verdict rather
+   * than counting it twice.
+   */
+  persist: () => {
+    const rows = [...get()._rows.values()];
+    if (rows.length) enqueue(rows).then(flush);
+  },
 
   /**
    * Starting over: different media, or the feature switched off.

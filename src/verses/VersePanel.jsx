@@ -112,6 +112,7 @@ const VersePanel = ({onSeek}) => {
   const dismiss = useVerseStore(state => state.dismiss);
   const rate = useVerseStore(state => state.rate);
   const noteRevisit = useVerseStore(state => state.noteRevisit);
+  const showFromHistory = useVerseStore(state => state.showFromHistory);
 
   const currentId = current?.id;
 
@@ -134,15 +135,34 @@ const VersePanel = ({onSeek}) => {
     }
   }, [currentId]);
 
-  const handleSeek = useCallback(
+  /**
+   * Read a verse again, without disturbing what is playing.
+   *
+   * The two halves of a history row do different things on purpose. Wanting to
+   * re-read a verse is far more common than wanting to hear it again, and
+   * having every tap jump the audio made the list dangerous to browse - one
+   * mis-tap and the lecture was somewhere else.
+   *
+   * Going back to a verse at all is the strongest evidence the match was right,
+   * and it costs nobody anything to give. See feedback.js.
+   */
+  const handleShow = useCallback(
     entry => {
-      // Going back to a verse is the strongest evidence the match was right,
-      // and it costs nobody anything to give. See feedback.js.
       noteRevisit(entry.key);
+      // Show the one that was asked for, not whichever was matched last.
+      showFromHistory(entry);
       setShowHistory(false);
+    },
+    [noteRevisit, showFromHistory],
+  );
+
+  /** The timestamp, which is the part that moves the audio. */
+  const handleJump = useCallback(
+    entry => {
+      handleShow(entry);
       onSeek?.(entry.at);
     },
-    [noteRevisit, onSeek],
+    [handleShow, onSeek],
   );
 
   // Newest first: the thing just heard is the thing most likely wanted.
@@ -186,6 +206,49 @@ const VersePanel = ({onSeek}) => {
     </ScrollView>
   ) : null;
 
+  /**
+   * Everything heard so far, newest first.
+   *
+   * Held as an element rather than written where it is used, because both
+   * states need it. Dismissing a verse leaves the panel with nothing on screen
+   * and the list is still worth reaching - it is the table of contents for the
+   * whole recording, and the thing somebody dismissed was one line of it.
+   */
+  const historyList = (
+      <ScrollView
+        style={styles.historyList}
+        nestedScrollEnabled
+        persistentScrollbar>
+        {recent.map((entry, i) => (
+          <View
+            key={entry.key || `${entry.id}-${entry.heardAt}-${i}`}
+            style={styles.historyRow}>
+            {/* Two targets, not one. The time moves the lecture; the verse
+                only brings it back on screen. */}
+            <TouchableOpacity
+              onPress={() => handleJump(entry)}
+              hitSlop={{top: 8, bottom: 8, left: 6, right: 6}}
+              accessibilityRole="button"
+              accessibilityLabel={`Play from ${formatPosition(entry.at)}`}>
+              <Text style={styles.historyTime}>
+                {formatPosition(entry.at)}
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.historyRefBtn}
+              onPress={() => handleShow(entry)}
+              accessibilityRole="button"
+              accessibilityLabel={`Show ${entry.ref}`}>
+              <Text style={styles.historyRef} numberOfLines={1}>
+                {entry.kind === 'song' ? entry.title || entry.ref : entry.ref}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        ))}
+      </ScrollView>
+  );
+
   if (!enabled) return null;
 
   if (unavailable) {
@@ -203,7 +266,33 @@ const VersePanel = ({onSeek}) => {
   // Listening, but nothing recognised yet. Deliberately not blank: somebody
   // switched this on and is owed evidence that it is running, and a whole
   // lecture can pass before the first verse.
+  // Nothing on screen: either nothing has been heard yet, or the last thing
+  // was dismissed. The history outlives both, so it stays reachable - losing a
+  // recording's whole table of contents by closing one verse is not a thing
+  // anybody means to do.
   if (!current) {
+    if (showHistory && recent.length > 0) {
+      return (
+        <View style={styles.container}>
+          <View style={styles.header}>
+            <Text style={styles.ref}>Heard so far</Text>
+            <View style={styles.headerActions}>
+              <TouchableOpacity
+                onPress={() => setShowHistory(false)}
+                style={styles.iconBtn}
+                hitSlop={{top: 8, bottom: 8, left: 8, right: 8}}
+                accessibilityRole="button"
+                accessibilityLabel="Close the list">
+                <Icon name="close" size={18} color={C.muted} />
+              </TouchableOpacity>
+            </View>
+          </View>
+          {historyList}
+          {debugBlock}
+        </View>
+      );
+    }
+
     return (
       <View style={[styles.container, styles.quiet]}>
         {listening ? (
@@ -219,6 +308,21 @@ const VersePanel = ({onSeek}) => {
             <Text style={styles.quietText}>Starting to listen…</Text>
           </>
         )}
+
+        {/* The way back to what was already heard. Without it, dismissing a
+            verse strands the list until the next one happens to match. */}
+        {recent.length > 0 && (
+          <TouchableOpacity
+            onPress={() => setShowHistory(true)}
+            style={styles.quietHistory}
+            hitSlop={{top: 8, bottom: 8, left: 8, right: 8}}
+            accessibilityRole="button"
+            accessibilityLabel={`${recent.length} verses heard so far`}>
+            <Icon name="list" size={16} color={C.body} />
+            <Text style={styles.count}>{recent.length}</Text>
+          </TouchableOpacity>
+        )}
+
         {debugBlock}
       </View>
     );
@@ -250,45 +354,6 @@ const VersePanel = ({onSeek}) => {
             : 'heard'}
         </Text>
 
-        {/* Was this right?
-            
-            Only for something matched from the sound. A verse named in the
-            title, or a citation read out loud, was not a judgement the matcher
-            made - rating those would produce rows that no threshold controls.
-
-            Asked once. Having answered, the thumb stays as a record of what was
-            said rather than becoming a control to fiddle with. */}
-        {current.source === 'heard' && (
-          <View style={styles.rateGroup}>
-            {current.rated ? (
-              <Icon
-                name={current.rated === 'right' ? 'thumb-up' : 'thumb-down'}
-                size={14}
-                color={C.faint}
-              />
-            ) : (
-              <>
-                <TouchableOpacity
-                  onPress={() => rate('right')}
-                  style={styles.iconBtn}
-                  hitSlop={{top: 8, bottom: 8, left: 6, right: 6}}
-                  accessibilityRole="button"
-                  accessibilityLabel="This verse is right">
-                  <Icon name="thumb-up-off-alt" size={15} color={C.muted} />
-                </TouchableOpacity>
-                <TouchableOpacity
-                  onPress={() => rate('wrong')}
-                  style={styles.iconBtn}
-                  hitSlop={{top: 8, bottom: 8, left: 6, right: 6}}
-                  accessibilityRole="button"
-                  accessibilityLabel="This verse is wrong">
-                  <Icon name="thumb-down-off-alt" size={15} color={C.muted} />
-                </TouchableOpacity>
-              </>
-            )}
-          </View>
-        )}
-
         <View style={styles.headerActions}>
           {recent.length > 1 && (
             <TouchableOpacity
@@ -303,19 +368,6 @@ const VersePanel = ({onSeek}) => {
           )}
 
           <TouchableOpacity
-            onPress={() => setExpanded(v => !v)}
-            style={styles.iconBtn}
-            hitSlop={{top: 8, bottom: 8, left: 8, right: 8}}
-            accessibilityRole="button"
-            accessibilityLabel={expanded ? 'Show less' : 'Show translation'}>
-            <Icon
-              name={expanded ? 'expand-less' : 'expand-more'}
-              size={20}
-              color={C.body}
-            />
-          </TouchableOpacity>
-
-          <TouchableOpacity
             onPress={dismiss}
             style={styles.iconBtn}
             hitSlop={{top: 8, bottom: 8, left: 8, right: 8}}
@@ -327,22 +379,7 @@ const VersePanel = ({onSeek}) => {
       </View>
 
       {showHistory ? (
-        <ScrollView
-          style={styles.historyList}
-          nestedScrollEnabled
-          persistentScrollbar>
-          {recent.map((entry, i) => (
-            <TouchableOpacity
-              key={entry.key || `${entry.id}-${entry.heardAt}-${i}`}
-              style={styles.historyRow}
-              onPress={() => handleSeek(entry)}>
-              <Text style={styles.historyTime}>{formatPosition(entry.at)}</Text>
-              <Text style={styles.historyRef} numberOfLines={1}>
-                {entry.kind === 'song' ? entry.title || entry.ref : entry.ref}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
+        historyList
       ) : (
         <ScrollView
           style={styles.body}
@@ -455,6 +492,76 @@ const VersePanel = ({onSeek}) => {
         </ScrollView>
       )}
 
+      {/* Under the verse rather than up in the header, and labelled.
+
+          Both controls used to be icons in the header row, beside the history
+          and the dismiss, where they said nothing about themselves: a bare
+          chevron does not read as "translation", and two bare thumbs do not
+          say what is being judged. The header now carries only what the panel
+          *is* - the reference, where it came from, and how to get rid of it.
+
+          Here is where the eye arrives, having just read the verse, and both
+          questions belong at that moment: do you want more of this, and was it
+          the right one. */}
+      {!showHistory && (
+        <View style={styles.footer}>
+          <TouchableOpacity
+            onPress={() => setExpanded(v => !v)}
+            style={styles.footerAction}
+            hitSlop={{top: 8, bottom: 8, left: 8, right: 8}}
+            accessibilityRole="button">
+            <Icon
+              name={expanded ? 'expand-less' : 'expand-more'}
+              size={16}
+              color={C.body}
+            />
+           
+          </TouchableOpacity>
+
+          {/* Only for something matched from the sound. A verse named in the
+              title, or a citation read out loud, was not a judgement the
+              matcher made - asking about those would collect answers that no
+              threshold controls.
+
+              Asked once. Having answered, what is left is a record of what was
+              said rather than a control to keep fiddling with. */}
+          {current.source === 'heard' && (
+            <View style={styles.rateGroup}>
+              {current.rated ? (
+                <>
+                  <Icon
+                    name={current.rated === 'right' ? 'thumb-up' : 'thumb-down'}
+                    size={13}
+                    color={C.faint}
+                  />
+                  <Text style={styles.rateThanks}>Thanks</Text>
+                </>
+              ) : (
+                <>
+                  <Text style={styles.rateLabel}>Right verse?</Text>
+                  <TouchableOpacity
+                    onPress={() => rate('right')}
+                    style={styles.rateBtn}
+                    hitSlop={{top: 10, bottom: 10, left: 6, right: 6}}
+                    accessibilityRole="button"
+                    accessibilityLabel="Yes, this is the right verse">
+                    <Icon name="thumb-up-off-alt" size={15} color={C.muted} />
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() => rate('wrong')}
+                    style={styles.rateBtn}
+                    hitSlop={{top: 10, bottom: 10, left: 6, right: 6}}
+                    accessibilityRole="button"
+                    accessibilityLabel="No, this is the wrong verse">
+                    <Icon name="thumb-down-off-alt" size={15} color={C.muted} />
+                  </TouchableOpacity>
+                </>
+              )}
+            </View>
+          )}
+        </View>
+      )}
+
       {debugBlock}
     </View>
   );
@@ -531,15 +638,51 @@ const styles = StyleSheet.create({
     color: C.faint,
     fontSize: 11,
   },
+  footer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 8,
+    paddingTop: 7,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: C.border,
+  },
+  footerAction: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+  },
+  footerLabel: {
+    color: C.body,
+    fontSize: 11,
+  },
   rateGroup: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 2,
+    gap: 6,
+    // Pushed to the far end, so the question is never mistaken for a caption
+    // on the control beside it.
     marginLeft: 'auto',
+  },
+  rateLabel: {
+    color: C.faint,
+    fontSize: 11,
+  },
+  rateThanks: {
+    color: C.faint,
+    fontSize: 11,
+  },
+  rateBtn: {
+    paddingHorizontal: 1,
   },
   headerActions: {
     flexDirection: 'row',
     alignItems: 'center',
+    // Holds the right edge of the header. This briefly lived on the rating
+    // group instead, back when the thumbs sat up here and took the end of the
+    // row - and when they moved down to the footer they took the alignment
+    // with them, leaving the list and the dismiss bunched against the source
+    // label in the middle of the row.
+    marginLeft: 'auto',
     gap: 4,
   },
   iconBtn: {
@@ -634,6 +777,19 @@ const styles = StyleSheet.create({
     gap: 10,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: C.border,
+  },
+  quietHistory: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    marginLeft: 'auto',
+  },
+  historyRefBtn: {
+    flexShrink: 1,
+    // Takes the rest of the row, so re-reading a verse is the easy tap and the
+    // one that moves the audio is the deliberate one.
+    flexGrow: 1,
+    paddingVertical: 2,
   },
   historyTime: {
     color: C.accent,

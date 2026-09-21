@@ -14,7 +14,7 @@
 // what it is doing rather than appearing to hang.
 
 import {useCallback, useEffect, useRef, useState} from 'react';
-import {ToastAndroid} from 'react-native';
+import {AppState, ToastAndroid} from 'react-native';
 
 import useSettingsStore from '../Settings/settingsStore';
 import {flush, flushWhenOnline} from './feedback';
@@ -83,6 +83,21 @@ const useVerseDetection = ({sourceId, title, path, isPaused, isPlaybackReady}) =
     // In that order: the cached values are available immediately and work
     // offline, and the fetch corrects them a moment later if it can.
     loadTuning().then(refreshTuning);
+  }, []);
+
+  // Backgrounding is the last moment anything is guaranteed to run.
+  //
+  // Matches are held in memory until the recording changes or the player
+  // closes, and a process that is swiped away reaches neither. This is the one
+  // callback Android does deliver first, so it is where a lecture's worth of
+  // data stops being lost.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', next => {
+      if (next === 'background' || next === 'inactive') {
+        useVerseStore.getState().persist();
+      }
+    });
+    return () => sub.remove();
   }, []);
 
   // A new recording is a new table of contents.

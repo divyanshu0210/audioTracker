@@ -5,7 +5,6 @@ import {
   Alert,
   Animated,
   AppState,
-  Dimensions,
   InteractionManager,
   Keyboard,
   NativeModules,
@@ -15,6 +14,7 @@ import {
   ToastAndroid,
   TouchableOpacity,
   View,
+  useWindowDimensions,
 } from 'react-native';
 import Fontisto from 'react-native-vector-icons/Fontisto';
 import Icon from 'react-native-vector-icons/MaterialIcons';
@@ -574,11 +574,10 @@ const BacePlayer = () => {
   }, [focus.locked, focus.focusOn, focus.setFocus, focusTapAllowed]);
 
   const [isAudio, setIsAudio] = useState(false);
-  const {height: SCREEN_HEIGHT} = Dimensions.get('window');
+  const {height: SCREEN_HEIGHT} = useWindowDimensions();
   const AUDIO_MINIMIZED_RATIO = 0.18;
   const VIDEO_MINIMIZED_RATIO = 0.25;
   const AUDIO_PLAYER_HEIGHT = SCREEN_HEIGHT * AUDIO_MINIMIZED_RATIO;
-  const MAXIMIZED_HEIGHT = SCREEN_HEIGHT;
   const MINIMIZED_HEIGHT = useRef(
     new Animated.Value(SCREEN_HEIGHT * VIDEO_MINIMIZED_RATIO),
   ).current;
@@ -590,6 +589,21 @@ const BacePlayer = () => {
   // const [isDragging, setIsDragging] = useState(false);
   const [isMinimized, setIsMinimized] = useState(true);
   const [isHidden, setIsHidden] = useState(false);
+  const previousWindowHeight = useRef(SCREEN_HEIGHT);
+
+  // Keep the player height and minimized detent in sync after rotation or a
+  // window-size change. Otherwise the portrait height can survive in
+  // landscape and leave the player occupying only part of the screen.
+  useEffect(() => {
+    if (previousWindowHeight.current === SCREEN_HEIGHT) return;
+    previousWindowHeight.current = SCREEN_HEIGHT;
+    const minimizedHeight = isAudio
+      ? SCREEN_HEIGHT * AUDIO_MINIMIZED_RATIO
+      : SCREEN_HEIGHT * VIDEO_MINIMIZED_RATIO;
+    MINIMIZED_HEIGHT.setValue(minimizedHeight);
+    if (isHidden) return;
+    playerHeight.setValue(isMinimized ? minimizedHeight : SCREEN_HEIGHT);
+  }, [SCREEN_HEIGHT, isAudio, isHidden, isMinimized, MINIMIZED_HEIGHT, playerHeight]);
 
   // Notes context
   const [showNotes, setShowNotes] = useState(false);
@@ -1289,13 +1303,13 @@ const BacePlayer = () => {
 
   const maximizePlayer = useCallback(() => {
     Animated.timing(playerHeight, {
-      toValue: MAXIMIZED_HEIGHT,
+      toValue: SCREEN_HEIGHT,
       duration: 300,
       useNativeDriver: false,
     }).start();
     setIsHidden(false);
     setIsMinimized(false);
-  }, []);
+  }, [playerHeight, SCREEN_HEIGHT]);
 
   const togglePlayerSize = useCallback(() => {
     if (!isMinimized) {
@@ -1399,7 +1413,11 @@ const BacePlayer = () => {
   // for the rest of the session. SaveToListBar also returns null on its own for
   // an item already in a list, which is why its height is tied to the item
   // rather than only to the flags.
-  const queueUp = !showNotes && autoplay && !isInPip;
+  // A maximized local/VLC video owns the whole screen. Keep the queue
+  // available in the normal player and for YouTube, but do not let its bar
+  // remain visible below a fullscreen VLC video.
+  const isVlcFullscreen = !isMinimized && source_type !== 'youtube_video';
+  const queueUp = !showNotes && autoplay && !isInPip && !isVlcFullscreen;
   const saveBarUp = !isInPip && !showNotes;
   const bottomOverlay = Math.max(
     queueUp ? queueBarHeight : 0,
@@ -1737,7 +1755,7 @@ const BacePlayer = () => {
           {!isInPip && renderPersistentBackButton()}
           {!isInPip && renderDragHandle()}
 
-          {!showNotes && autoplay && !isInPip && (
+          {!showNotes && autoplay && !isInPip && !isVlcFullscreen && (
             <PlayerQueue
               onBarLayout={e => setQueueBarHeight(e.nativeEvent.layout.height)}
               playlist={playlist}

@@ -565,6 +565,7 @@ const BottomControls = React.memo(
       <Animated.View
         style={[
           styles.bottomControls,
+          !isAudio && styles.bottomControlsVideo,
           isAudio && styles.bottomControlsAudio,
           {opacity: controlsOpacity},
         ]}>
@@ -684,6 +685,12 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0, 0, 0, 0.1)',
     zIndex: 10,
     paddingBottom: 10,
+  },
+  // Android's navigation/gesture inset can sit over the very bottom of a
+  // fullscreen video. Lift the video controls clear of that inset so the
+  // settings and fullscreen buttons remain fully visible and tappable.
+  bottomControlsVideo: {
+    bottom: 10,
   },
   // An audio player is AUDIO_MINIMIZED_RATIO of the screen - around 144dp on a
   // usual phone - and this block is anchored to the bottom and grows upward,

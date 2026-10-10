@@ -20,7 +20,23 @@
 // ā), so they are fetched as 1252 and the entities decoded by hand - see
 // fetch.js for why the encoding is passed explicitly.
 
+const fs = require('fs');
+const path = require('path');
 const {fetchText, mapLimit} = require('../fetch');
+
+const MANUAL_DEVANAGARI_PATH = path.join(
+  __dirname,
+  '../data/songs_devanagari.json',
+);
+
+const loadManualDevanagari = () => {
+  try {
+    return JSON.parse(fs.readFileSync(MANUAL_DEVANAGARI_PATH, 'utf8'));
+  } catch (error) {
+    console.warn(`  manual song Devanagari skipped: ${error.message}`);
+    return {};
+  }
+};
 
 // kksongs carries songs written *in* English and in Spanish - translations set
 // to music, and original compositions by western devotees. They are real songs
@@ -279,5 +295,52 @@ module.exports = async function loadSongs({concurrency = 6, onProgress} = {}) {
     failures.slice(0, 5).forEach(f => console.warn(`    ${f.item}: ${f.error}`));
   }
 
-  return results.filter(Boolean);
+  const manual = loadManualDevanagari();
+  const songs = results.filter(Boolean);
+  let applied = 0;
+  const merged = songs.map(song => {
+    const correction = manual[song.id];
+    if (!correction) return song;
+    const changes = {};
+    if (Array.isArray(correction.devanagari)) {
+      changes.devanagari = correction.devanagari;
+      applied++;
+    }
+    // Manual records can also correct the display title/reference. Keep the
+    // fetched metadata for every other field.
+    if (correction.ref) changes.ref = correction.ref;
+    if (correction.title) changes.title = correction.title;
+    if (Array.isArray(correction.lines)) changes.lines = correction.lines;
+    if (Array.isArray(correction.sections)) changes.sections = correction.sections;
+    if (correction.translation) changes.translation = correction.translation;
+    if (!Object.keys(changes).length) return song;
+    return {...song, ...changes};
+  });
+  // Keep manually curated songs even when their source page disappears from
+  // the site's A-Z indexes.  These records are complete enough to be used by
+  // the app and are especially important for curated prayer collections.
+  const fetchedIds = new Set(merged.map(song => song.id));
+  for (const [id, correction] of Object.entries(manual)) {
+    // Songbook records are owned by sources/songbook.js; keeping them here as
+    // manual-only records would recreate the duplicate we intentionally fold.
+    if (id.startsWith('songbook-') || fetchedIds.has(id) || !Array.isArray(correction.lines)) continue;
+    merged.push({
+      id,
+      kind: 'song',
+      book: 'songs',
+      ref: correction.ref || correction.title || id,
+      title: correction.title || correction.ref || id,
+      lines: correction.lines,
+      devanagari: Array.isArray(correction.devanagari) ? correction.devanagari : null,
+      translation: correction.translation || '',
+      author: correction.author || null,
+      bookName: correction.bookName || null,
+      language: correction.language || null,
+      sourceUrl: correction.sourceUrl || null,
+      manual: true,
+      ...(Array.isArray(correction.sections) ? {sections: correction.sections} : {}),
+    });
+  }
+  if (applied) console.log(`  applied manual Devanagari to ${applied}/${songs.length} songs`);
+  return merged;
 };

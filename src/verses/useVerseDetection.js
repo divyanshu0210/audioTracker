@@ -7,7 +7,7 @@
 // capture holds a foreground service, a speech model and an audio stream open,
 // so it should run when there is something to hear and at no other time.
 //
-// Three things gate it: the preference, something actually playing, and the
+// Three things gate it: an explicit button press, something actually playing, and the
 // platform. Switching it on the first time is not free - a permission prompt, a
 // system consent dialog and a hundred and ninety megabyte download - so
 // `toggle` reports
@@ -23,6 +23,7 @@ import useVerseStore, {setVersePosition} from './useVerseStore';
 import {songFromTitle, verseFromTitle} from './verseTitle';
 import {
   capabilities,
+  deleteModel,
   enableListening,
   isSupportedPlatform,
   setCapturing,
@@ -30,20 +31,21 @@ import {
 } from './verseRecognition';
 
 const useVerseDetection = ({sourceId, title, path, isPaused, isPlaybackReady}) => {
-  const preference = useSettingsStore(
-    state => state.settings?.verseDetectionEnabled ?? false,
-  );
   const updateSettings = useSettingsStore(state => state.updateSettings);
 
   const listening = useVerseStore(state => state.listening);
   const [preparing, setPreparing] = useState(false);
-  const [modelProgress, setModelProgress] = useState(null);
+  // Recognition is deliberately opt-in for each recording. The stored
+  // setting remembers that the user has used the feature, but it must not
+  // start capture merely because a new video was opened.
+  const [sessionRequested, setSessionRequested] = useState(false);
 
   // Whether this device can do it at all, which is a stronger question than
   // "is it Android": playback capture arrived in Android 10. Asked once - the
   // answer cannot change while the app runs - and starts null so a control that
   // cannot work is never drawn and then removed.
   const [available, setAvailable] = useState(null);
+  const [modelReady, setModelReady] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -51,13 +53,21 @@ const useVerseDetection = ({sourceId, title, path, isPaused, isPlaybackReady}) =
       setAvailable(false);
       return undefined;
     }
-    capabilities().then(caps => {
-      if (!cancelled) setAvailable(!!caps.supported);
+    const read = () => capabilities().then(caps => {
+      if (!cancelled) {
+        setAvailable(!!caps.supported);
+        setModelReady(!!caps.modelReady);
+      }
     });
+    read();
+    const poll = setInterval(() => {
+      if (modelReady !== true) read();
+    }, 5000);
     return () => {
       cancelled = true;
+      clearInterval(poll);
     };
-  }, []);
+  }, [modelReady]);
 
   // Whether capture is up, tracked here rather than read back from the store:
   // the effect below has to tell "should be running" from "is running" without
@@ -102,6 +112,7 @@ const useVerseDetection = ({sourceId, title, path, isPaused, isPlaybackReady}) =
 
   // A new recording is a new table of contents.
   useEffect(() => {
+    setSessionRequested(false);
     useVerseStore.getState().reset();
 
     // These files are usually named by the verse they are about, which fills
@@ -116,11 +127,11 @@ const useVerseDetection = ({sourceId, title, path, isPaused, isPlaybackReady}) =
     useVerseStore.getState().expectSong(song, song?.id);
   }, [sourceId, title, path]);
 
-  // The preference is the person's answer; the store's `enabled` is what the
-  // rest of the feature reads.
+  // The store's `enabled` flag follows the explicit button press for this
+  // recording. A saved preference is intentionally not enough to start audio.
   useEffect(() => {
-    useVerseStore.getState().setEnabled(preference && available !== false);
-  }, [preference, available]);
+    useVerseStore.getState().setEnabled(sessionRequested && available !== false);
+  }, [sessionRequested, available]);
 
   // Whether the capture *session* should exist - not the same question as
   // whether it should be reading right now.
@@ -130,7 +141,7 @@ const useVerseDetection = ({sourceId, title, path, isPaused, isPlaybackReady}) =
   // on pause put a consent dialog in front of the person every time they
   // pressed play. The session spans the whole time the player is open; pausing
   // only closes the tap, in the effect below.
-  const shouldListen = preference && available === true && isPlaybackReady;
+  const shouldListen = sessionRequested && available === true && isPlaybackReady;
 
   useEffect(() => {
     let cancelled = false;
@@ -138,11 +149,15 @@ const useVerseDetection = ({sourceId, title, path, isPaused, isPlaybackReady}) =
     const sync = async () => {
       if (shouldListen && !runningRef.current) {
         runningRef.current = true;
-        const ok = await enableListening({
-          onModelProgress: fraction => !cancelled && setModelProgress(fraction),
-        });
-        if (cancelled) return;
-        setModelProgress(null);
+        const ok = await enableListening();
+        if (cancelled) {
+          // The recording may have changed while Android was showing the
+          // consent dialog. Do not leave a capture service running for a
+          // session that is already gone, or leave runningRef wedged true.
+          runningRef.current = false;
+          if (ok) await stopListening();
+          return;
+        }
         if (!ok) {
           // A failed start must not leave the flag set, or nothing will try
           // again for the rest of the session.
@@ -188,7 +203,8 @@ const useVerseDetection = ({sourceId, title, path, isPaused, isPlaybackReady}) =
    * and the model download. Everything after is a flag flip.
    */
   const toggle = useCallback(async () => {
-    if (preference) {
+    if (sessionRequested) {
+      setSessionRequested(false);
       updateSettings({verseDetectionEnabled: false});
       await stopListening();
       useVerseStore.getState().reset();
@@ -212,11 +228,12 @@ const useVerseDetection = ({sourceId, title, path, isPaused, isPlaybackReady}) =
           ToastAndroid.LONG,
         );
       }
+      setSessionRequested(true);
       updateSettings({verseDetectionEnabled: true});
     } finally {
       setPreparing(false);
     }
-  }, [preference, available, updateSettings]);
+  }, [sessionRequested, available, updateSettings]);
 
   /**
    * Where the media is, in seconds.
@@ -236,15 +253,26 @@ const useVerseDetection = ({sourceId, title, path, isPaused, isPlaybackReady}) =
     useVerseStore.getState().toggleDebug();
   }, []);
 
+  // Development control for repeating the first-run model path. Stop the
+  // listener before deleting so an active recogniser cannot keep the file open.
+  const removeModel = useCallback(async () => {
+    updateSettings({verseDetectionEnabled: false});
+    await stopListening();
+    await deleteModel();
+    setModelReady(false);
+    ToastAndroid?.show?.('Speech model deleted', ToastAndroid.SHORT);
+  }, [updateSettings]);
+
   return {
     // Strictly true only once the check has come back, so a control that cannot
     // work is never drawn even for one frame.
     available: available === true,
-    enabled: preference,
+    modelReady: modelReady === true,
+    enabled: sessionRequested,
     listening,
     preparing,
-    modelProgress,
     toggle,
+    removeModel,
     toggleDebug,
     reportPosition,
     onSeek,

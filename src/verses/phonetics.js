@@ -33,7 +33,18 @@
 // would be built in one alphabet and queried in another, and nothing would
 // ever match - so there is one copy of these rules and both sides import it.
 
-import {devanagariToLatin} from './devanagari';
+import {devanagariToLatin, hasDevanagari} from './devanagari';
+
+/**
+ * Devanagari comparison form. Unlike phoneticStream this keeps the script,
+ * while dropping whitespace, danda punctuation, and verse numbers so small
+ * ASR spacing differences do not matter.
+ */
+export const devanagariStream = text => {
+  const value = String(text || '').normalize('NFC');
+  if (!hasDevanagari(value)) return '';
+  return value.replace(/[^\u0900-\u097f]/g, '');
+};
 
 // Devanagari before anything else.
 //

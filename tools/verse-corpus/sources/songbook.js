@@ -25,6 +25,13 @@ const path = require('path');
 const {CACHE_DIR} = require('../fetch');
 
 const PARSED = path.join(CACHE_DIR, 'songbook.json');
+// Keep a checked-in copy so a clean checkout can rebuild the corpus without
+// first downloading and parsing the PDF.
+const PACKED = path.join(__dirname, '../data/songbook.json');
+const MANUAL_DEVANAGARI = path.join(
+  __dirname,
+  '../data/songs_devanagari.json',
+);
 
 /** A stable id from the song's name. Same shape as the kksongs ids. */
 const slugOf = name =>
@@ -35,7 +42,8 @@ const slugOf = name =>
     .replace(/[^a-z0-9]/g, '');
 
 module.exports = async ({onProgress} = {}) => {
-  if (!fs.existsSync(PARSED)) {
+  const parsedPath = fs.existsSync(PARSED) ? PARSED : PACKED;
+  if (!fs.existsSync(parsedPath)) {
     console.log(
       '    (skipped) run `python tools/verse-corpus/songbook.py` first - it ' +
         'reads the PDF and caches the songs this source needs',
@@ -43,17 +51,35 @@ module.exports = async ({onProgress} = {}) => {
     return [];
   }
 
-  const songs = JSON.parse(fs.readFileSync(PARSED, 'utf8'));
+  const songs = JSON.parse(fs.readFileSync(parsedPath, 'utf8'));
+  let manual = {};
+  try {
+    manual = JSON.parse(fs.readFileSync(MANUAL_DEVANAGARI, 'utf8'));
+  } catch (error) {
+    console.warn(`  manual song Devanagari skipped: ${error.message}`);
+  }
   const records = [];
 
   songs.forEach((song, i) => {
+    // The book's front-matter Praṇāma Mantras are the same sequence already
+    // maintained as the curated Mangalacarana Prayers record in songs.js.
+    // Keep the curated version because it has the complete supplied text,
+    // section headings, and cleaned continuous translation.
+    const normalizedRef = String(song.ref || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, '');
+    if (normalizedRef === 'pranama mantras'.replace(/[^a-z0-9]/g, '')) return;
     const lines = (song.lines || []).map(l => l.trim()).filter(Boolean);
     // Two lines is the shortest thing worth matching; below that a record is
     // all coincidence and no evidence.
     if (!song.ref || lines.length < 2) return;
 
+    const id = `songbook-${slugOf(song.ref)}`;
+    const correction = manual[id];
     records.push({
-      id: `songbook-${slugOf(song.ref)}`,
+      id,
       kind: 'song',
       book: 'songs',
       ref: song.ref,
@@ -63,7 +89,9 @@ module.exports = async ({onProgress} = {}) => {
       // than a song - see combine_prayers in songbook.py. Absent on everything
       // else, and the panel renders nothing when it is.
       ...(song.sections ? {sections: song.sections} : {}),
-      devanagari: null,
+      devanagari: Array.isArray(correction?.devanagari)
+        ? correction.devanagari
+        : null,
       // Carried, but never indexed. Only `lines` reaches the matcher - English
       // prose in this corpus is what once made the panel name a song every few
       // seconds of ordinary speech - while the panel still has something to

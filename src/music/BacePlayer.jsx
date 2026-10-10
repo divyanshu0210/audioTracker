@@ -1585,6 +1585,24 @@ const BacePlayer = () => {
                     disabled: below Android 10 there is no playback capture at
                     all, and a permanently dead control invites tapping. */}
                 {verses.available && (
+                  <View
+                    accessible
+                    accessibilityLabel={
+                      verses.modelReady
+                        ? 'AI speech model ready'
+                        : 'AI speech model waiting to download'
+                    }
+                    style={styles.focusPillHit}>
+                    <View style={[styles.focusPill, {backgroundColor: '#27272a'}]}>
+                      <Icon
+                        name={verses.modelReady ? 'cloud-done' : 'cloud-download'}
+                        size={18}
+                        color={verses.modelReady ? '#4ade80' : '#fbbf24'}
+                      />
+                    </View>
+                  </View>
+                )}
+                {verses.available && (
                   <TouchableOpacity
                     style={styles.focusPillHit}
                     onPress={verses.toggle}
@@ -1629,6 +1647,19 @@ const BacePlayer = () => {
                           }
                         />
                       )}
+                    </View>
+                  </TouchableOpacity>
+                )}
+
+                {__DEV__ && verses.available && (
+                  <TouchableOpacity
+                    style={styles.focusPillHit}
+                    onPress={verses.removeModel}
+                    accessibilityRole="button"
+                    accessibilityLabel="Delete speech model"
+                    accessibilityHint="Deletes the downloaded AI speech model so it can be downloaded again">
+                    <View style={[styles.focusPill, {backgroundColor: '#7f1d1d'}]}>
+                      <Icon name="delete-outline" size={19} color="#fecaca" />
                     </View>
                   </TouchableOpacity>
                 )}

@@ -82,6 +82,7 @@ const formatPosition = seconds => {
 const VersePanel = ({onSeek}) => {
   const [expanded, setExpanded] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
+  const [songScript, setSongScript] = useState('devanagari');
 
   // The purport is fetched rather than bundled - see purport.js - so it has
   // three states the panel has to tell apart: not asked for, fetching, and
@@ -132,6 +133,7 @@ const VersePanel = ({onSeek}) => {
 
   useEffect(() => {
     lineTops.current = [];
+    setSongScript('devanagari');
   }, [currentId]);
 
   useEffect(() => {
@@ -426,9 +428,17 @@ const VersePanel = ({onSeek}) => {
 
   const isSong = current.kind === 'song';
 
-  // Empty for Caitanya-caritamrta, which is Bengali, and for the songs that
-  // carry no script at all. Both then show the transliteration alone.
-  const script = current.devanagari?.filter(isDevanagari) || [];
+  // Corpus records may store one script string or an array of script lines.
+  // Normalize both shapes before filtering so older/generated shards cannot
+  // make the panel call .filter on a string.
+  const devanagari = Array.isArray(current.devanagari)
+    ? current.devanagari
+    : current.devanagari
+    ? String(current.devanagari).split(/\r?\n/)
+    : [];
+  const script = devanagari.filter(isDevanagari);
+  const showDevanagari = !isSong || songScript === 'devanagari';
+  const showLatin = !isSong || songScript === 'latin';
 
   return (
     <View style={styles.container}>
@@ -451,6 +461,27 @@ const VersePanel = ({onSeek}) => {
         </Text>
 
         <View style={styles.headerActions}>
+          {isSong && script.length > 0 && current.lines?.length > 0 && (
+            <TouchableOpacity
+              onPress={() =>
+                setSongScript(mode =>
+                  mode === 'devanagari' ? 'latin' : 'devanagari',
+                )
+              }
+              style={styles.scriptToggle}
+              accessibilityRole="button"
+              accessibilityLabel="Switch song script"
+              accessibilityHint={
+                songScript === 'devanagari'
+                  ? 'Show the Latin transliteration'
+                  : 'Show the Devanagari text'
+              }>
+              <Text style={styles.scriptToggleText}>
+                {songScript === 'devanagari' ? 'En' : 'Hi'}
+              </Text>
+            </TouchableOpacity>
+          )}
+
           {recent.length > 1 && (
             <TouchableOpacity
               onPress={() => setShowHistory(v => !v)}
@@ -496,12 +527,37 @@ const VersePanel = ({onSeek}) => {
               transliteration anyway. Absent, this renders nothing and the
               transliteration simply sits at the top. */}
           {script.length > 0 && (
-            <View style={styles.devanagariBlock}>
-              {script.map((line, i) => (
-                <Text key={i} style={styles.devanagari}>
-                  {line}
-                </Text>
-              ))}
+            <View>
+              {showDevanagari && (
+                <View style={styles.devanagariBlock}>
+                  {script.map((line, i) =>
+                    isSong ? (
+                      <React.Fragment key={i}>
+                        {!!sectionAt[i] && (
+                          <Text style={styles.prayerName}>{sectionAt[i]}</Text>
+                        )}
+                        <View
+                          onLayout={e => {
+                            lineTops.current[i] = e.nativeEvent.layout.y;
+                          }}
+                          style={[styles.lineRow, i === followLine && styles.lineRowHere]}>
+                          <Text
+                            style={[
+                              styles.devanagari,
+                              i === followLine && styles.lineHere,
+                            ]}>
+                            {line}
+                          </Text>
+                        </View>
+                      </React.Fragment>
+                    ) : (
+                      <Text key={i} style={styles.devanagari}>
+                        {line}
+                      </Text>
+                    ),
+                  )}
+                </View>
+              )}
             </View>
           )}
 
@@ -516,7 +572,7 @@ const VersePanel = ({onSeek}) => {
 
               followLine is null whenever the place is not known, which includes
               every verse - so this renders exactly as it did before for them. */}
-          {current.lines?.map((line, i) => (
+          {showLatin && current.lines?.map((line, i) => (
             <React.Fragment key={i}>
               {!!sectionAt[i] && (
                 <Text style={styles.prayerName}>{sectionAt[i]}</Text>
@@ -861,6 +917,17 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 0.6,
     marginBottom: 3,
+  },
+  scriptToggle: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    backgroundColor: 'rgba(148, 163, 184, 0.16)',
+    marginRight: 2,
+  },
+  scriptToggleText: {
+    color: C.accent,
+    fontSize: 11,
   },
   devanagariBlock: {
     marginBottom: 6,

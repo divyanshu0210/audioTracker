@@ -6,6 +6,7 @@ Builds the corpus that verse detection matches against, into `src/verses/corpus/
 node tools/verse-corpus/build.js                  # everything
 node tools/verse-corpus/build.js --only=songs     # one source
 node tools/verse-corpus/build.js --max-df=40      # tighter common-gram filter
+node tools/verse-corpus/build.js --recover-devanagari  # recover SB completion script
 ```
 
 The output is committed, so this only needs running when a source changes or a
@@ -92,6 +93,19 @@ material, and the songs are a scrape of kksongs. Fine for a personal library; wo
 before this is handed to anyone else.
 
 ## Adding a source
+
+The `sbCompletion` CSV contains transliteration only even though the original
+Vedabase verse pages contain Devanagari. Use `--recover-devanagari` when running
+the build to fetch that script at low concurrency. The same option enriches the
+existing CC records with only the Devanagari verse text from Vedamrit; all CC
+translations, purports, IDs, and other fields remain from the archive. It is
+opt-in because it is several thousand page requests; successful pages are
+cached and failed pages keep the transliteration fallback.
+
+The manually reviewed song Devanagari in
+`tools/verse-corpus/data/songs_devanagari.json` is merged by the songs source
+using song IDs during every build. It is source data, while `src/verses/corpus`
+contains generated shards and should not be used for hand-maintained inputs.
 
 A source module exports `async ({onProgress}) => records`, where a record is:
 

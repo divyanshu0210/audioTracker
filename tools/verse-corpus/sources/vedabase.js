@@ -29,10 +29,66 @@ const fs = require('fs');
 const path = require('path');
 const {execFileSync} = require('child_process');
 
-const {fetchText, CACHE_DIR} = require('../fetch');
+const {fetchText, mapLimit, CACHE_DIR} = require('../fetch');
 
 const TARBALL =
   'https://codeload.github.com/juanmanuelferrera/vedabase-original/tar.gz/refs/heads/main';
+
+const CC_SOURCE = 'https://vedamrit.in/cc';
+
+const decodeHtml = html =>
+  html
+    .replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCodePoint(parseInt(n, 16)))
+    .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n)))
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>');
+
+/** Extract only the original Devanagari verse from a Vedamrit page. */
+const devanagariFromCcPage = html => {
+  const text = decodeHtml(html
+    .replace(/<script[\s\S]*?<\/script>/gi, '')
+    .replace(/<style[\s\S]*?<\/style>/gi, '')
+    .replace(/<br\s*\/?\s*>/gi, '\n')
+    .replace(/<[^>]+>/g, '\n'));
+  const lines = text.split(/\r?\n/).map(line => line.replace(/\s+/g, ' ').trim()).filter(Boolean);
+  const devanagari = line => (line.match(/[\u0900-\u097f]/g) || []).length >= 2;
+  const numbered = line => devanagari(line) && /(?:॥|।)\s*[०-९\d-]+\s*॥?\s*$/.test(line);
+  const end = lines.findIndex(numbered);
+  if (end < 0) return null;
+
+  const verse = [lines[end]];
+  for (let i = end - 1; i >= 0 && devanagari(lines[i]); i--) verse.unshift(lines[i]);
+  // Preserve the source's pāda breaks for display. The matcher joins these
+  // lines when it builds its Devanagari stream, so this is presentation data.
+  return verse;
+};
+
+const ccPageUrl = ref => {
+  const match = String(ref || '').match(/^CC\s+(Adi|Madhya|Antya)\s+(\d+)\.(\d+(?:-\d+)?)$/i);
+  if (!match) return null;
+  const section = match[1].toLowerCase();
+  return `${CC_SOURCE}/${section === 'adi' ? 1 : section === 'madhya' ? 2 : 3}/${match[2]}/${match[3]}/`;
+};
+
+// Vedamrit has no usable page for these nine records. Keep the Devanagari
+// supplied by the CC text itself; all other fields still come from the archive.
+const MANUAL_CC_DEVANAGARI = {
+  'CC Adi 15.4': 'पौगण्ड-लीला चैतन्य-\nकृष्णस्यातिसुविस्तृता ।\nविद्यारम्भमुखा पाणि-\nग्रहणान्ता मनोहरा ॥४॥',
+  'CC Adi 15.5': 'गङ्गादास पण्डित-स्थाने पढ़ेन व्याकरण ।\nश्रवण-मात्रे कण्ठे कैला सूत्र-वृत्ति-गण ॥५॥',
+  'CC Adi 15.7': "अध्ययन-लीला प्रभुर वृन्दावन ।\n'चैतन्य-मङ्गले' कैल विस्तारि वर्णन ॥७॥",
+  'CC Adi 15.8': 'एक दिन मातर पदे करिया प्रणाम ।\nप्रभु कहे,—मात, मोरे देह एक दान ॥८॥',
+  'CC Adi 15.9': 'माता बले,—ताइ दिब, या तुमि मागिबे ।\nप्रभु कहे,—एकादशीते अन्न ना खाइबे ॥९॥',
+  'CC Adi 15.34': 'श्री-रूप-रघुनाथ-पदे यार आश ।\nचैतन्य-चरितामृत कहे कृष्णदास ॥३४॥',
+  'CC Adi 16.1': 'कृपा-सुधा-सरीद् यस्य\nविश्वम् आप्लावयन्त्य् अपि\nनीच-गैव सदा भाति\nतं चैतन्य-प्रभुं भजे ॥१॥',
+  'CC Adi 16.100': 'तोमार कवित्व येन गङ्गा-जल-धार ।\nतोमा-सम कवि कोथा नाहि देखि आर ॥१००॥',
+  'CC Adi 16.101': 'भवभूति, जयदेव, आर कालिदास ।\nताँ-सबार कवित्वे आछे दोषेर प्रकाश ॥१०१॥',
+};
+
+const MANUAL_SB_DEVANAGARI = {
+  'SB 10.42.22': 'तयोस्तदद्भुतं वीर्यं\nनिशाम्य पुरवासिनः ।\nतेजः प्रागल्भ्यं रूपं च\nमेनिरे विबुधोत्तमौ ॥२२॥',
+};
 
 // Only the three books with verses in them. The archive also carries the
 // lectures, letters and the smaller books, none of which anyone recites.
@@ -207,10 +263,11 @@ const displayRef = (book, ref) =>
     ? ref.replace(/^CC\s*/i, 'CC ')
     : ref.replace(/^Bg\.?\s*/i, 'BG ').replace(/^SB\s*/i, 'SB ');
 
-module.exports = async function loadVedabase({onProgress} = {}) {
+module.exports = async function loadVedabase({onProgress, recoverDevanagari = false} = {}) {
   const root = await ensureArchive();
   const records = [];
   let done = 0;
+  let ccDone = 0;
 
   for (const {dir, book} of BOOKS) {
     const files = walk(path.join(root, dir));
@@ -257,5 +314,29 @@ module.exports = async function loadVedabase({onProgress} = {}) {
     console.log(`    ${records.length - deduped.length} duplicate id(s) collapsed`);
   }
 
-  return deduped;
+  const withManual = deduped.map(record =>
+    MANUAL_SB_DEVANAGARI[record.ref]
+      ? {...record, devanagari: MANUAL_SB_DEVANAGARI[record.ref]}
+      : record,
+  );
+  if (!recoverDevanagari) return withManual;
+
+  const cc = withManual.filter(record => record.book === 'cc' && ccPageUrl(record.ref));
+  const {results, failures} = await mapLimit(cc, 3, async record => {
+    const html = await fetchText(ccPageUrl(record.ref));
+    const devanagari = devanagariFromCcPage(html);
+    if (devanagari) record.devanagari = devanagari;
+    if (onProgress && (++ccDone % 100 === 0 || ccDone === cc.length)) {
+      onProgress(ccDone, cc.length, `CC Devanagari ${record.ref}`);
+    }
+    return record;
+  });
+  const enriched = new Map(results.map(record => [record.id, record]));
+  if (failures.length) console.warn(`    ${failures.length} CC Devanagari page(s) failed`);
+  return withManual.map(record => {
+    const result = enriched.get(record.id) || record;
+    return MANUAL_CC_DEVANAGARI[result.ref]
+      ? {...result, devanagari: MANUAL_CC_DEVANAGARI[result.ref]}
+      : result;
+  });
 };

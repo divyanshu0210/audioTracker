@@ -18,12 +18,11 @@
 // Prabhupada's, and a panel that let it read as though it were would be quietly
 // misattributing his disciples' work to him.
 //
-// What is lost against the archive: no Devanagari, and the transliteration
-// arrives as one flat run with no line breaks, so these verses display as a
-// paragraph rather than as four lines. The archive is preferred wherever it
-// reaches for exactly that reason; this only covers where it does not.
+// The intermediate CSV has no Devanagari. The source pages it was made from
+// do, however, so the optional recovery pass below can put it back. The
+// transliteration remains the fallback when a page cannot be fetched.
 
-const {fetchText} = require('../fetch');
+const {fetchText, mapLimit} = require('../fetch');
 
 const CSV =
   'https://raw.githubusercontent.com/kodymoodley/vedabase-scraper/main/output/output-sb.csv';
@@ -35,6 +34,47 @@ const TRANSLATOR = 'Completed by Prabhupāda’s disciples after 1977';
 // archive; anything after it comes from here. Kept as one constant because it
 // is the single fact this whole file exists to express.
 const PRABHUPADA_THROUGH = {canto: 10, chapter: 13};
+
+const PAGE = (canto, chapter, verse) =>
+  `https://vedabase.io/en/library/sb/${canto}/${chapter}/${verse}/`;
+
+const MANUAL_DEVANAGARI = {
+  'SB 10.42.22': 'तयोस्तदद्भुतं वीर्यं\nनिशाम्य पुरवासिनः ।\nतेजः प्रागल्भ्यं रूपं च\nमेनिरे विबुधोत्तमौ ॥२२॥',
+  'SB 11.7.1': 'श्रीभगवानुवाच ।\nयदात्थ मां महाभाग तच्चिकीर्षितमेव मे ।\nब्रह्मा भवो लोकपालाः स्वर्वासं मेऽभिकाङ्क्षिणः ॥१॥',
+};
+
+const DEVANAGARI = /[\u0900-\u097f]/g;
+
+// The page is server-rendered, so a small text extraction is enough and keeps
+// the corpus builder dependency-free. The first contiguous run of lines that
+// contains Devanagari is the verse; later runs belong to synonyms/commentary.
+function devanagariFromPage(html) {
+  const text = html
+    .replace(/<script[\s\S]*?<\/script>/gi, '')
+    .replace(/<style[\s\S]*?<\/style>/gi, '')
+    .replace(/<br\s*\/?\s*>/gi, '\n')
+    .replace(/<[^>]+>/g, '\n')
+    .replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCodePoint(parseInt(n, 16)))
+    .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n)))
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>');
+
+  const lines = text
+    .split(/\r?\n/)
+    .map(line => line.replace(/\s+/g, ' ').trim())
+    .filter(Boolean);
+  const first = lines.findIndex(line => (line.match(DEVANAGARI) || []).length >= 2);
+  if (first < 0) return null;
+
+  const verse = [];
+  for (let i = first; i < lines.length; i++) {
+    if (!(lines[i].match(DEVANAGARI) || []).length) break;
+    verse.push(lines[i]);
+  }
+  return verse.length ? verse.join(' ') : null;
+}
 
 /**
  * RFC 4180, enough of it.
@@ -90,7 +130,7 @@ function parseCsv(text) {
   return rows;
 }
 
-module.exports = async function loadBhagavatamCompletion({onProgress} = {}) {
+module.exports = async function loadBhagavatamCompletion({onProgress, recoverDevanagari = false} = {}) {
   const text = await fetchText(CSV);
   const rows = parseCsv(text);
 
@@ -146,7 +186,45 @@ module.exports = async function loadBhagavatamCompletion({onProgress} = {}) {
     }
   }
 
-  return records;
+  for (const record of records) {
+    if (MANUAL_DEVANAGARI[record.ref]) record.devanagari = MANUAL_DEVANAGARI[record.ref];
+  }
+  if (!recoverDevanagari || !records.length) return records;
+
+  // Keep this opt-in: a complete recovery is several thousand polite page
+  // requests. The disk cache makes retries cheap and failed pages simply keep
+  // their transliteration fallback.
+  let recovered = 0;
+  let failed = 0;
+  if (onProgress) onProgress(0, records.length, 'recovering Devanagari');
+  const {results, failures} = await mapLimit(records, 3, async record => {
+    try {
+      const match = record.id.match(/^sb-(\d+)\.(\d+)\.([\d-]+)$/);
+      if (!match) return record;
+      const html = await fetchText(PAGE(match[1], match[2], match[3]));
+      const devanagari = devanagariFromPage(html);
+      if (devanagari) record.devanagari = devanagari;
+      return record;
+    } catch (error) {
+      failed++;
+      throw error;
+    } finally {
+      recovered++;
+      if (onProgress && (recovered % 25 === 0 || recovered === records.length)) {
+        onProgress(recovered, records.length, `Devanagari (${failed} failed)`);
+      }
+    }
+  });
+  if (onProgress) onProgress(records.length, records.length, `Devanagari (${failures.length} failed)`);
+  // mapLimit returns successful results in completion order; preserve the CSV
+  // order because corpus rebuilds should remain stable.
+  const byId = new Map(results.map(record => [record.id, record]));
+  return records.map(record => {
+    const result = byId.get(record.id) || record;
+    return MANUAL_DEVANAGARI[result.ref]
+      ? {...result, devanagari: MANUAL_DEVANAGARI[result.ref]}
+      : result;
+  });
 };
 
 module.exports.TRANSLATOR = TRANSLATOR;

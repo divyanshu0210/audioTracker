@@ -222,8 +222,14 @@ public class SanskritRecognizer implements AutoCloseable {
         return 1.0 / sum;
     }
 
+    /**
+     * Close only after any in-flight inference has finished. transcribe() is
+     * synchronized as well; without the same lock, service shutdown could
+     * destroy ONNX Runtime's session mutex while OrtSession.run() was still
+     * using it, which aborts the native process.
+     */
     @Override
-    public void close() {
+    public synchronized void close() {
         closeQuietly(ctc);
         closeQuietly(preprocessor);
         // The environment is a process-wide singleton and is deliberately not

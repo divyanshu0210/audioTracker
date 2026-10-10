@@ -20,40 +20,17 @@
 
 import {Buffer} from 'buffer';
 
-import {phoneticStream, grams, hashGram, neutralise} from './phonetics';
+import {
+  devanagariStream,
+  grams,
+  hashGram,
+  GRAM_SIZE,
+} from './phonetics';
 import {isPenalised, tuning} from './tuning';
 
 // Kept small on purpose. Counting hits is cheap; measuring runs is not, so
 // only the best few by raw count are looked at properly.
 const RERANK_DEPTH = 12;
-
-// How much more the Bengali pass has to show before it is believed.
-//
-// It matches in a coarser alphabet - see neutralise() - and a coincidence is
-// cheaper there: three letters fewer means every gram is likelier to occur by
-// accident. Held to the same bar as the Sanskrit pass, it put verses back on
-// screen for Devanagari soup, which is the failure this whole matcher was
-// rebuilt to stop.
-//
-// So the fallback must reach further and be more solid than the pass that
-// already declined. What it loses is a few points on sung Bengali; what it
-// keeps is the property that nonsense names nothing.
-const FLAT_RUN = 1.15;
-const FLAT_SOLID = 1.15;
-
-// How much o, v and y a query needs before the Bengali pass is even tried.
-//
-// Those are the three letters neutralise() flattens, and how many of them a
-// line contains turns out to say which language it was sung in. Measured over
-// the corpus: Sanskrit sits at p50 0.115 and p90 0.169, Bengali as sung at p10
-// 0.167 and p50 0.24. The two barely overlap.
-//
-// It is needed because the fallback is otherwise available to any query the
-// Sanskrit pass could not answer, including Sanskrit ones - and in the coarser
-// alphabet those find things. A degraded Srimad-Bhagavatam verse was matching a
-// Bengali song that shares not one word with it. Asking whether the query even
-// sounds Bengali costs nothing and keeps the two halves of the index apart.
-const BENGALI_HINT = 0.16;
 
 // How much of the stream has to line up before this is willing to name a
 // verse. Twenty-two characters is five or six syllables - about half a line -
@@ -178,14 +155,11 @@ const load = () => {
   const index = require('./corpus/index.json');
   decoded = {
     docs: index.docs,
-    common: unpackInts(index.common),
-    hashes: unpackInts(index.hashes),
-    starts: unpackInts(index.starts),
-    postings: unpackInts(index.postings),
+    devanagariCommon: unpackInts(index.devanagariCommon || ''),
+    devanagariHashes: unpackInts(index.devanagariHashes || ''),
+    devanagariStarts: unpackInts(index.devanagariStarts || ''),
+    devanagariPostings: unpackInts(index.devanagariPostings || ''),
     gramSize: index.gramSize,
-    // Ordinals below this are records as written; the rest are the flattened
-    // copies used for Bengali. See neutralise().
-    primaryCount: index.primaryCount ?? index.docs.length,
     builtAt: index.builtAt,
   };
   return decoded;
@@ -235,15 +209,20 @@ let touched = [];
  *                    the near-misses, which is the difference between "heard
  *                    nothing" and "nearly had it".
  */
-export const matchHashes = (queryHashes, minRun, flattened = false) => {
-  const {docs, common, hashes, starts, postings, gramSize, primaryCount} = load();
+export const matchHashes = (queryHashes, minRun, flattened = false, direct = false) => {
+  const loaded = load();
+  const {docs, gramSize} = loaded;
+  const common = loaded.devanagariCommon;
+  const hashes = loaded.devanagariHashes;
+  const starts = loaded.devanagariStarts;
+  const postings = loaded.devanagariPostings;
 
   // Which half of the index this query belongs to. A Sanskrit query never sees
   // the flattened copies and a flattened query never sees the originals - they
   // are two readings of the same corpus, not twice as much corpus, and letting
   // one query see both is what made nonsense match again.
-  const from = flattened ? primaryCount : 0;
-  const to = flattened ? docs.length : primaryCount;
+  const from = 0;
+  const to = docs.length;
 
   // Read once per query rather than per position: this loop runs over every
   // gram of every window, several times a second, for as long as a lecture
@@ -450,21 +429,16 @@ export const matchHashes = (queryHashes, minRun, flattened = false) => {
 export const identifyDetailed = text => {
   const {minRunChars, ambiguityMargin, penaltyFactor} = tuning();
 
-  const stream = phoneticStream(text);
-  if (stream.length < minRunChars) {
-    return {hit: null, why: `heard ${stream.length}ch, need ${minRunChars}`};
+  const directStream = devanagariStream(text);
+
+  if (directStream.length < minRunChars) {
+    return {
+      hit: null,
+      why: `heard ${directStream.length}ch, need ${minRunChars}`,
+    };
   }
 
-  const {gramSize} = load();
-  const hashesFor = s => grams(s, gramSize).map(hashGram);
-
-  // Set when a pass found candidates and refused them for being too alike.
-  //
-  // That refusal is an answer, and the Bengali pass must not be allowed to
-  // overturn it. The Caitanya-caritamrta quotes the Gita constantly - CC Antya
-  // 8.67-68 is BG 6.16 with two words changed - so a Gita verse can leave the
-  // Sanskrit pass deadlocked between the two, and a fallback reading "no match"
-  // as "nothing found" would then confidently name the Caitanya-caritamrta.
+  // A close tie is still treated as no match rather than guessing.
   let deadlocked = false;
 
   let why = 'no candidates';
@@ -501,38 +475,16 @@ export const identifyDetailed = text => {
     return best;
   };
 
-  const found = decide(matchHashes(hashesFor(stream)));
-  if (found) return {hit: found, why: 'matched'};
-  if (deadlocked) return {hit: null, why};
+  const directHashes = s => grams(s, GRAM_SIZE).map(hashGram);
+  if (directStream.length >= minRunChars) {
+    const directHit = decide(
+      matchHashes(directHashes(directStream), minRunChars, false, true),
+    );
+    if (directHit) return {hit: directHit, why: 'matched (Devanagari)'};
+    if (deadlocked) return {hit: null, why};
+  }
 
-  // Nothing in the Sanskrit alphabet. Try the Bengali one.
-  //
-  // A fallback rather than a second opinion, and that ordering is the whole of
-  // it. Bengali records carry a flattened second entry in the index - see
-  // neutralise() - and this is the query flattened to meet them, so a sung line
-  // finds its verse whichever vowels the singer actually shifted.
-  //
-  // Running both and keeping the better answer was tried first and was worse.
-  // The flattened alphabet is coarser, so it produces near-ties that the
-  // ambiguity gate then refuses - written Caitanya-caritamrta fell from 94% to
-  // 86%, almost entirely into no-match rather than into wrong answers. A query
-  // that the finer alphabet can already answer should never be asked twice.
-  // Does this even sound like Bengali? See BENGALI_HINT.
-  const shifted = (stream.match(/[ovy]/g) || []).length / stream.length;
-  if (shifted < BENGALI_HINT) return {hit: null, why};
-
-  const flat = neutralise(stream);
-  if (flat === stream) return {hit: null, why};
-
-  const {minSolidRatio} = tuning();
-  const loose = matchHashes(
-    hashesFor(flat),
-    Math.round(minRunChars * FLAT_RUN),
-    true,
-  ).filter(c => c.solidRatio >= minSolidRatio * FLAT_SOLID);
-
-  const fallback = decide(loose);
-  return {hit: fallback, why: fallback ? 'matched (bengali)' : why};
+  return {hit: null, why};
 };
 
 /** The best match for a piece of recogniser output, or null. */
@@ -547,9 +499,9 @@ export const identify = text => identifyDetailed(text).hit;
  * identical from a blank panel and have completely different causes.
  */
 export const nearMisses = (text, howMany = 3) => {
-  const stream = phoneticStream(text);
+  const stream = devanagariStream(text);
   if (!stream) return [];
-  return matchHashes(grams(stream, load().gramSize).map(hashGram), 0)
+  return matchHashes(grams(stream, GRAM_SIZE).map(hashGram), 0, false, true)
     .slice(0, howMany)
     .map(c => ({
       ref: c.ref,
@@ -563,11 +515,11 @@ export const nearMisses = (text, howMany = 3) => {
 };
 
 export const corpusStats = () => {
-  const {docs, hashes, postings, builtAt} = load();
+  const {docs, devanagariHashes, devanagariPostings, builtAt} = load();
   return {
     records: docs.length,
-    grams: hashes.length,
-    postings: postings.length,
+    grams: devanagariHashes.length,
+    postings: devanagariPostings.length,
     builtAt,
   };
 };

@@ -231,13 +231,27 @@ const detach = () => {
   subscriptions = [];
 };
 
+const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+/** Wait for the WorkManager-owned download to create its complete marker. */
+const waitForModel = async () => {
+  // Enqueue is idempotent: an existing/running unique job is kept, while a
+  // completed model makes the native side return immediately.
+  if (!(await scheduleModelDownload())) return false;
+  while (true) {
+    const caps = await capabilities();
+    if (caps.modelReady) return true;
+    await wait(1000);
+  }
+};
+
 /**
  * Everything needed before listening can start, in order, asking as it goes.
  *
  * Returns true only if it is now running. Each step can end the sequence, and
  * each leaves the store carrying a reason the panel can show.
  */
-export const enableListening = async ({onModelProgress} = {}) => {
+export const enableListening = async () => {
   const store = useVerseStore.getState();
 
   const caps = await capabilities();
@@ -253,9 +267,9 @@ export const enableListening = async ({onModelProgress} = {}) => {
 
   if (!caps.modelReady) {
     try {
-      await prepareModel(onModelProgress);
+      if (!(await waitForModel())) throw new Error('model download could not be queued');
     } catch (err) {
-      store.setUnavailable('The speech model could not be downloaded.');
+      store.setUnavailable('The speech model is waiting for a suitable connection.');
       return false;
     }
   }

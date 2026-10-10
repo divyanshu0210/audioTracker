@@ -5,6 +5,7 @@
 //   node tools/verse-corpus/build.js                  # everything
 //   node tools/verse-corpus/build.js --only=songs
 //   node tools/verse-corpus/build.js --max-df=40
+//   node tools/verse-corpus/build.js --recover-devanagari
 //
 // Two kinds of output, because the two have opposite constraints:
 //
@@ -36,7 +37,14 @@ require('@babel/register')({
   presets: [['@babel/preset-env', {targets: {node: 'current'}}]],
   only: [path.join(__dirname, '..', '..', 'src', 'verses')],
 });
-const {phoneticStream, grams, hashGram, neutralise, GRAM_SIZE} = require('../../src/verses/phonetics');
+const {
+  phoneticStream,
+  devanagariStream,
+  grams,
+  hashGram,
+  neutralise,
+  GRAM_SIZE,
+} = require('../../src/verses/phonetics');
 
 // How much of a record has to change before a flattened copy is worth indexing.
 //
@@ -148,6 +156,8 @@ const packInts = values => {
 async function main() {
   const only = arg('only', Object.keys(SOURCES).join(',')).split(',').map(s => s.trim());
   const maxDf = Number(arg('max-df', DEFAULT_MAX_DF));
+  const recoverDevanagari = process.argv.includes('--recover-devanagari') ||
+    arg('recover-devanagari', 'false') === 'true';
 
   fs.mkdirSync(TEXT_DIR, {recursive: true});
 
@@ -159,11 +169,11 @@ async function main() {
       process.exit(1);
     }
     console.log(`\n  ${name}...`);
-    let loaded = await load({onProgress: progress});
+    let loaded = await load({onProgress: progress, recoverDevanagari});
 
     if (name === 'songs') {
       const before = loaded.length;
-      loaded = loaded.filter(r => r.lines.join(' ').length <= MAX_SONG_CHARS);
+      loaded = loaded.filter(r => r.manual || r.lines.join(' ').length <= MAX_SONG_CHARS);
       const dropped = before - loaded.length;
       if (dropped) {
         console.log(`    ${dropped} over ${MAX_SONG_CHARS} chars dropped as compilations`);
@@ -172,6 +182,45 @@ async function main() {
 
     console.log(`    ${loaded.length} records`);
     records.push(...loaded);
+  }
+
+  // `--only` is a source refresh, not a request to publish a partial corpus.
+  // Preserve records from sources that were not selected, otherwise a quick
+  // BG or songs rebuild would overwrite index.json and hide every other book.
+  const allSourcesSelected = only.length === Object.keys(SOURCES).length;
+  if (!allSourcesSelected) {
+    const manifestPath = path.join(TEXT_DIR, 'manifest.json');
+    const existing = [];
+    if (fs.existsSync(manifestPath)) {
+      const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+      for (const shard of Object.keys(manifest)) {
+        const file = path.join(TEXT_DIR, `${shard}.json`);
+        if (!fs.existsSync(file)) continue;
+        const data = JSON.parse(fs.readFileSync(file, 'utf8'));
+        for (const record of Object.values(data)) existing.push(record);
+      }
+    }
+
+    const selected = new Set();
+    const add = prefix => selected.add(prefix);
+    for (const name of only) {
+      if (name === 'vedabase') ['bg-', 'sb-', 'cc-'].forEach(add);
+      else if (name === 'sbCompletion') add('sb-');
+      else if (name === 'songs') add('song-');
+      else if (name === 'songbook') add('songbook-');
+    }
+    const refreshed = new Set(records.map(record => record.id));
+    for (const record of existing) {
+      if (refreshed.has(record.id)) continue;
+      if ([...selected].some(prefix => record.id.startsWith(prefix))) continue;
+      record.book = record.book || (
+        record.id.startsWith('bg-') ? 'bg' :
+        record.id.startsWith('sb-') ? 'sb' :
+        record.id.startsWith('cc-') ? 'cc' : 'songs'
+      );
+      records.push(record);
+    }
+    console.log(`    preserved ${records.length - refreshed.size} records from unselected sources`);
   }
 
   // The same song from two sources is one song.
@@ -255,6 +304,10 @@ async function main() {
     .map(r => new Set(r.lines.map(lineKey).filter(Boolean)));
 
   const fragmentOfSequence = record => {
+    // A record that defines the complete sequence is the sequence itself,
+    // not a fragment of it. This matters for manually curated collections
+    // such as the full Mangalacarana prayers.
+    if (record.sections) return false;
     const lines = (record.lines || []).map(lineKey).filter(Boolean);
     if (!lines.length) return false;
     return sequences.some(
@@ -374,6 +427,7 @@ async function main() {
 
   const docs = [];
   const byGram = new Map(); // hash -> doc ordinals
+  const byDevanagariGram = new Map(); // hash -> primary doc ordinals
 
   // Most records are indexed once. The Bengali ones are indexed twice: as
   // written, and as sung.
@@ -407,7 +461,9 @@ async function main() {
       alternates.push(...alternate(record, streamOf.get(record)));
     }
   }
-  const forms = [...primaries, ...alternates];
+  // The app now matches Devanagari directly. Do not ship the old Latin and
+  // Bengali alternate forms in the runtime index.
+  const forms = primaries;
 
   if (alternates.length) {
     console.log(
@@ -455,6 +511,27 @@ async function main() {
     }
   });
 
+  // A second, script-preserving index for records whose source includes
+  // Devanagari. It uses the same ordinals as the primary phonetic half, so the
+  // matcher can choose the direct script path without loading display shards.
+  indexed.forEach((record, ordinal) => {
+    const stream = devanagariStream(
+      Array.isArray(record.devanagari)
+        ? record.devanagari.join(' ')
+        : record.devanagari,
+    );
+    if (!stream) return;
+    const seen = new Set();
+    for (const gram of grams(stream)) {
+      if (seen.has(gram)) continue;
+      seen.add(gram);
+      const hash = hashGram(gram);
+      const list = byDevanagariGram.get(hash);
+      if (list) list.push(ordinal);
+      else byDevanagariGram.set(hash, [ordinal]);
+    }
+  });
+
   const totalPostings = [...byGram.values()].reduce((n, l) => n + l.length, 0);
 
 
@@ -480,6 +557,14 @@ async function main() {
   kept.sort((a, b) => a[0] - b[0]);
   common.sort((a, b) => a[0] - b[0]);
 
+  const devKept = [];
+  const devCommon = [];
+  for (const entry of byDevanagariGram.entries()) {
+    (entry[1].length <= maxDf ? devKept : devCommon).push(entry);
+  }
+  devKept.sort((a, b) => a[0] - b[0]);
+  devCommon.sort((a, b) => a[0] - b[0]);
+
   const hashes = [];
   const starts = [];
   const postings = [];
@@ -490,12 +575,19 @@ async function main() {
   }
   starts.push(postings.length); // one past the end, so every range is a pair
 
+  const devHashes = [];
+  const devStarts = [];
+  const devPostings = [];
+  for (const [hash, list] of devKept) {
+    devHashes.push(hash | 0);
+    devStarts.push(devPostings.length);
+    devPostings.push(...list);
+  }
+  devStarts.push(devPostings.length);
+
   const index = {
     version: 1,
     gramSize: GRAM_SIZE,
-    // Ordinals below this are records as written; at or above it they are the
-    // flattened copies. See the note where `forms` is built.
-    primaryCount: primaries.length,
     builtAt: new Date().toISOString(),
     maxDf,
     docs,
@@ -508,10 +600,10 @@ async function main() {
     // Without this list both look identical from the device, every common
     // syllable severs the run it sits in, and nothing ever clears the
     // threshold. A few thousand integers to avoid that is a bargain.
-    common: packInts(common.map(([hash]) => hash | 0)),
-    hashes: packInts(hashes),
-    starts: packInts(starts),
-    postings: packInts(postings),
+    devanagariCommon: packInts(devCommon.map(([hash]) => hash | 0)),
+    devanagariHashes: packInts(devHashes),
+    devanagariStarts: packInts(devStarts),
+    devanagariPostings: packInts(devPostings),
   };
 
   fs.writeFileSync(path.join(OUT_DIR, 'index.json'), JSON.stringify(index));

@@ -15,6 +15,7 @@ import {
   View,
 } from 'react-native';
 import useSettingsStore from '../Settings/settingsStore';
+import {prefetchVerseModel} from '../verses/modelPrefetch';
 import {syncUserToBackend} from '../appMentorBackend/userMgt';
 import {useAppState} from '../contexts/AppStateContext';
 import {initUserDatabase} from '../database/UserDatabaseInstance';
@@ -57,6 +58,24 @@ const GoogleLoginScreen = ({navigation}) => {
   useEffect(() => {
     const frame = requestAnimationFrame(hideSplashScreen);
     return () => cancelAnimationFrame(frame);
+  }, []);
+
+  // The speech model verse detection needs, fetched while this screen waits.
+  //
+  // This is the longest idle stretch in the whole of onboarding - session
+  // check, account picker, backup check, possibly a restore - and it is spent
+  // watching progress bars rather than using the app, which makes it the right
+  // place to put a forty megabyte background download.
+  //
+  // The only place that starts it, and enough on its own: this is the initial
+  // route, so it mounts on every launch - it is the screen that looks for an
+  // existing session and moves past itself. The permission gate is not, since
+  // anyone who granted those months ago never sees it again.
+  //
+  // Nothing here waits on it or is told if it fails, and on a metered
+  // connection it does not run at all. See modelPrefetch.js for the rules.
+  useEffect(() => {
+    prefetchVerseModel();
   }, []);
 
   useEffect(() => {

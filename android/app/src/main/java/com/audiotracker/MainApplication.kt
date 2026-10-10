@@ -15,6 +15,7 @@ import com.transistorsoft.rnbackgroundfetch.RNBackgroundFetchPackage;
 import com.audiotracker.BackupLifecycleObserver
 import com.audiotracker.BackupPauseObserver
 import com.audiotracker.drivestream.DriveStreamPackage
+import com.audiotracker.verses.VerseRecognitionPackage
 //import com.audiotracker.ShellPackage
 
 class MainApplication : Application(), ReactApplication {
@@ -32,6 +33,7 @@ class MainApplication : Application(), ReactApplication {
               add(PipPackage())
               add(FocusSignalsPackage())
               add(DriveStreamPackage())
+              add(VerseRecognitionPackage())
               add(SplashPackage())
              //  add(RNBackgroundFetchPackage())
             }

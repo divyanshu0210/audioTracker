@@ -77,3 +77,21 @@ yarn-error.log
 **/.bundle/
 # Databases pulled off a device by tools/db-viewer (real user data, ~13MB each)
 tools/db-viewer/*/
+
+# Fetched pages for the verse corpus build; regenerate with
+# node tools/verse-corpus/build.js
+tools/verse-corpus/.cache/
+
+# Desktop model evaluation: a venv, multi-GB checkpoints, decoded audio and
+# transcripts of whatever was being tested. The scripts are tracked, the
+# outputs are not. See tools/verse-asr-eval/README.md
+tools/verse-asr-eval/.venv/
+tools/verse-asr-eval/.cache/
+tools/verse-asr-eval/out/
+# Transcripts and audio from other recordings, kept the same way: they are
+# large, they are somebody's copy of a lecture, and they are reproducible from
+# the source recording with transcribe.py.
+tools/verse-asr-eval/out-*/
+tools/verse-asr-eval/audio/
+tools/verse-asr-eval/__pycache__/
+tools/verse-corpus/__pycache__/

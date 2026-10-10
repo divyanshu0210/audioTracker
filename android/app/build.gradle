@@ -147,6 +147,23 @@ dependencies {
    // Backport of the Android 12 splash screen API, down to minSdk 24.
    implementation("androidx.core:core-splashscreen:1.0.1")
 
+   // Offline speech recognition, as two ONNX graphs - see
+   // SanskritRecognizer.java. Chosen over the platform SpeechRecognizer
+   // because that one only ever listens to a microphone, and what has to be
+   // recognised here is the app's own playback.
+   //
+   // Replaces Vosk. Vosk's advantage was that it streams, and the model that
+   // mattered is not available for it: the recogniser is a Sanskrit-finetuned
+   // Conformer published as ONNX, and onnxruntime is what runs it. The
+   // streaming loss is smaller than it looks, because the panel never acted on
+   // a single partial result anyway.
+   //
+   // The AAR carries onnxruntime's native library for every ABI. The splits
+   // block above is what keeps that out of the installed APK - each one gets
+   // its own architecture and no others.
+   implementation("com.microsoft.onnxruntime:onnxruntime-android:1.22.0")
+
+
     if (hermesEnabled.toBoolean()) {
         implementation("com.facebook.react:hermes-android")
     } else {

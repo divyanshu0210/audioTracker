@@ -1,0 +1,525 @@
+// matcher.js
+//
+// Which verse, if any, is being recited right now.
+//
+// The recogniser hands over a rolling window of the last few seconds as text.
+// This turns that into a phonetic stream (see phonetics.js), cuts it into
+// overlapping 5-grams, and asks the index which verses contain each one.
+//
+// The shape of the evidence is what makes this work. Because the grams overlap
+// by four characters, a genuine recitation does not scatter hits across a
+// verse - it produces a *run* of consecutive query positions all pointing at
+// the same verse. Thirty characters of real recitation is twenty-six
+// consecutive hits. Coincidence, by contrast, produces isolated hits in
+// unrelated places, because Sanskrit shares a lot of short material.
+//
+// So the score is not how many grams hit. It is how long the longest
+// uninterrupted run is, measured back in characters of stream. That single
+// change is the difference between a panel that flickers between plausible
+// verses and one that sits still on the right one.
+
+import {Buffer} from 'buffer';
+
+import {
+  devanagariStream,
+  grams,
+  hashGram,
+  GRAM_SIZE,
+} from './phonetics';
+import {isPenalised, tuning} from './tuning';
+
+// Kept small on purpose. Counting hits is cheap; measuring runs is not, so
+// only the best few by raw count are looked at properly.
+const RERANK_DEPTH = 12;
+
+// How much of the stream has to line up before this is willing to name a
+// verse. Twenty-two characters is five or six syllables - about half a line -
+// which is where a run stops being something two unrelated verses could share
+// by accident.
+//
+// It was twenty-six, reasoned rather than measured, and it was costing on both
+// sides at once. Over 48 real recordings, and over 300 windows of random
+// Devanagari soup that is no verse at all:
+//
+//   floor   found   named the wrong song   named something in soup
+//     26    62.5%          4.2%                  0 of 300
+//     24    66.7%          2.1%                  0
+//     22    68.8%          2.1%                  0
+//     20    70.8%          6.3%                  2
+//     16    79.2%         10.4%                 13
+//
+// Twenty-two finds six more recordings than twenty-six *and* halves the wrong
+// answers, which is not a trade at all - the old value was simply too high.
+// Runs between twenty-two and twenty-six turn out to be mostly real, and
+// refusing them did not buy precision, it just meant a song went unnamed and
+// some later window named a worse one.
+//
+// Twenty is where it becomes a trade and stops being worth it: soup starts
+// matching, and wrong answers triple.
+//
+// Checked against speech as well as song, because a floor this low is only
+// safe if a lecture does not trip it. Over a ten-minute English lecture put
+// through the Sanskrit model - 145 windows of English rendered phonetically in
+// Devanagari, which is the worst adversary this has - nothing was named at any
+// floor from 26 down to 16.
+//
+// The shipped value. Read through tuning() at the point of use so a server can
+// correct it - see tuning.js. Exported because tests and the corpus builder
+// want the number the app ships with, not whatever a device has been told.
+export const MIN_RUN_CHARS = 22;
+
+// What a position that is not in this record costs a run in progress.
+//
+// This is the number that decides whether the panel can be trusted, and the
+// reason is not obvious. Matching a window of speech against a verse is local
+// alignment, and the first version scored it with no penalty for a gap: a run
+// could skip up to six positions for free and pick up on the seventh. That
+// tolerance is necessary - a recogniser under a PA system drops a word here and
+// mangles one there, and without it a verse that was plainly recited comes back
+// as two half-runs that each clear nothing.
+//
+// But free gaps are sustainable gaps. At one hit in seven, a run crawls forever
+// through material that has nothing to do with it, gaining a character each
+// time, and forty characters collected across six hundred is indistinguishable
+// from forty characters actually recited. That is where the false verses came
+// from - measured on Devanagari soup, five percent of windows produced a
+// confident match, and the rate rose with window length.
+//
+// Charging for the gap fixes it at the root, because it makes the crawl
+// *lose*. At this penalty a run sustains roughly one miss for every third
+// position, so a mangled recitation survives comfortably while soup at one in
+// seven drifts negative and dies within a few characters. When the score goes
+// negative the run is abandoned and the next hit starts a fresh one, which is
+// what stops the alignment wandering out of the verse into the commentary
+// either side of it.
+//
+// Lowering it makes the panel eager and wrong; raising it starts rejecting
+// recitations with a dropped word in them. It is the one number worth tuning on
+// real recordings, which is precisely why it is no longer written here.
+// The number itself lives in tuning.js, so that a value tuned on synthetic
+// soup can be corrected by one measured on real recordings without an APK.
+// What is above is the reasoning behind the value it ships with.
+
+// How much of a run has to be this record specifically.
+//
+// A run is allowed to carry neutral grams through it - syllables too common to
+// identify anything, which really were heard and really are in the verse. But
+// nothing stops a run being made almost entirely of them, and such a run is not
+// evidence of this record so much as evidence of Sanskrit in general.
+//
+// That is the shape of the false positives seen on a device: ordinary speech
+// producing a long thin run through the common syllables of some verse, with
+// barely any of the verse's own material in it. This asks the question run
+// length alone does not - was this record *recognised*, or merely not
+// contradicted.
+//
+// Set low deliberately, because this is a second line of defence rather than
+// the cure. The false positives that made this unusable on a device came from
+// English and Spanish songs sitting in the corpus, and removing those fixed it
+// at the source - with them gone, clean English prose produces no candidate
+// that passes the length gate at all.
+//
+// It is kept because clean prose is not what the recogniser emits. Real output
+// on English speech is mangled, and mangled English looks more like
+// transliteration than proper English does, so the measured ceiling is an
+// optimistic one.
+//
+// Half would seem the natural threshold and is badly wrong: a verse is only
+// ever about half its own material, the rest being syllables shared with
+// everything. At 0.5 every mangled verse and every half-line was rejected. At
+// this value a recitation scores 46-52% and passes comfortably, while the cost
+// to recall is under one percent.
+// Also in tuning.js - see the note under MISS_PENALTY above.
+
+// Both the parse and the decode happen once, on first use, rather than at
+// import.
+//
+// The index is six megabytes of JSON, most of it base64 - and `import` at the
+// top of this file would spend that on the first launch that so much as
+// reaches this module, including every launch that never plays anything. The
+// require below runs inside load(), which runs on the first match attempt,
+// which only happens once recognition is actually listening.
+let decoded = null;
+
+const unpackInts = b64 => {
+  const bytes = Buffer.from(b64, 'base64');
+  // Copied rather than viewed: Buffer hands back a slice of a shared pool at
+  // an arbitrary byte offset, and Int32Array over an unaligned offset throws.
+  const out = new Int32Array(bytes.byteLength / 4);
+  for (let i = 0; i < out.length; i++) out[i] = bytes.readInt32LE(i * 4);
+  return out;
+};
+
+const load = () => {
+  if (decoded) return decoded;
+  const index = require('./corpus/index.json');
+  decoded = {
+    docs: index.docs,
+    devanagariCommon: unpackInts(index.devanagariCommon || ''),
+    devanagariHashes: unpackInts(index.devanagariHashes || ''),
+    devanagariStarts: unpackInts(index.devanagariStarts || ''),
+    devanagariPostings: unpackInts(index.devanagariPostings || ''),
+    gramSize: index.gramSize,
+    builtAt: index.builtAt,
+  };
+  return decoded;
+};
+
+/**
+ * Parse and decode the index now, rather than on the first match.
+ *
+ * The decode is not cheap - a nine megabyte JSON file, then a million postings
+ * out of base64 - and it runs on the JS thread. Left to happen lazily it lands
+ * on the first phrase the recogniser returns, which is in the middle of a
+ * lecture somebody is watching, and freezes the UI for as long as it takes.
+ *
+ * So it is pulled forward to the moment listening starts, where there is a
+ * system consent dialog covering the app and nothing to be frozen. Idempotent -
+ * load() returns the same object afterwards - so calling it twice costs
+ * nothing.
+ */
+export const warmUp = () => {
+  load();
+};
+
+/** Where `hash` sits in a sorted Int32Array, or -1. */
+const findGram = (hashes, hash) => {
+  let lo = 0;
+  let hi = hashes.length - 1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    const at = hashes[mid];
+    if (at === hash) return mid;
+    if (at < hash) lo = mid + 1;
+    else hi = mid - 1;
+  }
+  return -1;
+};
+
+// Reused between queries. Matching runs several times a second for as long as
+// a lecture is playing, and allocating a fifteen-thousand-slot counter each
+// time is the kind of garbage that shows up as a stutter in the panel.
+let counts = null;
+let touched = [];
+
+/**
+ * @param queryHashes hashed grams of the recogniser's output
+ * @param minRun      how long a run has to be to be returned. Defaults to the
+ *                    threshold the panel uses; the debug view passes 0 to see
+ *                    the near-misses, which is the difference between "heard
+ *                    nothing" and "nearly had it".
+ */
+export const matchHashes = (queryHashes, minRun, flattened = false, direct = false) => {
+  const loaded = load();
+  const {docs, gramSize} = loaded;
+  const common = loaded.devanagariCommon;
+  const hashes = loaded.devanagariHashes;
+  const starts = loaded.devanagariStarts;
+  const postings = loaded.devanagariPostings;
+
+  // Which half of the index this query belongs to. A Sanskrit query never sees
+  // the flattened copies and a flattened query never sees the originals - they
+  // are two readings of the same corpus, not twice as much corpus, and letting
+  // one query see both is what made nonsense match again.
+  const from = 0;
+  const to = docs.length;
+
+  // Read once per query rather than per position: this loop runs over every
+  // gram of every window, several times a second, for as long as a lecture
+  // plays.
+  const {missPenalty, minSolidRatio, minRunChars} = tuning();
+  const floor = minRun === undefined ? minRunChars : minRun;
+
+  if (!counts || counts.length !== docs.length) counts = new Int32Array(docs.length);
+
+  // Clearing only what the previous query touched, rather than the whole
+  // array - a query lights up a few hundred documents out of fifteen thousand.
+  for (const ordinal of touched) counts[ordinal] = 0;
+  touched = [];
+
+  // Kept per query gram so the rerank below can walk positions without
+  // searching the index a second time.
+  //   [from, to] - a real posting range
+  //   'neutral'   - a gram too common to be indexed; see `common` above. It
+  //                 neither confirms nor contradicts, and the rerank steps
+  //                 over it without breaking a run.
+  //   null        - in no verse at all, which is a genuine mismatch.
+  const rangeAt = new Array(queryHashes.length);
+
+  for (let q = 0; q < queryHashes.length; q++) {
+    const slot = findGram(hashes, queryHashes[q]);
+    if (slot === -1) {
+      rangeAt[q] = findGram(common, queryHashes[q]) === -1 ? null : 'neutral';
+      continue;
+    }
+    const postingsFrom = starts[slot];
+    const postingsTo = starts[slot + 1];
+    rangeAt[q] = [postingsFrom, postingsTo];
+    for (let p = postingsFrom; p < postingsTo; p++) {
+      const ordinal = postings[p];
+      // Wrong half of the index for this query - see `from`/`to` above.
+      if (ordinal < from || ordinal >= to) continue;
+      if (counts[ordinal] === 0) touched.push(ordinal);
+      counts[ordinal]++;
+    }
+  }
+
+  if (!touched.length) return [];
+
+  // Top few by raw hit count, which is a cheap upper bound on the run length.
+  const shortlist = touched
+    .slice()
+    .sort((a, b) => counts[b] - counts[a])
+    .slice(0, RERANK_DEPTH);
+
+  const wanted = new Set(shortlist);
+
+  // For each shortlisted verse, the best-scoring local alignment between the
+  // query and that record - the longest stretch of query positions landing in
+  // it, with short interruptions tolerated but paid for. See MISS_PENALTY.
+  //
+  // `solid` counts the positions in that alignment that were real hits on this
+  // record, as opposed to neutral grams that merely passed through it or misses
+  // it absorbed. See the note on MIN_SOLID_RATIO.
+  const runs = new Map(
+    shortlist.map(ordinal => [
+      ordinal,
+      {
+        // The running alignment score, and the best one seen. Fractional,
+        // because a miss costs less than a hit earns - see MISS_PENALTY.
+        score: 0,
+        best: 0,
+        solid: 0,
+        bestSolid: 0,
+        // Where the current run began and where the best one did. A run is
+        // abandoned the moment its score goes negative, so these move.
+        startsAt: -1,
+        bestStart: -1,
+        endsAt: -1,
+      },
+    ]),
+  );
+
+  // One step of the alignment for one record.
+  //
+  //   solid   a gram of this record, and the only thing that earns anything
+  //   neutral a gram too common to identify anything. It really was heard and
+  //           really is in the verse, so it keeps a run alive and counts
+  //           towards its length - but it earns nothing, because a run built
+  //           out of syllables every verse shares is evidence of Sanskrit in
+  //           general and not of this verse.
+  //   miss    a gram belonging to other records or to none. Costs.
+  const step = (run, q, kind) => {
+    if (run.score <= 0) {
+      // Nothing in progress. Only a solid hit may open a run; starting one on
+      // a neutral gram is how an alignment begins in the middle of nowhere.
+      if (kind !== 'solid') return;
+      run.score = 1;
+      run.solid = 1;
+      run.startsAt = q;
+    } else if (kind === 'solid') {
+      run.score += 1;
+      run.solid += 1;
+    } else if (kind === 'miss') {
+      run.score -= missPenalty;
+      if (run.score <= 0) {
+        // Abandoned. Whatever it had is already banked in `best`.
+        run.score = 0;
+        run.solid = 0;
+        run.startsAt = -1;
+        return;
+      }
+    }
+
+    if (run.score > run.best) {
+      run.best = run.score;
+      run.bestSolid = run.solid;
+      run.bestStart = run.startsAt;
+      run.endsAt = q;
+    }
+  };
+
+  for (let q = 0; q < queryHashes.length; q++) {
+    const range = rangeAt[q];
+
+    if (range === 'neutral') {
+      for (const ordinal of shortlist) step(runs.get(ordinal), q, 'neutral');
+      continue;
+    }
+
+    const hitHere = new Set();
+    if (range) {
+      for (let p = range[0]; p < range[1]; p++) {
+        const ordinal = postings[p];
+        if (wanted.has(ordinal)) hitHere.add(ordinal);
+      }
+    }
+    for (const ordinal of shortlist) {
+      step(runs.get(ordinal), q, hitHere.has(ordinal) ? 'solid' : 'miss');
+    }
+  }
+
+  return shortlist
+    .map(ordinal => {
+      const run = runs.get(ordinal);
+      const doc = docs[ordinal];
+      // How many query positions the winning alignment actually spanned, and
+      // how much stream that is: N overlapping 5-grams cover N + 4 characters.
+      //
+      // Measured from the span rather than from the score, and that is only
+      // honest because of the gap penalty - a run can no longer reach across
+      // material it did not match, so its extent and its content are the same
+      // thing again. Under the old free-gap scoring these two numbers could
+      // differ by a factor of fifteen.
+      const positions = run.best > 0 ? run.endsAt - run.bestStart + 1 : 0;
+      const runChars = positions ? positions + gramSize - 1 : 0;
+      const coverage = doc.len ? Math.min(1, runChars / doc.len) : 0;
+      // What share of the run was this record being recognised, rather than
+      // syllables so common they belong to everything, or tolerated misses.
+      const solidRatio = positions ? run.bestSolid / positions : 0;
+      return {
+        ...doc,
+        ordinal,
+        hits: counts[ordinal],
+        runChars,
+        // How much of the record this run accounts for. Not a gate - a
+        // lecturer quoting one line of a four-line verse is still a hit - but
+        // it is what separates the right answer from a longer record that
+        // merely contains it.
+        coverage,
+        // Run length is the evidence; coverage is how well the record fits it.
+        //
+        // Both are needed, because the corpus contains records that nest:
+        // compilations quoting whole chapters, songs built out of verses.
+        // Against a recitation of one verse, the verse and the compilation
+        // that quotes it produce *identical* runs - and ranking on run length
+        // alone leaves them tied, which reads as ambiguity and shows nothing.
+        // Coverage breaks it the right way every time: the verse accounts for
+        // nearly all of itself, the compilation for one percent of itself.
+        //
+        // Half weight, not full, so that coverage can separate a tie without
+        // ever letting a short record with a weak run beat a long one with a
+        // strong one.
+        score: runChars * (0.5 + 0.5 * coverage),
+        solidRatio,
+        // Where in the query the run ended, so a caller can tell how recent
+        // the evidence is.
+        endsAt: run.endsAt,
+      };
+    })
+    .filter(c => c.runChars >= floor && c.solidRatio >= minSolidRatio)
+    .sort((a, b) => b.score - a.score);
+};
+
+/**
+ * The best match, and why it was or was not accepted.
+ *
+ * Only the debug view wants the reason, but it wants it badly: the near-miss
+ * list it draws comes from nearMisses(), which applies the length and solidity
+ * gates and nothing else. A candidate can therefore sit at the top of that list
+ * looking unanswerable - 65 characters, 41% solid - while this function refuses
+ * it for a near-tie that the list does not show, because the tie is in the
+ * *scores* and the list prints run lengths. From outside, a correct match and a
+ * refused one are the same blank panel.
+ *
+ * Returns no hit rather than a low-confidence guess on purpose: a wrong verse
+ * sitting under the player is worse than no verse at all, because the person
+ * cannot tell which one it is without already knowing the answer.
+ */
+export const identifyDetailed = text => {
+  const {minRunChars, ambiguityMargin, penaltyFactor} = tuning();
+
+  const directStream = devanagariStream(text);
+
+  if (directStream.length < minRunChars) {
+    return {
+      hit: null,
+      why: `heard ${directStream.length}ch, need ${minRunChars}`,
+    };
+  }
+
+  // A close tie is still treated as no match rather than guessing.
+  let deadlocked = false;
+
+  let why = 'no candidates';
+
+  /** The gates, applied to one pass's candidates. */
+  const decide = candidates => {
+    // Verses that many people have reported as wrong have to work harder. They
+    // are real records and any of them can genuinely be recited, so this raises
+    // the bar rather than removing them - see tuning.js.
+    const results = candidates.filter(
+      c => !isPenalised(c.id) || c.runChars >= minRunChars * penaltyFactor,
+    );
+    if (!results.length) {
+      why = candidates.length ? 'all candidates penalised' : 'nothing over the gates';
+      return null;
+    }
+
+    const [best, runnerUp] = results;
+
+    // Two verses matching almost equally well usually means the run landed on
+    // something they share - a repeated epithet, or one of the many verses that
+    // open the same way. Naming either one would be a coin toss.
+    if (
+      runnerUp &&
+      runnerUp.score >= best.score * ambiguityMargin &&
+      runnerUp.id !== best.id
+    ) {
+      deadlocked = true;
+      why =
+        `tie: ${best.ref} ${best.score.toFixed(0)} vs ` +
+        `${runnerUp.ref} ${runnerUp.score.toFixed(0)}`;
+      return null;
+    }
+    return best;
+  };
+
+  const directHashes = s => grams(s, GRAM_SIZE).map(hashGram);
+  if (directStream.length >= minRunChars) {
+    const directHit = decide(
+      matchHashes(directHashes(directStream), minRunChars, false, true),
+    );
+    if (directHit) return {hit: directHit, why: 'matched (Devanagari)'};
+    if (deadlocked) return {hit: null, why};
+  }
+
+  return {hit: null, why};
+};
+
+/** The best match for a piece of recogniser output, or null. */
+export const identify = text => identifyDetailed(text).hit;
+
+/**
+ * The best few candidates regardless of whether any is good enough.
+ *
+ * Only the debug view calls this. It is the question that matters when nothing
+ * is appearing: is the recogniser producing something that nearly matches a
+ * verse, or something that resembles nothing in the corpus at all? Those look
+ * identical from a blank panel and have completely different causes.
+ */
+export const nearMisses = (text, howMany = 3) => {
+  const stream = devanagariStream(text);
+  if (!stream) return [];
+  return matchHashes(grams(stream, GRAM_SIZE).map(hashGram), 0, false, true)
+    .slice(0, howMany)
+    .map(c => ({
+      ref: c.ref,
+      runChars: c.runChars,
+      // What the ambiguity gate actually compares. Run length is what the eye
+      // reads, and the two can disagree completely - a short record the run
+      // covers most of scores like a long one it barely touches.
+      score: c.score,
+      solidRatio: c.solidRatio,
+    }));
+};
+
+export const corpusStats = () => {
+  const {docs, devanagariHashes, devanagariPostings, builtAt} = load();
+  return {
+    records: docs.length,
+    grams: devanagariHashes.length,
+    postings: devanagariPostings.length,
+    builtAt,
+  };
+};

@@ -115,7 +115,6 @@ const VersePanel = ({onSeek}) => {
 
   const dismiss = useVerseStore(state => state.dismiss);
   const rate = useVerseStore(state => state.rate);
-  const noteRevisit = useVerseStore(state => state.noteRevisit);
   const showFromHistory = useVerseStore(state => state.showFromHistory);
 
   const currentId = current?.id;
@@ -182,12 +181,11 @@ const VersePanel = ({onSeek}) => {
    */
   const handleShow = useCallback(
     entry => {
-      noteRevisit(entry.key);
       // Show the one that was asked for, not whichever was matched last.
       showFromHistory(entry);
       setShowHistory(false);
     },
-    [noteRevisit, showFromHistory],
+    [showFromHistory],
   );
 
   /** The timestamp, which is the part that moves the audio. */

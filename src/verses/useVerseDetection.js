@@ -18,7 +18,7 @@ import {AppState, ToastAndroid} from 'react-native';
 
 import useSettingsStore from '../Settings/settingsStore';
 import {flush, flushWhenOnline} from './feedback';
-import {loadTuning, refreshTuning} from './tuning';
+import {loadTuning} from './tuning';
 import useVerseStore, {setVersePosition} from './useVerseStore';
 import {songFromTitle, verseFromTitle} from './verseTitle';
 import {
@@ -89,10 +89,9 @@ const useVerseDetection = ({sourceId, title, path, isPaused, isPlaybackReady}) =
     flushWhenOnline();
     flush();
 
-    // Whatever this device last learned, then whatever the server knows now.
-    // In that order: the cached values are available immediately and work
-    // offline, and the fetch corrects them a moment later if it can.
-    loadTuning().then(refreshTuning);
+    // Use the last locally cached tuning values. Rating uploads no longer
+    // drive remote threshold changes.
+    loadTuning();
   }, []);
 
   // Backgrounding is the last moment anything is guaranteed to run.

@@ -42,42 +42,46 @@ const BATCH = 50;
 // long as the platform allows, and the next flush stacks on top of it.
 const TIMEOUT_MS = 10000;
 
-/**
- * What became of a match, strongest last.
- *
- * Ordered so a later signal can overwrite an earlier one without the caller
- * having to know which matters more: a verse dismissed and then thumbed up was
- * right, and a verse shown and then revisited was very right.
- */
-export const VERDICTS = {
-  shown: 0,
-  dismissed: 1,
-  wrong: 2,
-  right: 3,
-  revisited: 4,
-};
-
-export const isStronger = (next, current) =>
-  (VERDICTS[next] ?? 0) >= (VERDICTS[current] ?? 0);
+// Only explicit thumbs are feedback. The matcher may keep richer local state
+// while the recording is playing, but that state is not useful to the server.
+const PUBLIC_VERDICTS = new Set(['right', 'wrong']);
+const compactRow = row => ({
+  key: String(row.key),
+  verdict: row.verdict,
+  id: row.id || '',
+  ref: row.ref || '',
+  kind: row.kind || '',
+});
 
 /**
- * Add finished rows to the queue.
+ * Add explicit ratings to the queue.
  *
- * Never throws. A feedback log that can break the player is worse than none.
+ * Keep the matched verse/song so counts can be grouped by it, together with
+ * the verdict. All matcher evidence stays on the device.
  */
 export const enqueue = async rows => {
   if (!rows || !rows.length) return;
   try {
-    const queued = await load();
+    const feedback = rows
+      .filter(row => row?.key && PUBLIC_VERDICTS.has(row.verdict))
+      .map(compactRow);
+    // Also compact any queue left by an older app version, so legacy
+    // diagnostic rows are never uploaded after this update.
+    const queued = (await load())
+      .filter(row => row?.key && PUBLIC_VERDICTS.has(row.verdict))
+      .map(compactRow);
+    if (!feedback.length) {
+      await AsyncStorage.setItem(QUEUE_KEY, JSON.stringify(queued));
+      return;
+    }
     await AsyncStorage.setItem(
       QUEUE_KEY,
-      JSON.stringify([...queued, ...rows].slice(-MAX_QUEUED)),
+      JSON.stringify([...queued, ...feedback].slice(-MAX_QUEUED)),
     );
   } catch (err) {
     console.log('[verses] could not queue feedback:', err?.message);
   }
 };
-
 const load = async () => {
   try {
     const raw = await AsyncStorage.getItem(QUEUE_KEY);
@@ -87,8 +91,6 @@ const load = async () => {
     return [];
   }
 };
-
-export const queuedCount = async () => (await load()).length;
 
 // One flush at a time. Connectivity returning while a lecture ends would
 // otherwise start two, and both would read the same rows and send them twice.
@@ -125,7 +127,13 @@ export const flush = async () => {
     // offline for a week has more than one batch waiting, and leaving the rest
     // until the next recording would take a week to drain.
     for (;;) {
-      const rows = await load();
+      const storedRows = await load();
+      const rows = storedRows
+        .filter(row => row?.key && PUBLIC_VERDICTS.has(row.verdict))
+        .map(compactRow);
+      if (rows.length !== storedRows.length) {
+        await AsyncStorage.setItem(QUEUE_KEY, JSON.stringify(rows));
+      }
       if (!rows.length) break;
 
       const batch = rows.slice(0, BATCH);
@@ -160,11 +168,8 @@ const post = async rows => {
     // it. One enthusiastic listener producing two hundred rows would otherwise
     // set the thresholds for everybody, and a verse that is a magnet in one
     // person's library would look like a magnet in general. Both of those
-    // become answerable the moment rows can be grouped by who produced them.
-    //
-    // The cost is worth stating plainly: this stops being an anonymous log and
-    // becomes a record of which verses a named person heard, and where in a
-    // lecture. It is still not audio and not a transcript.
+    // Include the account when available so the server can count ratings per
+    // user. The payload contains no audio or matcher diagnostics.
     const userId = await AsyncStorage.getItem('userId');
 
     // Trailing slash matters: Django's APPEND_SLASH turns a POST to the
@@ -204,59 +209,5 @@ export const flushWhenOnline = () => {
     });
   } catch (err) {
     watching = false;
-  }
-};
-
-/**
- * Everything queued, as a table.
- *
- * For reading rather than sending - the fastest way to see whether the wrong
- * answers share a number, before any of this reaches a server.
- */
-export const exportFeedback = async () => {
-  const rows = await load();
-  if (!rows.length) return 'Nothing recorded yet.';
-
-  const cell = (value, places) => {
-    if (value === undefined || value === null) return '-';
-    return typeof value === 'number' && places !== undefined
-      ? value.toFixed(places)
-      : String(value);
-  };
-
-  const lines = rows.map(r =>
-    [
-      r.verdict,
-      cell(r.ref),
-      cell(r.source),
-      cell(r.position),
-      cell(r.runChars),
-      cell(r.solidRatio, 2),
-      cell(r.coverage, 2),
-      cell(r.confidence, 2),
-      cell(r.votes),
-    ].join('\t'),
-  );
-
-  const tally = rows.reduce((acc, r) => {
-    acc[r.verdict] = (acc[r.verdict] || 0) + 1;
-    return acc;
-  }, {});
-
-  return [
-    `${rows.length} matches · ` +
-      Object.entries(tally)
-        .map(([k, n]) => `${n} ${k}`)
-        .join(' · '),
-    ['verdict', 'ref', 'source', 'pos', 'runChars', 'solid', 'cover', 'conf', 'votes'].join('\t'),
-    ...lines,
-  ].join('\n');
-};
-
-export const clearFeedback = async () => {
-  try {
-    await AsyncStorage.removeItem(QUEUE_KEY);
-  } catch (err) {
-    // Nothing depends on it.
   }
 };

@@ -6,14 +6,10 @@
 // one meant an APK, which in practice means they never get corrected.
 //
 // So they are read from here rather than written where they are used. The
-// values ship with the app and work with no network ever; a device that reaches
-// the server takes whatever it has learned instead. See the config endpoint in
-// the backend's verses app.
+// values ship with the app and work without network access. User ratings do
+// not change matcher thresholds remotely.
 //
-// The validation below is not defensive habit, it is the point. A config
-// endpoint that can set MIN_RUN_CHARS to zero is a way to break the feature for
-// every user at once, from a machine nobody is watching. Anything outside a
-// range that makes sense is ignored and the shipped value stands.
+// The validation below keeps locally stored values within safe ranges.
 
 const KEY = '@verses/tuning';
 
@@ -113,30 +109,6 @@ export const loadTuning = async () => {
     if (raw) applyTuning(JSON.parse(raw));
   } catch (err) {
     // The shipped values stand, which is a working feature.
-  }
-  return current;
-};
-
-/**
- * Ask the server for better numbers.
- *
- * Silent on failure and safe to call often. Only a response that parses is
- * stored, so a server returning an error page cannot overwrite a good
- * configuration with rubbish.
- */
-export const refreshTuning = async () => {
-  try {
-    const {BASE_URL} = require('../appMentorBackend/userMgt');
-    const response = await fetch(`${BASE_URL}/verses/config/`);
-    if (!response.ok) return current;
-
-    const config = await response.json();
-    if (!config || typeof config !== 'object') return current;
-
-    applyTuning(config);
-    await storage().setItem(KEY, JSON.stringify(config));
-  } catch (err) {
-    // Offline, or no endpoint. Whatever was loaded stays.
   }
   return current;
 };

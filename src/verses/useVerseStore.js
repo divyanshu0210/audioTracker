@@ -20,7 +20,7 @@
 import {create} from 'zustand';
 
 import {identifyDetailed, nearMisses} from './matcher';
-import {enqueue, flush, isStronger} from './feedback';
+import {enqueue, flush} from './feedback';
 import {tuning} from './tuning';
 import {lastCitation} from './citations';
 import {lookup} from './corpusText';
@@ -724,28 +724,14 @@ const useVerseStore = create((set, get) => ({
       };
     }),
 
-  /**
-   * The verdict on a match, from whatever the person did about it.
-   *
-   * Signals arrive in any order and only the strongest is kept - a verse
-   * dismissed and then thumbed up was right, whatever the dismissal suggested.
-   * See VERDICTS.
-   */
-  recordVerdict: (key, verdict) =>
-    set(state => {
-      const row = state._rows.get(key);
-      if (!row || !isStronger(verdict, row.verdict)) return {};
-      const rows = new Map(state._rows);
-      rows.set(key, {...row, verdict});
-      return {_rows: rows};
-    }),
-
   /** A thumb on what is on screen. Deliberate, and the least ambiguous signal. */
   rate: verdict =>
     set(state => {
       if (!state.current || state.current.rated) return {};
-      get().recordVerdict(state.current.key, verdict);
-      return {current: {...state.current, rated: verdict}};
+      const rows = new Map(state._rows);
+      const row = rows.get(state.current.key);
+      if (row) rows.set(state.current.key, {...row, verdict});
+      return {_rows: rows, current: {...state.current, rated: verdict}};
     }),
 
   /**
@@ -773,14 +759,6 @@ const useVerseStore = create((set, get) => ({
     }),
 
   /**
-   * Somebody seeking to a verse from the history.
-   *
-   * The strongest signal available and the only one nobody has to be asked
-   * for: going back to a match means it was right *and* worth finding again.
-   */
-  noteRevisit: key => get().recordVerdict(key, 'revisited'),
-
-  /**
    * Dismiss what is on screen without forgetting that it happened.
    *
    * Counted against the match, but weakly. Somebody may be clearing the panel
@@ -789,7 +767,6 @@ const useVerseStore = create((set, get) => ({
    */
   dismiss: () =>
     set(state => {
-      if (state.current) get().recordVerdict(state.current.key, 'dismissed');
       return {current: null, _votes: new Map(), followLine: null, _lostWindows: 0};
     }),
 

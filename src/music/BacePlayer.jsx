@@ -585,7 +585,7 @@ const BacePlayer = () => {
   }, [focus.locked, focus.focusOn, focus.setFocus, focusTapAllowed]);
 
   const [isAudio, setIsAudio] = useState(false);
-  const {height: SCREEN_HEIGHT} = useWindowDimensions();
+  const {height: SCREEN_HEIGHT, width: SCREEN_WIDTH} = useWindowDimensions();
   const AUDIO_MINIMIZED_RATIO = 0.18;
   const VIDEO_MINIMIZED_RATIO = 0.25;
   const AUDIO_PLAYER_HEIGHT = SCREEN_HEIGHT * AUDIO_MINIMIZED_RATIO;
@@ -1339,6 +1339,22 @@ const BacePlayer = () => {
       setShowNotes(false);
     }
   }, [isMinimized, minimizePlayer, maximizePlayer]);
+
+  // Landscape leaves too little vertical room for notes below a video. Make
+  // the VLC player fullscreen for the duration of the landscape orientation;
+  // restore the normal minimized layout when the device returns to portrait.
+  const wasLandscapeRef = useRef(null);
+  useEffect(() => {
+    const isLandscape = SCREEN_WIDTH > SCREEN_HEIGHT;
+    if (wasLandscapeRef.current === isLandscape) return;
+    wasLandscapeRef.current = isLandscape;
+    if (isLandscape) {
+      setShowNotes(false);
+      maximizePlayer();
+    } else {
+      minimizePlayer();
+    }
+  }, [SCREEN_HEIGHT, SCREEN_WIDTH, maximizePlayer, minimizePlayer]);
 
   // Pan responder for drag gestures
   const panResponder = useRef(

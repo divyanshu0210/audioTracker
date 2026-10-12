@@ -768,33 +768,39 @@ const BottomControls = React.memo(
           </View>
         )}
 
-        <View style={styles.bottomRow}>
+        {!isAudio ? (
           <SliderWithTime
-            style={styles.timeControlsContainer}
-            sliderStyle={styles.sliderInline}
+            stacked
             onSeek={onSeek}
-          />
-          {!isAudio ? (
-            <View style={styles.inlineButtonRow}>
-              <PlayerSettings
-                ref={settingsRef}
-                playbackRate={playbackRate}
-                onSelectPlaybackRate={onSelectPlaybackRate}
-                aspectRatio={aspectRatio}
-                onSelectAspectRatio={onSelectAspectRatio}
-                onVisibilityChange={onSettingsVisibilityChange}
-              />
-              <TouchableOpacity
-                style={styles.controlButton}
-                onPress={onToggleSize}>
-                <Icon
-                  name={isMinimized ? 'fullscreen' : 'fullscreen-exit'}
-                  size={28}
-                  color="white"
+            topRight={
+              <View style={styles.inlineButtonRow}>
+                <PlayerSettings
+                  ref={settingsRef}
+                  playbackRate={playbackRate}
+                  onSelectPlaybackRate={onSelectPlaybackRate}
+                  aspectRatio={aspectRatio}
+                  onSelectAspectRatio={onSelectAspectRatio}
+                  onVisibilityChange={onSettingsVisibilityChange}
                 />
-              </TouchableOpacity>
-            </View>
-          ) : (
+                <TouchableOpacity
+                  style={styles.controlButton}
+                  onPress={onToggleSize}>
+                  <Icon
+                    name={isMinimized ? 'fullscreen' : 'fullscreen-exit'}
+                    size={28}
+                    color="white"
+                  />
+                </TouchableOpacity>
+              </View>
+            }
+          />
+        ) : (
+          <View style={styles.bottomRow}>
+            <SliderWithTime
+              style={styles.timeControlsContainer}
+              sliderStyle={styles.sliderInline}
+              onSeek={onSeek}
+            />
             <TouchableOpacity
               style={styles.audioControlButton}
               onPress={onChangePlaybackRate}>
@@ -802,8 +808,8 @@ const BottomControls = React.memo(
                 {playbackRates[playbackRateIndex]}x
               </Text>
             </TouchableOpacity>
+          </View>
           )}
-        </View>
       </Animated.View>
     );
   },

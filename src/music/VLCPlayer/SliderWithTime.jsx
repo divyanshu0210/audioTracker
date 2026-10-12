@@ -16,7 +16,7 @@ export const formatTime = time => {
   return hours > 0 ? `${hours}:${minutes}:${seconds}` : `${minutes}:${seconds}`;
 };
 
-const SliderWithTime = ({ style, onSeek, sliderStyle }) => {
+const SliderWithTime = ({ style, onSeek, sliderStyle, stacked = false, topRight }) => {
   // Subscribe to both time and duration in one component
   const currentTime = usePlayerTimeStore((state) => state.currentTime);
   const duration = usePlayerTimeStore((state) => state.duration);
@@ -36,6 +36,29 @@ const SliderWithTime = ({ style, onSeek, sliderStyle }) => {
     [duration]
   );
   
+  if (stacked) {
+    return (
+      <View style={[styles.stackedContainer, style]}>
+        <View style={styles.stackedTopRow}>
+          <Text style={[styles.timeText, styles.stackedTimeText]}>
+            {formattedCurrentTime} / {formattedDuration}
+          </Text>
+          {topRight}
+        </View>
+        <Slider
+          style={[styles.slider, styles.stackedSlider, sliderStyle]}
+          value={currentTime}
+          minimumValue={0}
+          maximumValue={duration}
+          onSlidingComplete={handleSlidingComplete}
+          minimumTrackTintColor="red"
+          maximumTrackTintColor="rgba(255, 255, 255, 0.5)"
+          thumbTintColor="red"
+        />
+      </View>
+    );
+  }
+
   return (
     <View style={[styles.container, style]}>
       <Text style={styles.timeText}>
@@ -66,9 +89,29 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     flex: 1,
   },
+  stackedContainer: {
+    width: '100%',
+    alignItems: 'center',
+  },
+  stackedTopRow: {
+    width: '95%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  stackedTimeText: {
+    width: 'auto',
+    flexShrink: 0,
+    paddingLeft: 4,
+  },
   slider: {
     flex: 1,
     marginHorizontal: 8,
+  },
+  stackedSlider: {
+    width: '99%',
+    marginHorizontal: 0,
+    marginTop: -6,
   },
   timeText: {
     color: 'white',

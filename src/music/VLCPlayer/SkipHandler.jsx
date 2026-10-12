@@ -16,11 +16,22 @@ const DOUBLE_PRESS_DELAY = 300;
  *  onCenterDoubleTap – called when double-tap lands in center third (toggle play/pause)
  *  children      – everything rendered inside the touchable area
  */
-const SkipHandler = ({ vlcPlayerRef, onSingleTap, onCenterDoubleTap, children }) => {
+const SkipHandler = ({
+  vlcPlayerRef,
+  onSkip,
+  onSingleTap,
+  onCenterDoubleTap,
+  children,
+}) => {
   const lastTap = useRef(0);
 
   // Use getState() inside callbacks so we never need these as reactive deps
   const triggerSkip = useCallback((seconds) => {
+    if (onSkip) {
+      onSkip(seconds);
+      return;
+    }
+
     const { getCurrentTime, getDuration, setCurrentTime } = usePlayerTimeStore.getState();
     const currentTime = getCurrentTime();
     const duration    = getDuration();
@@ -30,7 +41,7 @@ const SkipHandler = ({ vlcPlayerRef, onSingleTap, onCenterDoubleTap, children })
     const newTime = Math.max(0, Math.min(currentTime + seconds * 1000, duration));
     vlcPlayerRef.current.seek(newTime / duration);
     setCurrentTime(newTime);
-  }, [vlcPlayerRef]);
+  }, [onSkip, vlcPlayerRef]);
 
   const triggerSkipAnimation = useCallback((direction) => {
     const { setSkipDirection, setShowSkipIndicator } = usePlayerTimeStore.getState();

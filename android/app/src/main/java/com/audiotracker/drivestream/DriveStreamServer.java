@@ -4,6 +4,7 @@ import android.content.ContentResolver;
 import android.content.Context;
 import android.net.Uri;
 import android.os.ParcelFileDescriptor;
+import android.os.StatFs;
 import android.util.Base64;
 import android.util.Log;
 
@@ -11,6 +12,8 @@ import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.FileInputStream;
+import java.io.File;
+import java.io.FileOutputStream;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
@@ -24,6 +27,10 @@ import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.util.Locale;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ConcurrentHashMap;
@@ -68,7 +75,12 @@ public final class DriveStreamServer {
     private static final int MAX_REDIRECTS = 5;
     private static final int COPY_BUFFER = 64 * 1024;
     private static final int METADATA_CACHE_BYTES = 2 * 1024 * 1024;
-    private static final int METADATA_CACHE_FILES = 8;
+    private static final long CACHE_MIN_BYTES = 16L * 1024 * 1024;
+    private static final long CACHE_MAX_BYTES = 256L * 1024 * 1024;
+    private static final long CACHE_RESERVED_BYTES = 100L * 1024 * 1024;
+    // VLC's startup probes for these files have been observed around 0, 1.5
+    // and 5.3 MB. Keep this startup band ahead of later seek/playback ranges.
+    private static final long CACHE_METADATA_RANGE_BYTES = 8L * 1024 * 1024;
     private static final int MAX_HEADER_LINE = 8192;
 
     // Drive file ids are url-safe base64-ish. Anything else is not an id we
@@ -78,6 +90,7 @@ public final class DriveStreamServer {
     private static DriveStreamServer instance;
 
     private final Context appContext;
+    private final File diskCacheDir;
     private final ExecutorService workers = Executors.newCachedThreadPool();
     private final ConcurrentHashMap<String, AtomicInteger> rangeRequestCounts =
             new ConcurrentHashMap<>();
@@ -89,12 +102,18 @@ public final class DriveStreamServer {
         final long total;
         final String contentType;
         final byte[] bytes;
+        final File file;
 
         CachedWindow(long start, long total, String contentType, byte[] bytes) {
+            this(start, total, contentType, bytes, null);
+        }
+
+        CachedWindow(long start, long total, String contentType, byte[] bytes, File file) {
             this.start = start;
             this.total = total;
             this.contentType = contentType;
             this.bytes = bytes;
+            this.file = file;
         }
     }
 
@@ -105,6 +124,8 @@ public final class DriveStreamServer {
 
     private DriveStreamServer(Context context) {
         this.appContext = context.getApplicationContext();
+        this.diskCacheDir = new File(this.appContext.getCacheDir(), "drive-ranges");
+        this.diskCacheDir.mkdirs();
     }
 
     public static synchronized DriveStreamServer getInstance(Context context) {
@@ -117,7 +138,10 @@ public final class DriveStreamServer {
      * stream paths hang off. Idempotent - repeated calls return the same url.
      */
     public synchronized String start() throws IOException {
-        if (serverSocket != null && !serverSocket.isClosed()) return baseUrl;
+        if (serverSocket != null && !serverSocket.isClosed()) {
+            Log.d(TAG, "cache-startup " + cacheUsageSummary());
+            return baseUrl;
+        }
 
         byte[] raw = new byte[24];
         new SecureRandom().nextBytes(raw);
@@ -135,6 +159,7 @@ public final class DriveStreamServer {
         acceptThread.start();
 
         Log.d(TAG, "listening on port " + serverSocket.getLocalPort());
+        Log.d(TAG, "cache-startup " + cacheUsageSummary());
         return baseUrl;
     }
 
@@ -496,6 +521,380 @@ public final class DriveStreamServer {
         return fileId + "|" + rangeStart;
     }
 
+    private long diskCacheLimitBytes() {
+        try {
+            StatFs stats = new StatFs(diskCacheDir.getAbsolutePath());
+            long available = stats.getAvailableBytes();
+            if (available <= CACHE_RESERVED_BYTES) return 0;
+            long usable = Math.max(0, available - CACHE_RESERVED_BYTES);
+            long calculated = usable / 50; // 2% of space that remains usable.
+            return Math.max(CACHE_MIN_BYTES, Math.min(CACHE_MAX_BYTES, calculated));
+        } catch (RuntimeException e) {
+            return CACHE_MIN_BYTES;
+        }
+    }
+
+    /** Current on-disk cache usage and the dynamic limit selected for this device. */
+    private synchronized String cacheUsageSummary() {
+        long used = 0;
+        File[] files = diskCacheDir.listFiles();
+        if (files != null) {
+            for (File file : files) {
+                if (file.isFile() && file.getName().endsWith(".bin")) {
+                    used += fileSize(file);
+                }
+            }
+        }
+        long limit = diskCacheLimitBytes();
+        long available = -1;
+        try {
+            available = new StatFs(diskCacheDir.getAbsolutePath()).getAvailableBytes();
+        } catch (RuntimeException ignored) {
+            // The cache limit is still available even if free-space reporting fails.
+        }
+        return String.format(Locale.US,
+                "usedBytes=%d usedMB=%.2f limitBytes=%d limitMB=%.2f availableBytes=%d availableMB=%.2f",
+                used, used / (1024d * 1024d), limit, limit / (1024d * 1024d),
+                available, available < 0 ? 0 : available / (1024d * 1024d));
+    }
+
+    private static long fileSize(File file) {
+        return file != null && file.isFile() ? file.length() : 0;
+    }
+
+    private static boolean isMetadataRangeFile(File file) {
+        if (file == null) return false;
+        String[] parts = file.getName().split("__");
+        if (parts.length < 3) return false;
+        try {
+            long start = Long.parseLong(parts[1]);
+            return start < CACHE_METADATA_RANGE_BYTES;
+        } catch (NumberFormatException ignored) {
+            return false;
+        }
+    }
+
+    private synchronized CachedWindow findDiskWindowContaining(String fileId, long start) {
+        String prefix = fileId + "__";
+        File[] files = diskCacheDir.listFiles();
+        if (files == null) return null;
+        CachedWindow best = null;
+        long bestStart = Long.MIN_VALUE;
+        for (File file : files) {
+            String name = file.getName();
+            if (!file.isFile() || !name.startsWith(prefix) || !name.endsWith(".bin")) {
+                continue;
+            }
+            String[] parts = name.substring(prefix.length(), name.length() - 4).split("__");
+            if (parts.length != 2) continue;
+            try {
+                long windowStart = Long.parseLong(parts[0]);
+                long total = Long.parseLong(parts[1]);
+                if (start >= windowStart && start < windowStart + file.length()
+                        && windowStart >= bestStart) {
+                    bestStart = windowStart;
+                    best = new CachedWindow(windowStart, total, "video/mp4", null, file);
+                }
+            } catch (NumberFormatException ignored) {
+                // Ignore malformed cache entries.
+            }
+        }
+        return best;
+    }
+
+    private synchronized CachedWindow getCachedWindowContaining(String fileId, long start) {
+        CachedWindow cached = metadataWindows.get(cacheKey(fileId, start));
+        if (cached != null && (cached.bytes != null || fileSize(cached.file) > 0)) {
+            CachedWindow diskBest = findDiskWindowContaining(fileId, start);
+            if (diskBest == null || cached.start >= diskBest.start) {
+                if (cached.file != null) cached.file.setLastModified(System.currentTimeMillis());
+                return cached;
+            }
+            cached = diskBest;
+        }
+        if (cached == null) cached = findDiskWindowContaining(fileId, start);
+        if (cached == null) {
+            long bestStart = Long.MIN_VALUE;
+            for (CachedWindow candidate : metadataWindows.values()) {
+                if (candidate.file != null && candidate.file.getName().startsWith(fileId + "__")
+                        && start >= candidate.start
+                        && start < candidate.start + fileSize(candidate.file)
+                        && candidate.start >= bestStart) {
+                    cached = candidate;
+                    bestStart = candidate.start;
+                }
+            }
+        }
+        if (cached != null) metadataWindows.put(cacheKey(fileId, start), cached);
+        return cached;
+    }
+
+    /** Find a disk/RAM window that contains this byte position or starts there. */
+    private synchronized CachedWindow getCachedWindowCovering(String fileId, long position) {
+        CachedWindow cached = getCachedWindowContaining(fileId, position);
+        if (cached != null) return cached;
+
+        File[] files = diskCacheDir.listFiles();
+        if (files == null) return null;
+        String prefix = fileId + "__";
+        for (File file : files) {
+            String name = file.getName();
+            if (!file.isFile() || !name.startsWith(prefix) || !name.endsWith(".bin")) continue;
+            String[] parts = name.substring(prefix.length(), name.length() - 4).split("__");
+            if (parts.length != 2) continue;
+            try {
+                long windowStart = Long.parseLong(parts[0]);
+                long total = Long.parseLong(parts[1]);
+                if (position >= windowStart && position < windowStart + file.length()) {
+                    CachedWindow result = new CachedWindow(windowStart, total,
+                            "video/mp4", null, file);
+                    metadataWindows.put(cacheKey(fileId, position), result);
+                    return result;
+                }
+            } catch (NumberFormatException ignored) {
+                // Ignore malformed cache entries.
+            }
+        }
+        return null;
+    }
+
+    /** Return the nearest cached window strictly after a byte position. */
+    private synchronized CachedWindow findNextCachedWindow(String fileId, long position,
+            long total) {
+        CachedWindow best = null;
+        long bestStart = Long.MAX_VALUE;
+        File[] files = diskCacheDir.listFiles();
+        if (files != null) {
+            String prefix = fileId + "__";
+            for (File file : files) {
+                String name = file.getName();
+                if (!file.isFile() || !name.startsWith(prefix) || !name.endsWith(".bin")) continue;
+                String[] parts = name.substring(prefix.length(), name.length() - 4).split("__");
+                if (parts.length != 2) continue;
+                try {
+                    long start = Long.parseLong(parts[0]);
+                    long cachedTotal = Long.parseLong(parts[1]);
+                    if (cachedTotal == total && start > position && start < bestStart) {
+                        bestStart = start;
+                        best = new CachedWindow(start, cachedTotal, "video/mp4", null, file);
+                    }
+                } catch (NumberFormatException ignored) {
+                    // Ignore malformed cache entries.
+                }
+            }
+        }
+        for (CachedWindow candidate : metadataWindows.values()) {
+            if (candidate.file == null || !candidate.file.isFile()
+                    || !candidate.file.getName().startsWith(fileId + "__")) continue;
+            if (candidate.total == total && candidate.start > position
+                    && candidate.start < bestStart) {
+                best = candidate;
+                bestStart = candidate.start;
+            }
+        }
+        return best;
+    }
+
+    /** Find the nearest cached window after a position, even before Drive tells us the total. */
+    private synchronized CachedWindow findNextCachedWindowAnyTotal(String fileId, long position) {
+        CachedWindow best = null;
+        long bestStart = Long.MAX_VALUE;
+        File[] files = diskCacheDir.listFiles();
+        String prefix = fileId + "__";
+        if (files != null) {
+            for (File file : files) {
+                String name = file.getName();
+                if (!file.isFile() || !name.startsWith(prefix) || !name.endsWith(".bin")) continue;
+                String[] parts = name.substring(prefix.length(), name.length() - 4).split("__");
+                if (parts.length != 2) continue;
+                try {
+                    long start = Long.parseLong(parts[0]);
+                    long total = Long.parseLong(parts[1]);
+                    if (start > position && start < bestStart && file.length() > 0) {
+                        bestStart = start;
+                        best = new CachedWindow(start, total, "video/mp4", null, file);
+                    }
+                } catch (NumberFormatException ignored) {
+                    // Ignore malformed cache entries.
+                }
+            }
+        }
+        for (CachedWindow candidate : metadataWindows.values()) {
+            if (candidate.file == null || !candidate.file.isFile()
+                    || !candidate.file.getName().startsWith(prefix)) continue;
+            if (candidate.start > position && candidate.start < bestStart) {
+                best = candidate;
+                bestStart = candidate.start;
+            }
+        }
+        return best;
+    }
+
+    private byte[] readCachedBytes(CachedWindow cached) throws IOException {
+        if (cached.bytes != null) return cached.bytes;
+        if (cached.file == null || !cached.file.isFile()) return null;
+        int size = (int) Math.min(METADATA_CACHE_BYTES, cached.file.length());
+        byte[] bytes;
+        try {
+            bytes = new byte[size];
+        } catch (OutOfMemoryError e) {
+            Log.w(TAG, "cache read skipped: insufficient memory");
+            return null;
+        }
+        try (InputStream in = new BufferedInputStream(new FileInputStream(cached.file))) {
+            int offset = 0;
+            while (offset < size) {
+                int read = in.read(bytes, offset, size - offset);
+                if (read < 0) break;
+                offset += read;
+            }
+            if (offset != size) return null;
+        }
+        cached.file.setLastModified(System.currentTimeMillis());
+        return bytes;
+    }
+
+    private synchronized void evictDiskCache(long incomingBytes) {
+        File[] files = diskCacheDir.listFiles();
+        if (files == null) return;
+        long total = 0;
+        for (File file : files) total += fileSize(file);
+        long limit = diskCacheLimitBytes();
+        while (total + incomingBytes > limit) {
+            File oldest = null;
+            // Evict later seek/playback ranges before the startup metadata
+            // band. If only metadata remains, the second pass below still
+            // evicts the oldest protected entry to honor the size limit.
+            for (File file : files) {
+                if (!file.isFile() || isMetadataRangeFile(file)) continue;
+                if (oldest == null || file.lastModified() < oldest.lastModified()) oldest = file;
+            }
+            if (oldest == null) {
+                for (File file : files) {
+                    if (!file.isFile()) continue;
+                    if (oldest == null || file.lastModified() < oldest.lastModified()) {
+                        oldest = file;
+                    }
+                }
+            }
+            if (oldest == null) break;
+            long evictedBytes = fileSize(oldest);
+            if (!oldest.delete()) break;
+            total -= evictedBytes;
+            final File evicted = oldest;
+            metadataWindows.entrySet().removeIf(entry ->
+                    entry.getValue().file != null && entry.getValue().file.equals(evicted));
+            files = diskCacheDir.listFiles();
+            if (files == null) break;
+        }
+    }
+
+    private synchronized CachedWindow persistWindow(String fileId, long start, long total,
+            String contentType, byte[] bytes) throws IOException {
+        if (diskCacheLimitBytes() < bytes.length) return null;
+        String filePrefix = fileId + "__";
+        File[] existing = diskCacheDir.listFiles();
+        if (existing != null) {
+            for (File file : existing) {
+                String name = file.getName();
+                if (!file.isFile() || !name.startsWith(filePrefix) || !name.endsWith(".bin")) {
+                    continue;
+                }
+                String[] parts = name.substring(filePrefix.length(), name.length() - 4)
+                        .split("__");
+                if (parts.length == 2 && !String.valueOf(total).equals(parts[1])) {
+                    long oldSize = fileSize(file);
+                    file.delete();
+                    metadataWindows.entrySet().removeIf(entry ->
+                            entry.getValue().file != null && entry.getValue().file.equals(file));
+                    Log.d(TAG, "cache-invalidate file=" + fileId
+                            + " oldTotal=" + parts[1] + " bytes=" + oldSize);
+                }
+            }
+        }
+        File target = new File(diskCacheDir, fileId + "__" + start + "__" + total + ".bin");
+        evictDiskCache(bytes.length);
+        File temp = new File(diskCacheDir, target.getName() + ".tmp");
+        try (OutputStream out = new BufferedOutputStream(new FileOutputStream(temp))) {
+            out.write(bytes);
+        }
+        if (!temp.renameTo(target)) {
+            temp.delete();
+            return null;
+        }
+        CachedWindow cached = new CachedWindow(start, total, contentType, null, target);
+        metadataWindows.put(cacheKey(fileId, start), cached);
+        return cached;
+    }
+
+    /** Persist one bounded cache window and log the outcome in a single event. */
+    private long storeCacheChunk(String fileId, long start, long total, String contentType,
+            ByteArrayOutputStream capture, String source) {
+        int bytes = capture.size();
+        try {
+            CachedWindow stored = persistWindow(fileId, start, total, contentType,
+                    capture.toByteArray());
+            String result = stored == null ? "failed" : "success";
+            Log.d(TAG, "timing proxy:cache-store file=" + fileId
+                    + " from=" + start
+                    + " to=" + (start + bytes - 1)
+                    + " bytes=" + bytes
+                    + " result=" + result
+                    + " intervals=" + cacheIntervals(fileId)
+                    + " " + cacheUsageSummary()
+                    + (stored == null ? " reason=capacity-or-write-rejected" : "")
+                    + " source=" + source);
+            return stored == null ? 0 : bytes;
+        } catch (IOException | RuntimeException e) {
+            Log.w(TAG, "timing proxy:cache-store file=" + fileId
+                    + " from=" + start
+                    + " bytes=" + bytes
+                    + " result=failed reason=" + e.getClass().getSimpleName()
+                    + " intervals=" + cacheIntervals(fileId)
+                    + " " + cacheUsageSummary()
+                    + " source=" + source);
+            return 0;
+        } catch (OutOfMemoryError e) {
+            Log.w(TAG, "timing proxy:cache-store file=" + fileId
+                    + " from=" + start
+                    + " bytes=" + bytes
+                    + " result=failed reason=insufficient-memory"
+                    + " intervals=" + cacheIntervals(fileId)
+                    + " " + cacheUsageSummary()
+                    + " source=" + source);
+            return 0;
+        }
+    }
+
+    /** Return persisted cache windows as compact inclusive byte intervals. */
+    private synchronized String cacheIntervals(String fileId) {
+        List<long[]> ranges = new ArrayList<>();
+        File[] files = diskCacheDir.listFiles();
+        String prefix = fileId + "__";
+        if (files != null) {
+            for (File file : files) {
+                String name = file.getName();
+                if (!file.isFile() || !name.startsWith(prefix) || !name.endsWith(".bin")) continue;
+                String[] parts = name.substring(prefix.length(), name.length() - 4).split("__");
+                if (parts.length != 2) continue;
+                try {
+                    long start = Long.parseLong(parts[0]);
+                    long end = start + file.length() - 1;
+                    if (file.length() > 0) ranges.add(new long[] {start, end});
+                } catch (NumberFormatException ignored) {
+                    // Ignore malformed cache entries.
+                }
+            }
+        }
+        Collections.sort(ranges, Comparator.comparingLong(range -> range[0]));
+        StringBuilder result = new StringBuilder("[");
+        for (int i = 0; i < ranges.size(); i++) {
+            if (i > 0) result.append(',');
+            result.append(ranges.get(i)[0]).append('-').append(ranges.get(i)[1]);
+        }
+        return result.append(']').toString();
+    }
+
     private static long parseContentTotal(String contentRange, String contentLength,
             long rangeStart) {
         if (contentRange != null) {
@@ -518,120 +917,300 @@ public final class DriveStreamServer {
         return -1;
     }
 
-    private boolean serveCachedWindow(String fileId, long requestedStart, OutputStream out)
-            throws IOException {
-        CachedWindow cached = metadataWindows.get(fileId);
-        if (cached == null || requestedStart < cached.start
-                || requestedStart >= cached.start + cached.bytes.length) {
-            return false;
-        }
-
-        int offset = (int) (requestedStart - cached.start);
-        int length = cached.bytes.length - offset;
-        long end = requestedStart + length - 1;
-        StringBuilder head = new StringBuilder(256);
-        head.append("HTTP/1.1 206 Partial Content\r\n")
-                .append("Content-Type: ")
-                .append(cached.contentType == null ? "application/octet-stream" : cached.contentType)
-                .append("\r\n")
-                .append("Content-Length: ").append(length).append("\r\n")
-                .append("Content-Range: bytes ").append(requestedStart).append('-')
-                .append(end).append('/').append(cached.total).append("\r\n")
-                .append("Accept-Ranges: bytes\r\n")
-                .append("Connection: close\r\n\r\n");
-
-        out.write(head.toString().getBytes(StandardCharsets.US_ASCII));
-        out.write(cached.bytes, offset, length);
-        out.flush();
-        Log.d(TAG, "timing proxy:cache-hit file=" + fileId
-                + " start=" + requestedStart
-                + " bytes=" + length);
-        return true;
-    }
-
     /**
      * Serve the cached metadata prefix and continue the same HTTP response
      * from Drive. Closing after the prefix is unsafe because VLC can interpret
      * that close as EOF and advance the playlist.
      */
-    private boolean serveCachedPrefixWithUpstream(String fileId, CachedWindow cached,
-            OutputStream out, long requestStartedAt) throws IOException {
-        if (cached == null || cached.bytes.length == 0) {
+    private boolean serveCachedPrefixWithUpstream(String fileId, long requestedStart,
+            CachedWindow cached, OutputStream out) throws IOException {
+        byte[] firstBytes = cached == null ? null : readCachedBytes(cached);
+        if (cached == null || firstBytes == null || firstBytes.length == 0
+                || requestedStart < cached.start
+                || requestedStart >= cached.start + firstBytes.length) {
             return false;
         }
 
-        long continuationStart = cached.start + cached.bytes.length;
-        if (continuationStart >= cached.total) {
-            return false;
+        // Stitch adjacent cached windows before going to Drive. VLC still gets
+        // one normal HTTP response, but every contiguous byte already on disk
+        // is read locally and is never downloaded again.
+        List<byte[]> cachedParts = new ArrayList<>();
+        int firstOffset = (int) (requestedStart - cached.start);
+        cachedParts.add(java.util.Arrays.copyOfRange(firstBytes, firstOffset,
+                firstBytes.length));
+        long continuationStart = cached.start + firstBytes.length;
+        Log.d(TAG, "timing proxy:cache-resume file=" + fileId
+                + " from=" + requestedStart
+                + " to=" + (cached.start + firstBytes.length - 1)
+                + " bytes=" + (firstBytes.length - firstOffset)
+                + " source=request-start");
+        while (continuationStart < cached.total) {
+            CachedWindow adjacent = getCachedWindowCovering(fileId, continuationStart);
+            if (adjacent == null || adjacent.start != continuationStart
+                    || adjacent.total != cached.total) {
+                break;
+            }
+            byte[] adjacentBytes = readCachedBytes(adjacent);
+            if (adjacentBytes == null || adjacentBytes.length == 0) break;
+            cachedParts.add(adjacentBytes);
+            Log.d(TAG, "timing proxy:cache-stitch file=" + fileId
+                    + " from=" + adjacent.start
+                    + " to=" + (adjacent.start + adjacentBytes.length - 1)
+                    + " bytes=" + adjacentBytes.length);
+            continuationStart += adjacentBytes.length;
         }
 
-        String token;
-        try {
-            token = DriveTokenProvider.get(appContext);
-        } catch (IOException e) {
-            return false;
-        }
-
-        long totalLength = cached.total - cached.start;
+        long totalLength = cached.total - requestedStart;
         StringBuilder head = new StringBuilder(256);
         head.append("HTTP/1.1 206 Partial Content\r\n")
                 .append("Content-Type: ")
                 .append(cached.contentType == null ? "application/octet-stream" : cached.contentType)
                 .append("\r\n")
                 .append("Content-Length: ").append(totalLength).append("\r\n")
-                .append("Content-Range: bytes ").append(cached.start).append('-')
+                .append("Content-Range: bytes ").append(requestedStart).append('-')
                 .append(cached.total - 1)
                 .append('/').append(cached.total).append("\r\n")
                 .append("Accept-Ranges: bytes\r\n")
                 .append("Connection: close\r\n\r\n");
         out.write(head.toString().getBytes(StandardCharsets.US_ASCII));
-        out.write(cached.bytes);
+        for (byte[] part : cachedParts) out.write(part);
         out.flush();
-        Log.d(TAG, "timing proxy:cache-prefix file=" + fileId
-                + " cachedBytes=" + cached.bytes.length
-                + " total=" + totalLength
-                + " elapsedMs=" + (System.currentTimeMillis() - requestStartedAt));
+        if (continuationStart >= cached.total) return true;
 
-        HttpURLConnection continuation = null;
-        try {
-            continuation = openUpstream(fileId,
-                    "bytes=" + continuationStart + "-", token);
-            int code = continuation.getResponseCode();
-            if (code == 401) {
+        long streamStart = continuationStart;
+        while (streamStart < cached.total) {
+            CachedWindow nextCached = findNextCachedWindow(fileId, streamStart, cached.total);
+            long boundedEnd = nextCached == null ? -1 : nextCached.start - 1;
+            String upstreamRange = boundedEnd >= streamStart
+                    ? "bytes=" + streamStart + "-" + boundedEnd
+                    : "bytes=" + streamStart + "-";
+            Log.d(TAG, "timing proxy:cache-gap-drive-stream file=" + fileId
+                    + " from=" + streamStart
+                    + " to=" + boundedEnd
+                    + " nextCachedStart="
+                    + (nextCached == null ? "none" : nextCached.start));
+            HttpURLConnection continuation = null;
+            try {
+                String token = DriveTokenProvider.get(appContext);
+                continuation = openUpstream(fileId, upstreamRange, token);
+                int code = continuation.getResponseCode();
+                if (code == 401) {
+                    continuation.disconnect();
+                    DriveTokenProvider.invalidate(appContext, token);
+                    token = DriveTokenProvider.get(appContext);
+                    continuation = openUpstream(fileId, upstreamRange, token);
+                    code = continuation.getResponseCode();
+                }
+                if (code >= 400) {
+                    Log.w(TAG, "cached prefix continuation failed for " + fileId
+                            + " status=" + code + " range=" + upstreamRange);
+                    return true;
+                }
+
+                InputStream body = continuation.getInputStream();
+                ByteArrayOutputStream capture = new ByteArrayOutputStream(64 * 1024);
+                byte[] buffer = new byte[COPY_BUFFER];
+                long segmentBytes = 0;
+                long storedBytes = 0;
+                boolean driveReadComplete = false;
+                long cacheChunkStart = streamStart;
+                int read;
+                try {
+                    while ((read = body.read(buffer)) != -1) {
+                        out.write(buffer, 0, read);
+                        segmentBytes += read;
+                        int captured = 0;
+                        while (captured < read && capture != null) {
+                            int chunk = Math.min(read - captured,
+                                    METADATA_CACHE_BYTES - capture.size());
+                            try {
+                                capture.write(buffer, captured, chunk);
+                            } catch (OutOfMemoryError e) {
+                                capture = null;
+                                Log.w(TAG, "cache capture skipped: insufficient memory");
+                                break;
+                            }
+                            captured += chunk;
+                            if (capture.size() == METADATA_CACHE_BYTES) {
+                                storedBytes += storeCacheChunk(fileId, cacheChunkStart,
+                                        cached.total, "video/mp4", capture, "drive");
+                                cacheChunkStart += capture.size();
+                                capture.reset();
+                            }
+                        }
+                    }
+                    driveReadComplete = true;
+                } finally {
+                    if (capture != null && capture.size() > 0) {
+                        storedBytes += storeCacheChunk(fileId, cacheChunkStart, cached.total,
+                                "video/mp4", capture, "drive");
+                    }
+                    if (boundedEnd < streamStart || !driveReadComplete) {
+                        Log.d(TAG, "timing proxy:drive-end file=" + fileId
+                                + " from=" + streamStart
+                                + " bytes=" + segmentBytes
+                                + " storedBytes=" + storedBytes
+                                + " status=" + (driveReadComplete ? "complete" : "interrupted"));
+                    }
+                }
                 continuation.disconnect();
-                DriveTokenProvider.invalidate(appContext, token);
-                token = DriveTokenProvider.get(appContext);
-                continuation = openUpstream(fileId,
-                        "bytes=" + continuationStart + "-", token);
-                code = continuation.getResponseCode();
-            }
-            if (code >= 400) {
-                Log.w(TAG, "cached prefix continuation failed for " + fileId
-                        + " status=" + code);
-                return true;
-            }
+                continuation = null;
 
-            InputStream body = continuation.getInputStream();
-            byte[] buffer = new byte[COPY_BUFFER];
+                if (boundedEnd < streamStart) {
+                    out.flush();
+                    return true;
+                }
+                streamStart = boundedEnd + 1;
+
+                // The bounded gap ended exactly where the next cached window
+                // begins. Reuse that window and any following adjacent windows.
+                boolean cacheStarted = false;
+                while (streamStart < cached.total) {
+                    CachedWindow local = getCachedWindowCovering(fileId, streamStart);
+                    if (local == null || local.start != streamStart
+                            || local.total != cached.total) break;
+                    byte[] localBytes = readCachedBytes(local);
+                    if (localBytes == null || localBytes.length == 0) break;
+                    if (!cacheStarted) {
+                        Log.d(TAG, "timing proxy:cache-resume file=" + fileId
+                                + " from=" + local.start
+                                + " to=" + (local.start + localBytes.length - 1)
+                                + " bytes=" + localBytes.length
+                                + " afterDriveBytes=" + segmentBytes);
+                        cacheStarted = true;
+                    } else {
+                        Log.d(TAG, "timing proxy:cache-stitch file=" + fileId
+                                + " from=" + local.start
+                                + " to=" + (local.start + localBytes.length - 1)
+                                + " bytes=" + localBytes.length);
+                    }
+                    out.write(localBytes);
+                    streamStart += localBytes.length;
+                    cachedParts.add(localBytes);
+                }
+                out.flush();
+            } catch (IOException e) {
+                // Cached bytes have already been sent. End this response and
+                // let VLC retry normally; never write a second HTTP header.
+                Log.w(TAG, "cache continuation skipped: " + e.getMessage());
+                return true;
+            } finally {
+                if (continuation != null) continuation.disconnect();
+            }
+        }
+        out.flush();
+        return true;
+    }
+
+    /** Stream an uncached request gap only until the next cached window. */
+    private boolean serveGapUntilCache(String fileId, long requestedStart,
+            CachedWindow nextCached, OutputStream out) throws IOException {
+        if (nextCached == null || nextCached.start <= requestedStart) return false;
+        long gapEnd = nextCached.start - 1;
+        String range = "bytes=" + requestedStart + "-" + gapEnd;
+        Log.d(TAG, "timing proxy:cache-gap-drive-stream file=" + fileId
+                + " from=" + requestedStart + " to=" + gapEnd
+                + " nextCachedStart=" + nextCached.start + " reason=cache-miss");
+
+        String token = DriveTokenProvider.get(appContext);
+        HttpURLConnection conn = openUpstream(fileId, range, token);
+        int code = conn.getResponseCode();
+        if (code == 401) {
+            conn.disconnect();
+            DriveTokenProvider.invalidate(appContext, token);
+            token = DriveTokenProvider.get(appContext);
+            conn = openUpstream(fileId, range, token);
+            code = conn.getResponseCode();
+        }
+        if (code >= 400) {
+            conn.disconnect();
+            return false;
+        }
+
+        String type = conn.getHeaderField("Content-Type");
+        String totalHeader = conn.getHeaderField("Content-Range");
+        String length = conn.getHeaderField("Content-Length");
+        long total = parseContentTotal(totalHeader, length, requestedStart);
+        if (total <= 0) total = nextCached.total;
+        String head = "HTTP/1.1 206 Partial Content\r\n"
+                + "Content-Type: " + (type == null ? "video/mp4" : type) + "\r\n"
+                + "Content-Length: " + (total - requestedStart) + "\r\n"
+                + "Content-Range: bytes " + requestedStart + "-" + (total - 1)
+                + "/" + total + "\r\n"
+                + "Accept-Ranges: bytes\r\nConnection: close\r\n\r\n";
+        out.write(head.getBytes(StandardCharsets.US_ASCII));
+        out.flush();
+
+        InputStream body = conn.getInputStream();
+        byte[] buffer = new byte[COPY_BUFFER];
+        ByteArrayOutputStream capture = new ByteArrayOutputStream(64 * 1024);
+        long bytesServed = 0;
+        long storedBytes = 0;
+        long chunkStart = requestedStart;
+        boolean complete = false;
+        try {
             int read;
             while ((read = body.read(buffer)) != -1) {
                 out.write(buffer, 0, read);
+                bytesServed += read;
+                int offset = 0;
+                while (offset < read) {
+                    int chunk = Math.min(read - offset,
+                            METADATA_CACHE_BYTES - capture.size());
+                    capture.write(buffer, offset, chunk);
+                    offset += chunk;
+                    if (capture.size() == METADATA_CACHE_BYTES) {
+                        storedBytes += storeCacheChunk(fileId, chunkStart, total, type,
+                                capture, "drive");
+                        chunkStart += capture.size();
+                        capture.reset();
+                    }
+                }
             }
-            out.flush();
-            Log.d(TAG, "timing proxy:cache-hit+upstream file=" + fileId
-                    + " cachedBytes=" + cached.bytes.length
-                    + " total=" + totalLength
-                    + " elapsedMs=" + (System.currentTimeMillis() - requestStartedAt));
-            return true;
+            complete = true;
         } finally {
-            if (continuation != null) continuation.disconnect();
+            if (capture.size() > 0) {
+                storedBytes += storeCacheChunk(fileId, chunkStart, total, type,
+                        capture, "drive");
+            }
+            Log.d(TAG, "timing proxy:drive-end file=" + fileId
+                    + " from=" + requestedStart
+                    + " bytes=" + bytesServed
+                    + " storedBytes=" + storedBytes
+                    + " status=" + (complete ? "complete" : "interrupted"));
+            conn.disconnect();
         }
+        if (!complete) return true;
+
+        boolean resumed = false;
+        long position = requestedStart + bytesServed;
+        while (position < total) {
+            CachedWindow local = getCachedWindowCovering(fileId, position);
+            if (local == null || local.start != position || local.total != total) break;
+            byte[] bytes = readCachedBytes(local);
+            if (bytes == null || bytes.length == 0) break;
+            if (!resumed) {
+                Log.d(TAG, "timing proxy:cache-resume file=" + fileId
+                        + " from=" + local.start
+                        + " to=" + (local.start + bytes.length - 1)
+                        + " bytes=" + bytes.length + " afterDriveBytes=" + bytesServed);
+                resumed = true;
+            } else {
+                Log.d(TAG, "timing proxy:cache-stitch file=" + fileId
+                        + " from=" + local.start
+                        + " to=" + (local.start + bytes.length - 1)
+                        + " bytes=" + bytes.length);
+            }
+            out.write(bytes);
+            out.flush();
+            position += bytes.length;
+        }
+        return true;
     }
 
     private void proxy(String fileId, String range, boolean headOnly, OutputStream out)
             throws IOException {
         HttpURLConnection conn = null;
-        long requestStartedAt = System.currentTimeMillis();
         String requestKey = fileId + "|" + (range == null ? "none" : range);
         int requestNumber = rangeRequestCounts
                 .computeIfAbsent(requestKey, ignored -> new AtomicInteger())
@@ -641,19 +1220,60 @@ public final class DriveStreamServer {
                 + (range == null ? " range=none" : " range=" + range));
         try {
             Long requestedStart = parseRangeStart(range);
-            if (!headOnly && requestedStart != null
-                    && range != null && !isBoundedRange(range)) {
-                CachedWindow cached = metadataWindows.get(cacheKey(fileId, requestedStart));
-                if (serveCachedPrefixWithUpstream(fileId, cached, out, requestStartedAt)) {
-                    return;
+            boolean cacheEligible = !headOnly && requestedStart != null
+                    && range != null && !isBoundedRange(range);
+            CachedWindow cached = null;
+            if (cacheEligible) {
+                try {
+                    cached = getCachedWindowContaining(fileId, requestedStart);
+                } catch (RuntimeException e) {
+                    Log.w(TAG, "cache lookup skipped: " + e.getMessage());
                 }
+            }
+
+            if (cacheEligible && cached != null) {
+                try {
+                    if (serveCachedPrefixWithUpstream(fileId, requestedStart, cached,
+                            out)) {
+                        return;
+                    }
+                } catch (IOException | RuntimeException e) {
+                    Log.w(TAG, "cache read skipped: " + e.getMessage());
+                } catch (OutOfMemoryError e) {
+                    Log.w(TAG, "cache read skipped: insufficient memory");
+                }
+            }
+
+            // A miss can still have a cached window later in the file. Bound
+            // the Drive request at that window so the response can switch back
+            // to disk instead of downloading through already cached bytes.
+            if (cacheEligible && cached == null) {
+                CachedWindow nextCached = findNextCachedWindowAnyTotal(fileId, requestedStart);
+                if (nextCached != null) {
+                    try {
+                        if (serveGapUntilCache(fileId, requestedStart, nextCached, out)) {
+                            return;
+                        }
+                    } catch (IOException | RuntimeException e) {
+                        Log.w(TAG, "bounded cache gap skipped: " + e.getMessage());
+                    } catch (OutOfMemoryError e) {
+                        Log.w(TAG, "bounded cache gap skipped: insufficient memory");
+                    }
+                }
+            }
+
+            if (!headOnly) {
+                String reason = cacheEligible
+                        ? (cached == null ? "cache-miss" : "cache-unavailable")
+                        : (isBoundedRange(range) ? "bounded-range" : "no-cacheable-range");
+                Log.d(TAG, "timing proxy:cache-gap-drive-stream file=" + fileId
+                        + " from=" + (requestedStart == null ? 0 : requestedStart)
+                        + " to=unknown reason=" + reason);
             }
 
             String token;
             try {
                 token = DriveTokenProvider.get(appContext);
-                Log.d(TAG, "timing proxy:token file=" + fileId
-                        + " elapsedMs=" + (System.currentTimeMillis() - requestStartedAt));
             } catch (IOException e) {
                 Log.w(TAG, "no Drive token", e);
                 writeStatus(out, 502, "Drive Auth Unavailable");
@@ -662,12 +1282,6 @@ public final class DriveStreamServer {
 
             conn = openUpstream(fileId, range, token);
             int code = conn.getResponseCode();
-            Log.d(TAG, "timing proxy:upstream file=" + fileId
-                    + " request#=" + requestNumber
-                    + " status=" + code
-                    + " contentLength=" + conn.getHeaderField("Content-Length")
-                    + " contentRange=" + conn.getHeaderField("Content-Range")
-                    + " elapsedMs=" + (System.currentTimeMillis() - requestStartedAt));
 
             // A token can go stale between range requests on a long file. One
             // retry with a freshly minted token turns that into a hiccup
@@ -722,63 +1336,59 @@ public final class DriveStreamServer {
 
             out.write(head.toString().getBytes(StandardCharsets.US_ASCII));
             out.flush();
-            Log.d(TAG, "timing proxy:headers file=" + fileId
-                    + " elapsedMs=" + (System.currentTimeMillis() - requestStartedAt));
             if (headOnly) return;
 
             InputStream body = conn.getInputStream();
             byte[] buffer = new byte[COPY_BUFFER];
-            boolean loggedFirstBytes = false;
             long bytesServed = 0;
-            ByteArrayOutputStream capture = requestedStart != null
-                    ? new ByteArrayOutputStream(METADATA_CACHE_BYTES)
+            long cacheTotal = requestedStart == null ? -1
+                    : parseContentTotal(contentRange, length, requestedStart);
+            long cacheChunkStart = requestedStart == null ? 0 : requestedStart;
+            long storedBytes = 0;
+            boolean driveReadComplete = false;
+            ByteArrayOutputStream capture = requestedStart != null && cacheTotal > 0
+                    ? new ByteArrayOutputStream(64 * 1024)
                     : null;
             try {
                 int read;
                 while ((read = body.read(buffer)) != -1) {
-                    if (capture != null && capture.size() < METADATA_CACHE_BYTES) {
-                        capture.write(buffer, 0,
-                                Math.min(read, METADATA_CACHE_BYTES - capture.size()));
-                    }
                     out.write(buffer, 0, read);
                     bytesServed += read;
-                    if (!loggedFirstBytes) {
-                        // Do not make VLC wait for the proxy's 64KB output buffer
-                        // to fill before it can inspect the media headers.
-                        out.flush();
-                        loggedFirstBytes = true;
-                        Log.d(TAG, "timing proxy:first-bytes file=" + fileId
-                                + " bytes=" + read
-                                + " elapsedMs=" + (System.currentTimeMillis() - requestStartedAt));
-                    }
-                }
-            } finally {
-                if (capture != null && capture.size() > 0 && requestedStart != null) {
-                    long total = parseContentTotal(contentRange, length, requestedStart);
-                    if (total > 0) {
-                        String key = cacheKey(fileId, requestedStart);
-                        if (metadataWindows.size() >= METADATA_CACHE_FILES
-                                && !metadataWindows.containsKey(key)) {
-                            String firstKey = metadataWindows.keys().nextElement();
-                            metadataWindows.remove(firstKey);
+                    if (capture != null) {
+                        int captured = 0;
+                        while (captured < read && capture != null) {
+                            int chunk = Math.min(read - captured,
+                                    METADATA_CACHE_BYTES - capture.size());
+                            try {
+                                capture.write(buffer, captured, chunk);
+                            } catch (OutOfMemoryError e) {
+                                capture = null;
+                                Log.w(TAG, "cache capture skipped: insufficient memory");
+                                break;
+                            }
+                            captured += chunk;
+                            if (capture.size() == METADATA_CACHE_BYTES) {
+                                storedBytes += storeCacheChunk(fileId, cacheChunkStart, cacheTotal,
+                                        type, capture, "drive");
+                                cacheChunkStart += capture.size();
+                                capture.reset();
+                            }
                         }
-                        metadataWindows.put(key, new CachedWindow(
-                                requestedStart,
-                                total,
-                                type,
-                                capture.toByteArray()));
-                        Log.d(TAG, "timing proxy:cache-store file=" + fileId
-                                + " start=" + requestedStart
-                                + " bytes=" + capture.size()
-                                + " total=" + total);
                     }
                 }
+                driveReadComplete = true;
+            } finally {
+                if (capture != null && capture.size() > 0) {
+                    storedBytes += storeCacheChunk(fileId, cacheChunkStart, cacheTotal,
+                            type, capture, "drive");
+                }
+                Log.d(TAG, "timing proxy:drive-end file=" + fileId
+                        + " from=" + (requestedStart == null ? 0 : requestedStart)
+                        + " bytes=" + bytesServed
+                        + " storedBytes=" + storedBytes
+                        + " status=" + (driveReadComplete ? "complete" : "interrupted"));
             }
             out.flush();
-            Log.d(TAG, "timing proxy:complete file=" + fileId
-                    + " request#=" + requestNumber
-                    + " bytesServed=" + bytesServed
-                    + " elapsedMs=" + (System.currentTimeMillis() - requestStartedAt));
         } finally {
             if (conn != null) conn.disconnect();
         }

@@ -29,6 +29,10 @@ import {usePipMode} from '../usePipMode';
 import {useShallow} from 'zustand/react/shallow';
 
 const playbackRates = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
+// Human button presses commonly arrive 250–300 ms apart. Keep collecting a
+// burst long enough that VLC receives one seek to the final target instead of
+// processing a queue of competing seeks.
+const SEEK_BUTTON_DEBOUNCE_MS = 500;
 
 const VLCPlayerComponent = forwardRef(
   (
@@ -76,6 +80,7 @@ const VLCPlayerComponent = forwardRef(
         getDuration: state.getDuration,
       })),
     );
+    const isBuffering = usePlayerTimeStore(state => state.isBuffering);
 
     // In PiP the window is only big enough for the video itself, and Android
     // doesn't deliver touches to it anyway — every control here is dead weight.
@@ -86,6 +91,11 @@ const VLCPlayerComponent = forwardRef(
     const controlsTimeout = useRef(null);
     const durationRef = useRef(0);
     const currentTimeRef = useRef(0);
+    const pendingSkipTargetRef = useRef(null);
+    const skipTimerRef = useRef(null);
+    const skipSettleTimerRef = useRef(null);
+    const lastProgressAtRef = useRef(0);
+    const lastProgressTimeRef = useRef(null);
     const settingsRef = useRef();
 
     // ─── Animations ───────────────────────────────────────────────────────────
@@ -131,6 +141,22 @@ const VLCPlayerComponent = forwardRef(
     // component — <VLCPlayer> included — four times a second.
     const hasStartedRef = useRef(false);
 
+    // libVLC can keep sending identical progress events while its input is
+    // stalled. Watch the media clock independently so the loader still
+    // appears when no buffering callback is emitted.
+    useEffect(() => {
+      const timer = setInterval(() => {
+        if (isPaused || !hasStartedRef.current || hasEndedRef.current) return;
+        if (
+          lastProgressAtRef.current > 0 &&
+          Date.now() - lastProgressAtRef.current >= 1500
+        ) {
+          setIsBuffering(true);
+        }
+      }, 500);
+      return () => clearInterval(timer);
+    }, [isPaused, setIsBuffering]);
+
     // Aspect ratio and "is the settings panel open" live here, not inside
     // PlayerSettings. That component is rendered by BottomControls, which
     // returns null the moment the controls auto-hide — so its local state went
@@ -160,6 +186,8 @@ const VLCPlayerComponent = forwardRef(
     // in a queue, which is the same wait it exists to explain.
     useEffect(() => {
       hasStartedRef.current = false;
+      lastProgressAtRef.current = 0;
+      lastProgressTimeRef.current = null;
       setIsBuffering(true);
     }, [item?.file_path, playerKey, setIsBuffering]);
 
@@ -201,7 +229,10 @@ const VLCPlayerComponent = forwardRef(
     );
 
     const handlePlaying = useCallback(() => {
-      if (hasStartedRef.current) setIsBuffering(false);
+      if (hasStartedRef.current) {
+        lastProgressAtRef.current = Date.now();
+        setIsBuffering(false);
+      }
     }, [setIsBuffering]);
 
     // The speed the settings panel picks and the speed the cycle button picks
@@ -218,7 +249,7 @@ const VLCPlayerComponent = forwardRef(
       // The 3s timer that schedules this can still be pending if the video
       // got paused after it was set (e.g. pauseOnStart pausing right after
       // the initial showControls() call) — don't hide while paused.
-      if (isPaused) return;
+      if (isPaused || pendingSkipTargetRef.current != null) return;
       Animated.timing(controlsOpacity, {
         toValue: 0,
         duration: 300,
@@ -255,6 +286,25 @@ const VLCPlayerComponent = forwardRef(
         controlsTimeout.current = setTimeout(hideControls, 3000);
       }
     }, [controlsOpacity, hideControls, isPaused, isAudio, getIsBuffering]);
+
+    // Buffering must not leave only a spinner on screen. Keep the title,
+    // scrubber, transport controls, and other player information visible for
+    // the entire stall so the user can still understand and control playback.
+    useEffect(() => {
+      clearTimeout(controlsTimeout.current);
+      if (isBuffering && !isPaused) {
+        setControlsVisible(true);
+        Animated.timing(controlsOpacity, {
+          toValue: 1,
+          duration: 150,
+          useNativeDriver: true,
+        }).start();
+        return;
+      }
+      if (!isBuffering && !isPaused && !isAudio) {
+        controlsTimeout.current = setTimeout(hideControls, 3000);
+      }
+    }, [controlsOpacity, hideControls, isAudio, isBuffering, isPaused, setControlsVisible]);
 
     // Show controls on mount via showControls() (not a bare
     // setControlsVisible(true)) so the initial display also schedules the
@@ -335,20 +385,80 @@ const VLCPlayerComponent = forwardRef(
     }, [resetToStart, isPaused]);
 
     const handleSeek = useCallback(newTime => {
+      if (skipTimerRef.current) clearTimeout(skipTimerRef.current);
+      skipTimerRef.current = null;
+      pendingSkipTargetRef.current = null;
+      if (skipSettleTimerRef.current) clearTimeout(skipSettleTimerRef.current);
+      skipSettleTimerRef.current = null;
       if (vlcPlayerRef.current && durationRef.current > 0) {
         vlcPlayerRef.current.seek(newTime / durationRef.current);
         setCurrentTime(newTime);
       }
     }, []);
 
+    const flushPendingSkip = useCallback(() => {
+      skipTimerRef.current = null;
+      const targetTime = pendingSkipTargetRef.current;
+      if (targetTime == null || !vlcPlayerRef.current || !durationRef.current) return;
+
+      // Keep the target until onProgress confirms that VLC reached it. This
+      // prevents stale progress events from moving the UI backwards while the
+      // native player is processing the seek.
+      console.log('[PlaybackTiming] VLC seek flush', {targetTime});
+      vlcPlayerRef.current.seek(targetTime / durationRef.current);
+      // Keep the shared clock stable until VLC confirms the final target.
+      // This keeps the slider, tracking, and verse detection synchronized.
+      if (isPaused) {
+        pendingSkipTargetRef.current = null;
+        setCurrentTime(targetTime);
+        currentTimeRef.current = targetTime;
+        onCurrentTimeChange?.(targetTime);
+        console.log('[PlaybackTiming] VLC paused seek confirmed', {targetTime});
+        showControls();
+        return;
+      }
+      setIsBuffering(true);
+      if (skipSettleTimerRef.current) clearTimeout(skipSettleTimerRef.current);
+      skipSettleTimerRef.current = setTimeout(() => {
+        console.log('[PlaybackTiming] VLC seek timeout', {targetTime});
+        pendingSkipTargetRef.current = null;
+        skipSettleTimerRef.current = null;
+        setIsBuffering(false);
+        showControls();
+      }, 5000);
+    }, [isPaused, onCurrentTimeChange, setCurrentTime, setIsBuffering, showControls]);
+
     const skipTime = useCallback(seconds => {
       if (!vlcPlayerRef.current || !durationRef.current) return;
-      const newTime = Math.max(
+      if (skipSettleTimerRef.current) clearTimeout(skipSettleTimerRef.current);
+      skipSettleTimerRef.current = null;
+      const baseTime =
+        pendingSkipTargetRef.current == null
+          ? getCurrentTime()
+          : pendingSkipTargetRef.current;
+      const targetTime = Math.max(
         0,
-        Math.min(getCurrentTime() + seconds * 1000, getDuration()),
+        Math.min(baseTime + seconds * 1000, getDuration()),
       );
-      vlcPlayerRef.current.seek(newTime / durationRef.current);
-      setCurrentTime(newTime);
+      pendingSkipTargetRef.current = targetTime;
+      // Do not move the shared clock during the burst. The final target is
+      // committed only after VLC confirms it through onProgress.
+      showControls();
+      if (skipTimerRef.current) clearTimeout(skipTimerRef.current);
+      if (skipSettleTimerRef.current) clearTimeout(skipSettleTimerRef.current);
+      skipSettleTimerRef.current = null;
+      skipTimerRef.current = setTimeout(
+        flushPendingSkip,
+        SEEK_BUTTON_DEBOUNCE_MS,
+      );
+    }, [flushPendingSkip, getCurrentTime, getDuration, showControls]);
+
+    useEffect(() => () => {
+      if (skipTimerRef.current) clearTimeout(skipTimerRef.current);
+      if (skipSettleTimerRef.current) clearTimeout(skipSettleTimerRef.current);
+      skipTimerRef.current = null;
+      skipSettleTimerRef.current = null;
+      pendingSkipTargetRef.current = null;
     }, []);
 
     const changePlaybackRate = useCallback(() => {
@@ -388,6 +498,7 @@ const VLCPlayerComponent = forwardRef(
     return (
       <SkipHandler
         vlcPlayerRef={vlcPlayerRef}
+        onSkip={skipTime}
         onSingleTap={handleScreenTap}
         onCenterDoubleTap={togglePlayPause}>
         {/* Header */}
@@ -426,6 +537,44 @@ const VLCPlayerComponent = forwardRef(
               updateDuration(event.duration / 1000);
               updateItemFields(item.id, {duration: event.duration / 1000});
               setDuration(event.duration);
+            }
+            const pendingSkipTarget = pendingSkipTargetRef.current;
+            if (pendingSkipTarget != null) {
+              // VLC reports currentTime in seconds, so this tolerance is
+              // 750 ms, not 750 seconds.
+              if (Math.abs(event.currentTime - pendingSkipTarget) > 0.75) {
+                // VLC is still reporting the pre-seek position. Do not let
+                // that stale value overwrite the optimistic button target or
+                // feed incorrect time to watch/verse tracking.
+                return;
+              }
+              console.log('[PlaybackTiming] VLC seek confirmed', {
+                targetTime: pendingSkipTarget,
+                currentTime: event.currentTime,
+              });
+              pendingSkipTargetRef.current = null;
+              if (skipSettleTimerRef.current) {
+                clearTimeout(skipSettleTimerRef.current);
+                skipSettleTimerRef.current = null;
+              }
+              setIsBuffering(false);
+              showControls();
+            }
+            const now = Date.now();
+            const previousTime = lastProgressTimeRef.current;
+            if (
+              previousTime == null ||
+              Math.abs(event.currentTime - previousTime) > 0.01
+            ) {
+              lastProgressAtRef.current = now;
+              lastProgressTimeRef.current = event.currentTime;
+              if (!isPaused && hasStartedRef.current) setIsBuffering(false);
+            } else if (
+              !isPaused &&
+              hasStartedRef.current &&
+              now - lastProgressAtRef.current >= 1500
+            ) {
+              setIsBuffering(true);
             }
             setCurrentTime(event.currentTime);
             currentTimeRef.current = event.currentTime;
@@ -576,6 +725,7 @@ const BottomControls = React.memo(
         style={[
           styles.bottomControls,
           !isAudio && styles.bottomControlsVideo,
+          !isAudio && {bottom: isMinimized ? 0 : 28},
           isAudio && styles.bottomControlsAudio,
           {opacity: controlsOpacity},
         ]}>
@@ -697,10 +847,11 @@ const styles = StyleSheet.create({
     paddingBottom: 10,
   },
   // Android's navigation/gesture inset can sit over the very bottom of a
-  // fullscreen video. Lift the video controls clear of that inset so the
-  // settings and fullscreen buttons remain fully visible and tappable.
+  // Keep a small lift in the minimized player. Fullscreen applies a larger
+  // runtime lift above this style to clear Android's navigation/gesture inset,
+  // including on the first fullscreen transition before orientation settles.
   bottomControlsVideo: {
-    bottom: 10,
+    bottom: 8,
   },
   // An audio player is AUDIO_MINIMIZED_RATIO of the screen - around 144dp on a
   // usual phone - and this block is anchored to the bottom and grows upward,

@@ -26,6 +26,8 @@ import java.security.SecureRandom;
 import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Pattern;
 
 /**
@@ -65,6 +67,8 @@ public final class DriveStreamServer {
     private static final int CLIENT_READ_TIMEOUT_MS = 30000;
     private static final int MAX_REDIRECTS = 5;
     private static final int COPY_BUFFER = 64 * 1024;
+    private static final int METADATA_CACHE_BYTES = 2 * 1024 * 1024;
+    private static final int METADATA_CACHE_FILES = 8;
     private static final int MAX_HEADER_LINE = 8192;
 
     // Drive file ids are url-safe base64-ish. Anything else is not an id we
@@ -75,6 +79,24 @@ public final class DriveStreamServer {
 
     private final Context appContext;
     private final ExecutorService workers = Executors.newCachedThreadPool();
+    private final ConcurrentHashMap<String, AtomicInteger> rangeRequestCounts =
+            new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, CachedWindow> metadataWindows =
+            new ConcurrentHashMap<>();
+
+    private static final class CachedWindow {
+        final long start;
+        final long total;
+        final String contentType;
+        final byte[] bytes;
+
+        CachedWindow(long start, long total, String contentType, byte[] bytes) {
+            this.start = start;
+            this.total = total;
+            this.contentType = contentType;
+            this.bytes = bytes;
+        }
+    }
 
     private ServerSocket serverSocket;
     private Thread acceptThread;
@@ -443,13 +465,195 @@ public final class DriveStreamServer {
         }
     }
 
+    private static Long parseRangeStart(String range) {
+        if (range == null || !range.regionMatches(true, 0, "bytes=", 0, 6)) {
+            return 0L;
+        }
+        int dash = range.indexOf('-', 6);
+        if (dash <= 6) return null;
+        try {
+            return Long.parseLong(range.substring(6, dash).trim());
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    /**
+     * VLC commonly asks for an open-ended range such as `bytes=0-`. A cached
+     * prefix cannot safely satisfy that request: closing the socket after the
+     * prefix can look like EOF to VLC and trigger playlist auto-advance. Keep
+     * open-ended requests on the upstream path; cache hits are safe only for
+     * ranges with an explicit end.
+     */
+    private static boolean isBoundedRange(String range) {
+        if (range == null) return false;
+        int dash = range.indexOf('-');
+        return dash >= 0 && dash + 1 < range.length()
+                && range.substring(dash + 1).trim().length() > 0;
+    }
+
+    private static String cacheKey(String fileId, long rangeStart) {
+        return fileId + "|" + rangeStart;
+    }
+
+    private static long parseContentTotal(String contentRange, String contentLength,
+            long rangeStart) {
+        if (contentRange != null) {
+            int slash = contentRange.lastIndexOf('/');
+            if (slash >= 0) {
+                try {
+                    return Long.parseLong(contentRange.substring(slash + 1).trim());
+                } catch (NumberFormatException ignored) {
+                    // Fall through to the Content-Length estimate.
+                }
+            }
+        }
+        if (contentLength != null) {
+            try {
+                return rangeStart + Long.parseLong(contentLength);
+            } catch (NumberFormatException ignored) {
+                // Unknown length; the cache will not be used for this response.
+            }
+        }
+        return -1;
+    }
+
+    private boolean serveCachedWindow(String fileId, long requestedStart, OutputStream out)
+            throws IOException {
+        CachedWindow cached = metadataWindows.get(fileId);
+        if (cached == null || requestedStart < cached.start
+                || requestedStart >= cached.start + cached.bytes.length) {
+            return false;
+        }
+
+        int offset = (int) (requestedStart - cached.start);
+        int length = cached.bytes.length - offset;
+        long end = requestedStart + length - 1;
+        StringBuilder head = new StringBuilder(256);
+        head.append("HTTP/1.1 206 Partial Content\r\n")
+                .append("Content-Type: ")
+                .append(cached.contentType == null ? "application/octet-stream" : cached.contentType)
+                .append("\r\n")
+                .append("Content-Length: ").append(length).append("\r\n")
+                .append("Content-Range: bytes ").append(requestedStart).append('-')
+                .append(end).append('/').append(cached.total).append("\r\n")
+                .append("Accept-Ranges: bytes\r\n")
+                .append("Connection: close\r\n\r\n");
+
+        out.write(head.toString().getBytes(StandardCharsets.US_ASCII));
+        out.write(cached.bytes, offset, length);
+        out.flush();
+        Log.d(TAG, "timing proxy:cache-hit file=" + fileId
+                + " start=" + requestedStart
+                + " bytes=" + length);
+        return true;
+    }
+
+    /**
+     * Serve the cached metadata prefix and continue the same HTTP response
+     * from Drive. Closing after the prefix is unsafe because VLC can interpret
+     * that close as EOF and advance the playlist.
+     */
+    private boolean serveCachedPrefixWithUpstream(String fileId, CachedWindow cached,
+            OutputStream out, long requestStartedAt) throws IOException {
+        if (cached == null || cached.bytes.length == 0) {
+            return false;
+        }
+
+        long continuationStart = cached.start + cached.bytes.length;
+        if (continuationStart >= cached.total) {
+            return false;
+        }
+
+        String token;
+        try {
+            token = DriveTokenProvider.get(appContext);
+        } catch (IOException e) {
+            return false;
+        }
+
+        long totalLength = cached.total - cached.start;
+        StringBuilder head = new StringBuilder(256);
+        head.append("HTTP/1.1 206 Partial Content\r\n")
+                .append("Content-Type: ")
+                .append(cached.contentType == null ? "application/octet-stream" : cached.contentType)
+                .append("\r\n")
+                .append("Content-Length: ").append(totalLength).append("\r\n")
+                .append("Content-Range: bytes ").append(cached.start).append('-')
+                .append(cached.total - 1)
+                .append('/').append(cached.total).append("\r\n")
+                .append("Accept-Ranges: bytes\r\n")
+                .append("Connection: close\r\n\r\n");
+        out.write(head.toString().getBytes(StandardCharsets.US_ASCII));
+        out.write(cached.bytes);
+        out.flush();
+        Log.d(TAG, "timing proxy:cache-prefix file=" + fileId
+                + " cachedBytes=" + cached.bytes.length
+                + " total=" + totalLength
+                + " elapsedMs=" + (System.currentTimeMillis() - requestStartedAt));
+
+        HttpURLConnection continuation = null;
+        try {
+            continuation = openUpstream(fileId,
+                    "bytes=" + continuationStart + "-", token);
+            int code = continuation.getResponseCode();
+            if (code == 401) {
+                continuation.disconnect();
+                DriveTokenProvider.invalidate(appContext, token);
+                token = DriveTokenProvider.get(appContext);
+                continuation = openUpstream(fileId,
+                        "bytes=" + continuationStart + "-", token);
+                code = continuation.getResponseCode();
+            }
+            if (code >= 400) {
+                Log.w(TAG, "cached prefix continuation failed for " + fileId
+                        + " status=" + code);
+                return true;
+            }
+
+            InputStream body = continuation.getInputStream();
+            byte[] buffer = new byte[COPY_BUFFER];
+            int read;
+            while ((read = body.read(buffer)) != -1) {
+                out.write(buffer, 0, read);
+            }
+            out.flush();
+            Log.d(TAG, "timing proxy:cache-hit+upstream file=" + fileId
+                    + " cachedBytes=" + cached.bytes.length
+                    + " total=" + totalLength
+                    + " elapsedMs=" + (System.currentTimeMillis() - requestStartedAt));
+            return true;
+        } finally {
+            if (continuation != null) continuation.disconnect();
+        }
+    }
+
     private void proxy(String fileId, String range, boolean headOnly, OutputStream out)
             throws IOException {
         HttpURLConnection conn = null;
+        long requestStartedAt = System.currentTimeMillis();
+        String requestKey = fileId + "|" + (range == null ? "none" : range);
+        int requestNumber = rangeRequestCounts
+                .computeIfAbsent(requestKey, ignored -> new AtomicInteger())
+                .incrementAndGet();
+        Log.d(TAG, "timing proxy:start file=" + fileId
+                + " request#=" + requestNumber
+                + (range == null ? " range=none" : " range=" + range));
         try {
+            Long requestedStart = parseRangeStart(range);
+            if (!headOnly && requestedStart != null
+                    && range != null && !isBoundedRange(range)) {
+                CachedWindow cached = metadataWindows.get(cacheKey(fileId, requestedStart));
+                if (serveCachedPrefixWithUpstream(fileId, cached, out, requestStartedAt)) {
+                    return;
+                }
+            }
+
             String token;
             try {
                 token = DriveTokenProvider.get(appContext);
+                Log.d(TAG, "timing proxy:token file=" + fileId
+                        + " elapsedMs=" + (System.currentTimeMillis() - requestStartedAt));
             } catch (IOException e) {
                 Log.w(TAG, "no Drive token", e);
                 writeStatus(out, 502, "Drive Auth Unavailable");
@@ -458,6 +662,12 @@ public final class DriveStreamServer {
 
             conn = openUpstream(fileId, range, token);
             int code = conn.getResponseCode();
+            Log.d(TAG, "timing proxy:upstream file=" + fileId
+                    + " request#=" + requestNumber
+                    + " status=" + code
+                    + " contentLength=" + conn.getHeaderField("Content-Length")
+                    + " contentRange=" + conn.getHeaderField("Content-Range")
+                    + " elapsedMs=" + (System.currentTimeMillis() - requestStartedAt));
 
             // A token can go stale between range requests on a long file. One
             // retry with a freshly minted token turns that into a hiccup
@@ -512,15 +722,63 @@ public final class DriveStreamServer {
 
             out.write(head.toString().getBytes(StandardCharsets.US_ASCII));
             out.flush();
+            Log.d(TAG, "timing proxy:headers file=" + fileId
+                    + " elapsedMs=" + (System.currentTimeMillis() - requestStartedAt));
             if (headOnly) return;
 
             InputStream body = conn.getInputStream();
             byte[] buffer = new byte[COPY_BUFFER];
-            int read;
-            while ((read = body.read(buffer)) != -1) {
-                out.write(buffer, 0, read);
+            boolean loggedFirstBytes = false;
+            long bytesServed = 0;
+            ByteArrayOutputStream capture = requestedStart != null
+                    ? new ByteArrayOutputStream(METADATA_CACHE_BYTES)
+                    : null;
+            try {
+                int read;
+                while ((read = body.read(buffer)) != -1) {
+                    if (capture != null && capture.size() < METADATA_CACHE_BYTES) {
+                        capture.write(buffer, 0,
+                                Math.min(read, METADATA_CACHE_BYTES - capture.size()));
+                    }
+                    out.write(buffer, 0, read);
+                    bytesServed += read;
+                    if (!loggedFirstBytes) {
+                        // Do not make VLC wait for the proxy's 64KB output buffer
+                        // to fill before it can inspect the media headers.
+                        out.flush();
+                        loggedFirstBytes = true;
+                        Log.d(TAG, "timing proxy:first-bytes file=" + fileId
+                                + " bytes=" + read
+                                + " elapsedMs=" + (System.currentTimeMillis() - requestStartedAt));
+                    }
+                }
+            } finally {
+                if (capture != null && capture.size() > 0 && requestedStart != null) {
+                    long total = parseContentTotal(contentRange, length, requestedStart);
+                    if (total > 0) {
+                        String key = cacheKey(fileId, requestedStart);
+                        if (metadataWindows.size() >= METADATA_CACHE_FILES
+                                && !metadataWindows.containsKey(key)) {
+                            String firstKey = metadataWindows.keys().nextElement();
+                            metadataWindows.remove(firstKey);
+                        }
+                        metadataWindows.put(key, new CachedWindow(
+                                requestedStart,
+                                total,
+                                type,
+                                capture.toByteArray()));
+                        Log.d(TAG, "timing proxy:cache-store file=" + fileId
+                                + " start=" + requestedStart
+                                + " bytes=" + capture.size()
+                                + " total=" + total);
+                    }
+                }
             }
             out.flush();
+            Log.d(TAG, "timing proxy:complete file=" + fileId
+                    + " request#=" + requestNumber
+                    + " bytesServed=" + bytesServed
+                    + " elapsedMs=" + (System.currentTimeMillis() - requestStartedAt));
         } finally {
             if (conn != null) conn.disconnect();
         }

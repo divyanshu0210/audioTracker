@@ -49,6 +49,7 @@ const VLCPlayerComponent = forwardRef(
     },
     ref,
   ) => {
+    const playerMountedAt = useRef(Date.now());
     console.log(
       '🔄🔄🔄🔄 VLCPlayerComponent RENDERING',
       new Date().toISOString(),
@@ -434,6 +435,11 @@ const VLCPlayerComponent = forwardRef(
             // rather than on all four progress ticks a second.
             if (event.currentTime > 0 && !hasStartedRef.current) {
               hasStartedRef.current = true;
+              console.log('[PlaybackTiming] VLC first progress', {
+                sourceId: item?.source_id,
+                elapsedMs: Date.now() - playerMountedAt.current,
+                currentTimeMs: event.currentTime,
+              });
               setIsBuffering(false);
               // Playback exists now, so the controls have something to sit
               // over and the 3s countdown finally means something. showControls
@@ -443,6 +449,10 @@ const VLCPlayerComponent = forwardRef(
             onCurrentTimeChange?.(event.currentTime);
           }}
           onOpen={() => {
+            console.log('[PlaybackTiming] VLC open', {
+              sourceId: item?.source_id,
+              elapsedMs: Date.now() - playerMountedAt.current,
+            });
             // Only honor startTime on the very first open — reapplying it on
             // every resetToStart remount would seek back to the old saved
             // position instead of the fresh 0 we just reset to.

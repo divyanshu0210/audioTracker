@@ -36,6 +36,17 @@ const {DriveStream} = NativeModules;
 // One start() per process, shared by every caller. Cleared on failure so a
 // later attempt can retry rather than handing back the same rejection forever.
 let basePromise = null;
+// NetInfo.fetch() can take seconds while Android performs its first
+// connectivity probe. Keep the latest event state so resolving a Drive URL
+// does not repeat that probe for every playback.
+let latestNetworkState = null;
+NetInfo.addEventListener(state => {
+  latestNetworkState = state;
+});
+
+// A stale downloaded path can make RNFS.exists wait for several seconds on
+// external storage. Drive streaming should not be held behind that check.
+const LOCAL_COPY_CHECK_TIMEOUT_MS = 250;
 
 const getBaseUrl = () => {
   if (!basePromise) {
@@ -66,7 +77,7 @@ export const getContentStreamUrl = async uri => {
 
 const isOffline = async () => {
   try {
-    const state = await NetInfo.fetch();
+    const state = latestNetworkState || (await NetInfo.fetch());
     // isInternetReachable is null until the first probe resolves; only a
     // definite false counts, so a slow probe never blocks a stream.
     return !state.isConnected || state.isInternetReachable === false;
@@ -159,14 +170,33 @@ export const resolvePlaybackPath = async item => {
   // Skipped for a uri, which RNFS cannot stat anyway — reaching here with one
   // means it was already found to be unreadable above.
   if (item.file_path && !isContentUri(item.file_path)) {
+    const existsStartedAt = Date.now();
     try {
-      if (await RNFS.exists(item.file_path)) return item.file_path;
+      const exists = await Promise.race([
+        RNFS.exists(item.file_path),
+        new Promise(resolve =>
+          setTimeout(() => resolve(null), LOCAL_COPY_CHECK_TIMEOUT_MS),
+        ),
+      ]);
+      console.log('[PlaybackTiming] local copy check', {
+        sourceId: item.source_id,
+        exists,
+        elapsedMs: Date.now() - existsStartedAt,
+      });
+      if (exists) return item.file_path;
     } catch (error) {
       console.warn('Could not check the downloaded copy:', error);
     }
   }
 
-  if (await isOffline()) return null;
+  const connectivityStartedAt = Date.now();
+  const offline = await isOffline();
+  console.log('[PlaybackTiming] connectivity check', {
+    sourceId: item.source_id,
+    offline,
+    elapsedMs: Date.now() - connectivityStartedAt,
+  });
+  if (offline) return null;
 
   try {
     return await getDriveStreamUrl(driveId);

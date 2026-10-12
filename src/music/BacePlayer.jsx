@@ -268,10 +268,21 @@ const BacePlayer = () => {
     if (isStreamUrl(currentItem.file_path)) return;
 
     let cancelled = false;
+    const resolveStartedAt = Date.now();
+    console.log('[PlaybackTiming] stream resolve:start', {
+      sourceId: currentSourceId,
+      type: currentItem?.type,
+      at: new Date(resolveStartedAt).toISOString(),
+    });
     setIsResolvingSource(true);
     (async () => {
       const path = await resolvePlaybackPath(currentItem);
       if (cancelled) return;
+      console.log('[PlaybackTiming] stream resolve:done', {
+        sourceId: currentSourceId,
+        elapsedMs: Date.now() - resolveStartedAt,
+        hasPath: !!path,
+      });
       setIsResolvingSource(false);
       if (path === currentItem.file_path) return;
 
@@ -753,6 +764,11 @@ const BacePlayer = () => {
   }, []);
 
   const loadPreviousWatchData = async videoId => {
+    const watchDataStartedAt = Date.now();
+    console.log('[PlaybackTiming] watch data:start', {
+      sourceId: videoId,
+      at: new Date(watchDataStartedAt).toISOString(),
+    });
     if (!videoId) {
       console.log('no videoID for loading');
       setIsDataLoaded(true);
@@ -780,6 +796,10 @@ const BacePlayer = () => {
     } catch (error) {
       console.error('Error loading watch data:', error);
     } finally {
+      console.log('[PlaybackTiming] watch data:done', {
+        sourceId: videoId,
+        elapsedMs: Date.now() - watchDataStartedAt,
+      });
       setIsDataLoaded(true);
     }
   };

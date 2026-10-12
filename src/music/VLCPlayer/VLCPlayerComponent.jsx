@@ -834,7 +834,9 @@ const styles = StyleSheet.create({
     top: 0,
     left: 0,
     right: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.1)',
+    // Keep the title readable over bright video and light backgrounds. This
+    // is intentionally close to black while retaining a little of the video.
+    backgroundColor: 'rgba(0, 0, 0, 0.42)',
     paddingTop: 10,
     paddingBottom: 5,
     paddingHorizontal: 15,
@@ -848,9 +850,11 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.1)',
+    // A dark surface keeps the timer, slider and controls legible regardless
+    // of the frame underneath them.
+    backgroundColor: 'rgba(0, 0, 0, 0.42)',
     zIndex: 10,
-    paddingBottom: 10,
+    paddingBottom: 0,
   },
   // Android's navigation/gesture inset can sit over the very bottom of a
   // Keep a small lift in the minimized player. Fullscreen applies a larger

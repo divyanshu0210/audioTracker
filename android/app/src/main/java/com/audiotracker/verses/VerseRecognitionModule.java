@@ -6,6 +6,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.media.projection.MediaProjectionManager;
+import android.media.projection.MediaProjectionConfig;
 import android.os.Build;
 import android.util.Log;
 
@@ -194,7 +195,17 @@ public class VerseRecognitionModule extends ReactContextBaseJavaModule {
         try {
             MediaProjectionManager manager = (MediaProjectionManager)
                     activity.getSystemService(Context.MEDIA_PROJECTION_SERVICE);
-            activity.startActivityForResult(manager.createScreenCaptureIntent(), REQUEST_CAPTURE);
+            Intent consentIntent;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                // Android 14+ can restrict the system picker to the default
+                // display, avoiding the extra single-app choice for this
+                // audio-capture flow.
+                consentIntent = manager.createScreenCaptureIntent(
+                        MediaProjectionConfig.createConfigForDefaultDisplay());
+            } else {
+                consentIntent = manager.createScreenCaptureIntent();
+            }
+            activity.startActivityForResult(consentIntent, REQUEST_CAPTURE);
         } catch (Throwable t) {
             pendingStart = null;
             Log.e(TAG, "could not ask for capture consent", t);

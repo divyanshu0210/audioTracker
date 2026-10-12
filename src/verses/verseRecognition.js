@@ -215,6 +215,13 @@ export const setCapturing = async capturing => {
   }
 };
 
+/** Pause and detach this screen's listeners while retaining MediaProjection. */
+export const pauseListening = async () => {
+  detach();
+  useVerseStore.getState().setListening(false);
+  await setCapturing(false);
+};
+
 export const stopListening = async () => {
   detach();
   useVerseStore.getState().setListening(false);

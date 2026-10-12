@@ -164,6 +164,9 @@ public class VerseCaptureService extends Service {
     private Thread worker;
     private volatile boolean running;
     private volatile boolean capturing;
+    /** The requested state can arrive while the ONNX sessions are loading. */
+    private volatile boolean captureRequested;
+    private volatile boolean modelReady;
 
     private static volatile boolean active = false;
 
@@ -220,6 +223,15 @@ public class VerseCaptureService extends Service {
         return START_NOT_STICKY;
     }
 
+    @Override
+    public void onTaskRemoved(Intent rootIntent) {
+        // Swiping AudioTracker away from Recents ends the app session. Do not
+        // leave the MediaProjection grant or its foreground notification alive
+        // after the task has been dismissed.
+        stopSelf();
+        super.onTaskRemoved(rootIntent);
+    }
+
     private void begin(int resultCode, Intent resultData) throws Exception {
         MediaProjectionManager manager =
                 (MediaProjectionManager) getSystemService(Context.MEDIA_PROJECTION_SERVICE);
@@ -269,18 +281,41 @@ public class VerseCaptureService extends Service {
                 .setAudioPlaybackCaptureConfig(config)
                 .build();
 
-        recognizer = new SanskritRecognizer(this);
-
         record.startRecording();
         running = true;
-        capturing = true;
+        // Start draining AudioRecord immediately, but do not run recognition
+        // until the ONNX sessions have been created on the recogniser thread.
+        // Session construction allocates a large amount of native memory and
+        // can take a noticeable moment on a phone; doing it here made the
+        // enable action appear to freeze the player/UI.
+        capturing = false;
+        captureRequested = true;
+        modelReady = false;
         active = true;
-        emitState("listening", null);
+        emitState("preparing", null);
 
         worker = new Thread(this::readLoop, "verse-capture");
         worker.start();
-        recogniser = new Thread(this::recogniseLoop, "verse-recognise");
+        recogniser = new Thread(this::loadAndRecogniseLoop, "verse-recognise");
         recogniser.start();
+    }
+
+    /** Load the native model away from the service/UI caller, then recognise. */
+    private void loadAndRecogniseLoop() {
+        try {
+            recognizer = new SanskritRecognizer(this);
+            modelReady = true;
+            if (!running) return;
+            if (captureRequested) setCapturing(true);
+            recogniseLoop();
+        } catch (Throwable t) {
+            modelReady = false;
+            if (running) {
+                Log.e(TAG, "could not load recogniser", t);
+                fail("the recogniser could not be loaded");
+                stopSelf();
+            }
+        }
     }
 
     /**
@@ -300,7 +335,15 @@ public class VerseCaptureService extends Service {
      * runs the model not once.
      */
     private synchronized void setCapturing(boolean want) {
-        if (!running || capturing == want) return;
+        if (!running) return;
+
+        captureRequested = want;
+        if (want && !modelReady) {
+            capturing = false;
+            emitState("preparing", null);
+            return;
+        }
+        if (capturing == want) return;
 
         if (want) {
             // Whatever is in the ring was heard before the pause and does not
@@ -433,6 +476,7 @@ public class VerseCaptureService extends Service {
             ringLock.notifyAll();
         }
         recognizer = null;
+        modelReady = false;
     }
 
     private void emitSpeech(String text, float confidence) {
@@ -469,7 +513,7 @@ public class VerseCaptureService extends Service {
 
         Notification notification = new NotificationCompat.Builder(this, CHANNEL_ID)
                 .setContentTitle("Listening for verses")
-                .setContentText("Verses and songs will appear under the player")
+                .setContentText("Ready to detect verses and songs from the player")
                 .setSmallIcon(android.R.drawable.ic_btn_speak_now)
                 .setOngoing(true)
                 .setPriority(NotificationCompat.PRIORITY_LOW)
@@ -486,7 +530,19 @@ public class VerseCaptureService extends Service {
     public void onDestroy() {
         running = false;
         capturing = false;
+        captureRequested = false;
+        modelReady = false;
         active = false;
+
+        if (recogniser != null) {
+            recogniser.interrupt();
+            try {
+                recogniser.join(1500);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            recogniser = null;
+        }
 
         if (worker != null) {
             try {

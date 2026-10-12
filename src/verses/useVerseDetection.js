@@ -25,6 +25,7 @@ import {
   capabilities,
   deleteModel,
   enableListening,
+  pauseListening,
   isSupportedPlatform,
   setCapturing,
   stopListening,
@@ -168,7 +169,10 @@ const useVerseDetection = ({sourceId, title, path, isPaused, isPlaybackReady}) =
         }
       } else if (!shouldListen && runningRef.current) {
         runningRef.current = false;
-        await stopListening();
+        // Keep the MediaProjection session alive for this player session.
+        // Turning detection off pauses audio capture; it does not trigger a
+        // second system consent dialog if the user enables it again.
+        await setCapturing(false);
       }
     };
 
@@ -184,12 +188,15 @@ const useVerseDetection = ({sourceId, title, path, isPaused, isPlaybackReady}) =
     setCapturing(!isPaused);
   }, [isPaused]);
 
-  // Leaving the player stops the capture. Without this the foreground service
-  // and its notification outlive the thing they were listening to.
+  // Leaving the player pauses capture and detaches this screen's listeners,
+  // while the foreground service keeps the projection grant for the next
+  // player screen in the same app session.
   useEffect(
     () => () => {
       runningRef.current = false;
-      stopListening();
+      // Keep the projection service alive between player screens so the next
+      // video can reuse the existing system grant without another dialog.
+      pauseListening();
       useVerseStore.getState().reset();
     },
     [],
@@ -205,7 +212,7 @@ const useVerseDetection = ({sourceId, title, path, isPaused, isPlaybackReady}) =
     if (sessionRequested) {
       setSessionRequested(false);
       updateSettings({verseDetectionEnabled: false});
-      await stopListening();
+      await setCapturing(false);
       useVerseStore.getState().reset();
       return;
     }

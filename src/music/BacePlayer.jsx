@@ -1639,24 +1639,6 @@ const BacePlayer = () => {
                     disabled: below Android 10 there is no playback capture at
                     all, and a permanently dead control invites tapping. */}
                 {verses.available && (
-                  <View
-                    accessible
-                    accessibilityLabel={
-                      verses.modelReady
-                        ? 'AI speech model ready'
-                        : 'AI speech model waiting to download'
-                    }
-                    style={styles.focusPillHit}>
-                    <View style={[styles.focusPill, {backgroundColor: '#27272a'}]}>
-                      <Icon
-                        name={verses.modelReady ? 'cloud-done' : 'cloud-download'}
-                        size={18}
-                        color={verses.modelReady ? '#4ade80' : '#fbbf24'}
-                      />
-                    </View>
-                  </View>
-                )}
-                {verses.available && (
                   <TouchableOpacity
                     style={styles.focusPillHit}
                     onPress={verses.toggle}
@@ -1670,7 +1652,9 @@ const BacePlayer = () => {
                     disabled={verses.preparing}
                     accessibilityRole="switch"
                     accessibilityState={{checked: verses.enabled}}
-                    accessibilityLabel="Verse detection"
+                    accessibilityLabel={`Verse detection, AI model ${
+                      verses.modelReady ? 'ready' : 'waiting to download'
+                    }`}
                     accessibilityHint={
                       verses.enabled
                         ? 'Double tap to stop listening for verses, or double tap and hold to show what it is hearing'
@@ -1696,8 +1680,12 @@ const BacePlayer = () => {
                             verses.enabled
                               ? verses.listening
                                 ? '#4ade80'
-                                : '#94a3b8'
-                              : '#a1a1aa'
+                                : verses.modelReady
+                                ? '#94a3b8'
+                                : '#fbbf24'
+                              : verses.modelReady
+                              ? '#a1a1aa'
+                              : '#fbbf24'
                           }
                         />
                       )}

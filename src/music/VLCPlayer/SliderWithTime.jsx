@@ -20,22 +20,22 @@ const SliderWithTime = ({ style, onSeek, sliderStyle, stacked = false, topRight 
   // Subscribe to both time and duration in one component
   const currentTime = usePlayerTimeStore((state) => state.currentTime);
   const duration = usePlayerTimeStore((state) => state.duration);
-  
+
   const handleSlidingComplete = useCallback((value) => {
     onSeek?.(value);
   }, [onSeek]);
-  
+
   // Memoize formatted times to avoid recalculation on every render
-  const formattedCurrentTime = React.useMemo(() => 
-    formatTime(currentTime / 1000), 
+  const formattedCurrentTime = React.useMemo(() =>
+    formatTime(currentTime / 1000),
     [currentTime]
   );
-  
-  const formattedDuration = React.useMemo(() => 
-    formatTime(duration / 1000), 
+
+  const formattedDuration = React.useMemo(() =>
+    formatTime(duration / 1000),
     [duration]
   );
-  
+
   if (stacked) {
     return (
       <View style={[styles.stackedContainer, style]}>
@@ -52,8 +52,9 @@ const SliderWithTime = ({ style, onSeek, sliderStyle, stacked = false, topRight 
           maximumValue={duration}
           onSlidingComplete={handleSlidingComplete}
           minimumTrackTintColor="red"
-          maximumTrackTintColor="rgba(255, 255, 255, 0.5)"
+          maximumTrackTintColor="rgba(255, 255, 255, 1)"
           thumbTintColor="red"
+
         />
       </View>
     );
@@ -64,7 +65,7 @@ const SliderWithTime = ({ style, onSeek, sliderStyle, stacked = false, topRight 
       <Text style={styles.timeText}>
         {formattedCurrentTime}
       </Text>
-      
+
       <Slider
         style={[styles.slider, sliderStyle]}
         value={currentTime}
@@ -75,7 +76,7 @@ const SliderWithTime = ({ style, onSeek, sliderStyle, stacked = false, topRight 
         maximumTrackTintColor="rgba(255, 255, 255, 0.5)"
         thumbTintColor="red"
       />
-      
+
       <Text style={styles.timeText}>
         {formattedDuration}
       </Text>
@@ -107,6 +108,7 @@ const styles = StyleSheet.create({
   slider: {
     flex: 1,
     marginHorizontal: 8,
+
   },
   stackedSlider: {
     width: '99%',

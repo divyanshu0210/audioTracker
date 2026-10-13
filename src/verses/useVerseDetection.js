@@ -162,10 +162,13 @@ const useVerseDetection = ({sourceId, title, path, isPaused, isPlaybackReady}) =
           // A failed start must not leave the flag set, or nothing will try
           // again for the rest of the session.
           runningRef.current = false;
-        } else if (pausedRef.current) {
-          // Opened onto a paused player - a note's timestamp link does this,
-          // and so does pauseOnStart.
-          setCapturing(false);
+        } else {
+          // `start()` can resolve with an already-active service. That happens
+          // after the player was paused or after leaving and re-entering the
+          // screen. Explicitly restore the requested capture state; otherwise
+          // the native service remains idle and the UI never receives a fresh
+          // listening event.
+          await setCapturing(!pausedRef.current);
         }
       } else if (!shouldListen && runningRef.current) {
         runningRef.current = false;
@@ -239,7 +242,7 @@ const useVerseDetection = ({sourceId, title, path, isPaused, isPlaybackReady}) =
     } finally {
       setPreparing(false);
     }
-  }, [sessionRequested, available, updateSettings]);
+  }, [sessionRequested, available, modelReady, isPlaybackReady, updateSettings]);
 
   /**
    * Where the media is, in seconds.

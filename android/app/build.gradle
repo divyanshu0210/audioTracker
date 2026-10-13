@@ -77,12 +77,23 @@ def enableSeparateBuildPerCPUArchitecture = true
  */
 def jscFlavor = 'org.webkit:android-jsc:+'
 
+def syncVerseMatcherIndex = tasks.register("syncVerseMatcherIndex", Copy) {
+    from file("../../src/verses/corpus/index.json")
+    into file("$buildDir/generated/verseMatcherAssets")
+    rename { "verse_index.json" }
+}
+
+tasks.named("preBuild").configure { dependsOn(syncVerseMatcherIndex) }
+
 android {
     ndkVersion rootProject.ext.ndkVersion
     buildToolsVersion rootProject.ext.buildToolsVersion
     compileSdk rootProject.ext.compileSdkVersion
 
     namespace "com.audiotracker"
+    sourceSets {
+        main.assets.srcDir("$buildDir/generated/verseMatcherAssets")
+    }
     defaultConfig {
         applicationId "com.audiotracker"
         minSdkVersion rootProject.ext.minSdkVersion

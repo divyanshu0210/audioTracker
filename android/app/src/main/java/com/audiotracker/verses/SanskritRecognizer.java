@@ -41,6 +41,9 @@ import ai.onnxruntime.OrtSession;
 public class SanskritRecognizer implements AutoCloseable {
 
     private static final String TAG = "VerseRecognizer";
+    private static final Object PRELOAD_LOCK = new Object();
+    private static SanskritRecognizer preloaded;
+    private static boolean preloadInProgress;
 
     /** Index 0 of the vocabulary. Dropped by the CTC collapse below. */
     private static final int BLANK = 0;
@@ -71,6 +74,59 @@ public class SanskritRecognizer implements AutoCloseable {
         this.vocab = readVocab(new File(dir, VerseModelStore.VOCAB));
 
         Log.i(TAG, "loaded, " + vocab.length + " classes");
+    }
+
+    /** Warm the ONNX sessions without starting capture or holding a service. */
+    public static void preload(Context context) {
+        synchronized (PRELOAD_LOCK) {
+            if (preloaded != null || preloadInProgress) return;
+            preloadInProgress = true;
+        }
+        new Thread(() -> {
+            SanskritRecognizer loaded = null;
+            try {
+                if (VerseModelStore.isReady(context)) loaded = new SanskritRecognizer(context);
+                if (loaded != null) Log.i(TAG, "background preload ready");
+            } catch (Throwable t) {
+                Log.w(TAG, "background preload skipped", t);
+            }
+            synchronized (PRELOAD_LOCK) {
+                preloaded = loaded;
+                preloadInProgress = false;
+                PRELOAD_LOCK.notifyAll();
+            }
+        }, "verse-model-preload").start();
+    }
+
+    /** Take the warmed sessions, waiting for an in-progress preload if needed. */
+    public static SanskritRecognizer obtain(Context context)
+            throws IOException, OrtException, JSONException {
+        synchronized (PRELOAD_LOCK) {
+            while (preloadInProgress && preloaded == null) {
+                try {
+                    PRELOAD_LOCK.wait();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
+            if (preloaded != null) {
+                SanskritRecognizer result = preloaded;
+                preloaded = null;
+                return result;
+            }
+        }
+        return new SanskritRecognizer(context);
+    }
+
+    /** Release an unused warm instance, for explicit model deletion or memory pressure. */
+    public static void releasePreloaded() {
+        SanskritRecognizer unused;
+        synchronized (PRELOAD_LOCK) {
+            unused = preloaded;
+            preloaded = null;
+        }
+        if (unused != null) unused.close();
     }
 
     private static String[] readVocab(File file) throws IOException, JSONException {

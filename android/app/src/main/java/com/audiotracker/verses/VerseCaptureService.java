@@ -303,7 +303,10 @@ public class VerseCaptureService extends Service {
     /** Load the native model away from the service/UI caller, then recognise. */
     private void loadAndRecogniseLoop() {
         try {
-            recognizer = new SanskritRecognizer(this);
+            // Reuse an idle background preload when available. If preload is
+            // still constructing the sessions, obtain() waits for it rather
+            // than creating a second ONNX copy in memory.
+            recognizer = SanskritRecognizer.obtain(this);
             modelReady = true;
             if (!running) return;
             if (captureRequested) setCapturing(true);
@@ -409,6 +412,7 @@ public class VerseCaptureService extends Service {
     private void recogniseLoop() {
         float[] snapshot = new float[WINDOW_SAMPLES];
         long lastAt = 0;
+        boolean firstWindowLogged = false;
         String previous = "";
 
         try {
@@ -440,6 +444,11 @@ public class VerseCaptureService extends Service {
                 }
 
                 if (count < MIN_SAMPLES) continue;
+
+                if (!firstWindowLogged) {
+                    firstWindowLogged = true;
+                    Log.i(TAG, "recognition:first-window samples=" + count);
+                }
 
                 SanskritRecognizer.Heard heard = recognizer.transcribe(snapshot, count);
                 String text = heard.text;
@@ -491,6 +500,7 @@ public class VerseCaptureService extends Service {
     }
 
     private void emitState(String state, String reason) {
+        Log.i(TAG, "state=" + state + (reason == null ? "" : " reason=" + reason));
         WritableMap payload = Arguments.createMap();
         payload.putString("state", state);
         if (reason != null) payload.putString("reason", reason);

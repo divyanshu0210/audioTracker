@@ -20,6 +20,7 @@ import com.facebook.react.bridge.Promise;
 import com.facebook.react.bridge.ReactApplicationContext;
 import com.facebook.react.bridge.ReactContextBaseJavaModule;
 import com.facebook.react.bridge.ReactMethod;
+import com.facebook.react.bridge.ReadableArray;
 import com.facebook.react.bridge.WritableMap;
 
 /**
@@ -58,6 +59,8 @@ public class VerseRecognitionModule extends ReactContextBaseJavaModule {
         public void onActivityResult(Activity activity, int requestCode, int resultCode, Intent data) {
             if (requestCode != REQUEST_CAPTURE) return;
 
+            Log.i(TAG, "capture-consent result=" + resultCode);
+
             Promise promise = pendingStart;
             pendingStart = null;
             if (promise == null) return;
@@ -83,11 +86,26 @@ public class VerseRecognitionModule extends ReactContextBaseJavaModule {
     public VerseRecognitionModule(ReactApplicationContext context) {
         super(context);
         context.addActivityEventListener(activityListener);
+        VerseMatcher.preload(context);
     }
 
     @Override
     public String getName() {
         return "VerseRecognition";
+    }
+
+    /** Native lookup used by matcher.js after the index is ready. */
+    @ReactMethod(isBlockingSynchronousMethod = true)
+    public com.facebook.react.bridge.WritableArray matchHashes(ReadableArray queryHashes,
+            int minRun, double minSolidRatio, double missPenalty) {
+        int[] hashes = new int[queryHashes == null ? 0 : queryHashes.size()];
+        for (int i = 0; i < hashes.length; i++) hashes[i] = queryHashes.getInt(i);
+        return VerseMatcher.match(hashes, minRun, minSolidRatio, missPenalty);
+    }
+
+    @ReactMethod(isBlockingSynchronousMethod = true)
+    public com.facebook.react.bridge.WritableArray songNames() {
+        return VerseMatcher.songNames();
     }
 
     /** What this device can do. Cheap enough for a settings screen to ask freely. */
@@ -150,9 +168,23 @@ public class VerseRecognitionModule extends ReactContextBaseJavaModule {
         if (promise != null) promise.resolve(true);
     }
 
+    /** Warm the recogniser only when the completed model is already on disk. */
+    @ReactMethod
+    public void preloadModel(Promise promise) {
+        Context context = getReactApplicationContext();
+        if (!VerseModelStore.isReady(context)) {
+            if (promise != null) promise.resolve(false);
+            return;
+        }
+        Log.d(TAG, "background model preload requested");
+        SanskritRecognizer.preload(context);
+        if (promise != null) promise.resolve(true);
+    }
+
     @ReactMethod
     public void deleteModel(Promise promise) {
         VerseModelWorker.cancel(getReactApplicationContext());
+        SanskritRecognizer.releasePreloaded();
         VerseModelStore.delete(getReactApplicationContext());
         promise.resolve(true);
     }

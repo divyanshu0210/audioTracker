@@ -133,6 +133,17 @@ export const scheduleModelDownload = async () => {
   }
 };
 
+/** Warm the native ONNX sessions when the completed model is already present. */
+export const preloadModel = async () => {
+  if (!isSupportedPlatform || !VerseRecognition) return false;
+  try {
+    return await VerseRecognition.preloadModel();
+  } catch (err) {
+    console.log('[verses] could not preload the model:', err?.message);
+    return false;
+  }
+};
+
 export const deleteModel = async () => {
   if (!isSupportedPlatform || !VerseRecognition) return false;
   return VerseRecognition.deleteModel();
@@ -174,18 +185,6 @@ export const startListening = async () => {
       }
     }),
   ];
-
-  // Decoding the gram index takes a moment and blocks the JS thread. Started
-  // here rather than left to the first phrase that arrives: `start` puts the
-  // consent dialog over the app, and a thread blocked behind that dialog is one
-  // nobody is waiting on.
-  setTimeout(() => {
-    try {
-      require('./matcher').warmUp();
-    } catch (err) {
-      // The first match will pay for it instead.
-    }
-  }, 0);
 
   try {
     await VerseRecognition.start();
@@ -247,7 +246,9 @@ const waitForModel = async () => {
   if (!(await scheduleModelDownload())) return false;
   while (true) {
     const caps = await capabilities();
-    if (caps.modelReady) return true;
+    if (caps.modelReady) {
+      return true;
+    }
     await wait(1000);
   }
 };

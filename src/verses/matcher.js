@@ -18,7 +18,7 @@
 // change is the difference between a panel that flickers between plausible
 // verses and one that sits still on the right one.
 
-import {Buffer} from 'buffer';
+import {NativeModules} from 'react-native';
 
 import {
   devanagariStream,
@@ -27,6 +27,8 @@ import {
   GRAM_SIZE,
 } from './phonetics';
 import {isPenalised, tuning} from './tuning';
+
+const {VerseRecognition} = NativeModules;
 
 // Kept small on purpose. Counting hits is cheap; measuring runs is not, so
 // only the best few by raw count are looked at properly.
@@ -131,77 +133,6 @@ export const MIN_RUN_CHARS = 22;
 // to recall is under one percent.
 // Also in tuning.js - see the note under MISS_PENALTY above.
 
-// Both the parse and the decode happen once, on first use, rather than at
-// import.
-//
-// The index is six megabytes of JSON, most of it base64 - and `import` at the
-// top of this file would spend that on the first launch that so much as
-// reaches this module, including every launch that never plays anything. The
-// require below runs inside load(), which runs on the first match attempt,
-// which only happens once recognition is actually listening.
-let decoded = null;
-
-const unpackInts = b64 => {
-  const bytes = Buffer.from(b64, 'base64');
-  // Copied rather than viewed: Buffer hands back a slice of a shared pool at
-  // an arbitrary byte offset, and Int32Array over an unaligned offset throws.
-  const out = new Int32Array(bytes.byteLength / 4);
-  for (let i = 0; i < out.length; i++) out[i] = bytes.readInt32LE(i * 4);
-  return out;
-};
-
-const load = () => {
-  if (decoded) return decoded;
-  const index = require('./corpus/index.json');
-  decoded = {
-    docs: index.docs,
-    devanagariCommon: unpackInts(index.devanagariCommon || ''),
-    devanagariHashes: unpackInts(index.devanagariHashes || ''),
-    devanagariStarts: unpackInts(index.devanagariStarts || ''),
-    devanagariPostings: unpackInts(index.devanagariPostings || ''),
-    gramSize: index.gramSize,
-    builtAt: index.builtAt,
-  };
-  return decoded;
-};
-
-/**
- * Parse and decode the index now, rather than on the first match.
- *
- * The decode is not cheap - a nine megabyte JSON file, then a million postings
- * out of base64 - and it runs on the JS thread. Left to happen lazily it lands
- * on the first phrase the recogniser returns, which is in the middle of a
- * lecture somebody is watching, and freezes the UI for as long as it takes.
- *
- * So it is pulled forward to the moment listening starts, where there is a
- * system consent dialog covering the app and nothing to be frozen. Idempotent -
- * load() returns the same object afterwards - so calling it twice costs
- * nothing.
- */
-export const warmUp = () => {
-  load();
-};
-
-/** Where `hash` sits in a sorted Int32Array, or -1. */
-const findGram = (hashes, hash) => {
-  let lo = 0;
-  let hi = hashes.length - 1;
-  while (lo <= hi) {
-    const mid = (lo + hi) >> 1;
-    const at = hashes[mid];
-    if (at === hash) return mid;
-    if (at < hash) lo = mid + 1;
-    else hi = mid - 1;
-  }
-  return -1;
-};
-
-// Reused between queries. Matching runs several times a second for as long as
-// a lecture is playing, and allocating a fifteen-thousand-slot counter each
-// time is the kind of garbage that shows up as a stutter in the panel.
-let counts = null;
-let touched = [];
-
 /**
  * @param queryHashes hashed grams of the recogniser's output
  * @param minRun      how long a run has to be to be returned. Defaults to the
@@ -209,206 +140,20 @@ let touched = [];
  *                    the near-misses, which is the difference between "heard
  *                    nothing" and "nearly had it".
  */
-export const matchHashes = (queryHashes, minRun, flattened = false, direct = false) => {
-  const loaded = load();
-  const {docs, gramSize} = loaded;
-  const common = loaded.devanagariCommon;
-  const hashes = loaded.devanagariHashes;
-  const starts = loaded.devanagariStarts;
-  const postings = loaded.devanagariPostings;
 
-  // Which half of the index this query belongs to. A Sanskrit query never sees
-  // the flattened copies and a flattened query never sees the originals - they
-  // are two readings of the same corpus, not twice as much corpus, and letting
-  // one query see both is what made nonsense match again.
-  const from = 0;
-  const to = docs.length;
-
-  // Read once per query rather than per position: this loop runs over every
-  // gram of every window, several times a second, for as long as a lecture
-  // plays.
-  const {missPenalty, minSolidRatio, minRunChars} = tuning();
-  const floor = minRun === undefined ? minRunChars : minRun;
-
-  if (!counts || counts.length !== docs.length) counts = new Int32Array(docs.length);
-
-  // Clearing only what the previous query touched, rather than the whole
-  // array - a query lights up a few hundred documents out of fifteen thousand.
-  for (const ordinal of touched) counts[ordinal] = 0;
-  touched = [];
-
-  // Kept per query gram so the rerank below can walk positions without
-  // searching the index a second time.
-  //   [from, to] - a real posting range
-  //   'neutral'   - a gram too common to be indexed; see `common` above. It
-  //                 neither confirms nor contradicts, and the rerank steps
-  //                 over it without breaking a run.
-  //   null        - in no verse at all, which is a genuine mismatch.
-  const rangeAt = new Array(queryHashes.length);
-
-  for (let q = 0; q < queryHashes.length; q++) {
-    const slot = findGram(hashes, queryHashes[q]);
-    if (slot === -1) {
-      rangeAt[q] = findGram(common, queryHashes[q]) === -1 ? null : 'neutral';
-      continue;
-    }
-    const postingsFrom = starts[slot];
-    const postingsTo = starts[slot + 1];
-    rangeAt[q] = [postingsFrom, postingsTo];
-    for (let p = postingsFrom; p < postingsTo; p++) {
-      const ordinal = postings[p];
-      // Wrong half of the index for this query - see `from`/`to` above.
-      if (ordinal < from || ordinal >= to) continue;
-      if (counts[ordinal] === 0) touched.push(ordinal);
-      counts[ordinal]++;
-    }
-  }
-
-  if (!touched.length) return [];
-
-  // Top few by raw hit count, which is a cheap upper bound on the run length.
-  const shortlist = touched
-    .slice()
-    .sort((a, b) => counts[b] - counts[a])
-    .slice(0, RERANK_DEPTH);
-
-  const wanted = new Set(shortlist);
-
-  // For each shortlisted verse, the best-scoring local alignment between the
-  // query and that record - the longest stretch of query positions landing in
-  // it, with short interruptions tolerated but paid for. See MISS_PENALTY.
-  //
-  // `solid` counts the positions in that alignment that were real hits on this
-  // record, as opposed to neutral grams that merely passed through it or misses
-  // it absorbed. See the note on MIN_SOLID_RATIO.
-  const runs = new Map(
-    shortlist.map(ordinal => [
-      ordinal,
-      {
-        // The running alignment score, and the best one seen. Fractional,
-        // because a miss costs less than a hit earns - see MISS_PENALTY.
-        score: 0,
-        best: 0,
-        solid: 0,
-        bestSolid: 0,
-        // Where the current run began and where the best one did. A run is
-        // abandoned the moment its score goes negative, so these move.
-        startsAt: -1,
-        bestStart: -1,
-        endsAt: -1,
-      },
-    ]),
+// The packed index and postings lookup live in native code. Keeping this call
+// synchronous is intentional: native work is already preloaded and the small
+// query result avoids turning the existing store ingestion path async.
+export const matchHashes = (queryHashes, minRun) => {
+  if (!VerseRecognition?.matchHashes) return [];
+  const values = Array.isArray(queryHashes) ? queryHashes : Array.from(queryHashes || []);
+  const {minSolidRatio, missPenalty, minRunChars} = tuning();
+  return VerseRecognition.matchHashes(
+    values,
+    minRun === undefined ? minRunChars : minRun,
+    minSolidRatio,
+    missPenalty,
   );
-
-  // One step of the alignment for one record.
-  //
-  //   solid   a gram of this record, and the only thing that earns anything
-  //   neutral a gram too common to identify anything. It really was heard and
-  //           really is in the verse, so it keeps a run alive and counts
-  //           towards its length - but it earns nothing, because a run built
-  //           out of syllables every verse shares is evidence of Sanskrit in
-  //           general and not of this verse.
-  //   miss    a gram belonging to other records or to none. Costs.
-  const step = (run, q, kind) => {
-    if (run.score <= 0) {
-      // Nothing in progress. Only a solid hit may open a run; starting one on
-      // a neutral gram is how an alignment begins in the middle of nowhere.
-      if (kind !== 'solid') return;
-      run.score = 1;
-      run.solid = 1;
-      run.startsAt = q;
-    } else if (kind === 'solid') {
-      run.score += 1;
-      run.solid += 1;
-    } else if (kind === 'miss') {
-      run.score -= missPenalty;
-      if (run.score <= 0) {
-        // Abandoned. Whatever it had is already banked in `best`.
-        run.score = 0;
-        run.solid = 0;
-        run.startsAt = -1;
-        return;
-      }
-    }
-
-    if (run.score > run.best) {
-      run.best = run.score;
-      run.bestSolid = run.solid;
-      run.bestStart = run.startsAt;
-      run.endsAt = q;
-    }
-  };
-
-  for (let q = 0; q < queryHashes.length; q++) {
-    const range = rangeAt[q];
-
-    if (range === 'neutral') {
-      for (const ordinal of shortlist) step(runs.get(ordinal), q, 'neutral');
-      continue;
-    }
-
-    const hitHere = new Set();
-    if (range) {
-      for (let p = range[0]; p < range[1]; p++) {
-        const ordinal = postings[p];
-        if (wanted.has(ordinal)) hitHere.add(ordinal);
-      }
-    }
-    for (const ordinal of shortlist) {
-      step(runs.get(ordinal), q, hitHere.has(ordinal) ? 'solid' : 'miss');
-    }
-  }
-
-  return shortlist
-    .map(ordinal => {
-      const run = runs.get(ordinal);
-      const doc = docs[ordinal];
-      // How many query positions the winning alignment actually spanned, and
-      // how much stream that is: N overlapping 5-grams cover N + 4 characters.
-      //
-      // Measured from the span rather than from the score, and that is only
-      // honest because of the gap penalty - a run can no longer reach across
-      // material it did not match, so its extent and its content are the same
-      // thing again. Under the old free-gap scoring these two numbers could
-      // differ by a factor of fifteen.
-      const positions = run.best > 0 ? run.endsAt - run.bestStart + 1 : 0;
-      const runChars = positions ? positions + gramSize - 1 : 0;
-      const coverage = doc.len ? Math.min(1, runChars / doc.len) : 0;
-      // What share of the run was this record being recognised, rather than
-      // syllables so common they belong to everything, or tolerated misses.
-      const solidRatio = positions ? run.bestSolid / positions : 0;
-      return {
-        ...doc,
-        ordinal,
-        hits: counts[ordinal],
-        runChars,
-        // How much of the record this run accounts for. Not a gate - a
-        // lecturer quoting one line of a four-line verse is still a hit - but
-        // it is what separates the right answer from a longer record that
-        // merely contains it.
-        coverage,
-        // Run length is the evidence; coverage is how well the record fits it.
-        //
-        // Both are needed, because the corpus contains records that nest:
-        // compilations quoting whole chapters, songs built out of verses.
-        // Against a recitation of one verse, the verse and the compilation
-        // that quotes it produce *identical* runs - and ranking on run length
-        // alone leaves them tied, which reads as ambiguity and shows nothing.
-        // Coverage breaks it the right way every time: the verse accounts for
-        // nearly all of itself, the compilation for one percent of itself.
-        //
-        // Half weight, not full, so that coverage can separate a tie without
-        // ever letting a short record with a weak run beat a long one with a
-        // strong one.
-        score: runChars * (0.5 + 0.5 * coverage),
-        solidRatio,
-        // Where in the query the run ended, so a caller can tell how recent
-        // the evidence is.
-        endsAt: run.endsAt,
-      };
-    })
-    .filter(c => c.runChars >= floor && c.solidRatio >= minSolidRatio)
-    .sort((a, b) => b.score - a.score);
 };
 
 /**
@@ -512,14 +257,4 @@ export const nearMisses = (text, howMany = 3) => {
       score: c.score,
       solidRatio: c.solidRatio,
     }));
-};
-
-export const corpusStats = () => {
-  const {docs, devanagariHashes, devanagariPostings, builtAt} = load();
-  return {
-    records: docs.length,
-    grams: devanagariHashes.length,
-    postings: devanagariPostings.length,
-    builtAt,
-  };
 };

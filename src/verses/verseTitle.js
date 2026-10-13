@@ -17,8 +17,9 @@
 
 import {lastCitation} from './citations';
 import {lookup} from './corpusText';
+import {NativeModules} from 'react-native';
 
-const index = require('./corpus/index.json');
+const {VerseRecognition} = NativeModules;
 
 // How much of a title has to be a song's name before it counts as naming it.
 //
@@ -63,10 +64,13 @@ let names = null;
 const songNames = () => {
   if (names) return names;
   names = [];
-  for (const doc of index.docs) {
-    if (doc.kind !== 'song') continue;
-    const key = fold(doc.ref);
-    if (weight(key) >= MIN_NAME) names.push({id: doc.id, key});
+  // The matcher index already contains the song ids and names. Ask native for
+  // that small metadata projection instead of parsing the full songs shard.
+  const songs = VerseRecognition?.songNames?.() || [];
+  for (const record of songs) {
+    const key = fold(record.title);
+    if (!key.trim()) continue;
+    if (weight(key) >= MIN_NAME) names.push({id: record.id, key});
   }
   return names;
 };

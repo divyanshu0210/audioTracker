@@ -12,7 +12,7 @@
 // every launch. The answer to "what if they are offline during onboarding" is
 // that the job waits until they are not.
 
-import {scheduleModelDownload} from './verseRecognition';
+import {capabilities, preloadModel, scheduleModelDownload} from './verseRecognition';
 
 /**
  * Ask for the model. Resolves immediately and cannot fail.
@@ -23,5 +23,16 @@ import {scheduleModelDownload} from './verseRecognition';
  * alone.
  */
 export const prefetchVerseModel = () => scheduleModelDownload();
+
+/**
+ * Warm the recogniser only for a model that is already downloaded. This is
+ * intentionally separate from prefetchVerseModel: WorkManager owns fetching,
+ * while this only allocates the ONNX sessions in the background.
+ */
+export const preloadVerseModel = async () => {
+  const caps = await capabilities();
+  if (!caps.modelReady) return false;
+  return preloadModel();
+};
 
 export default prefetchVerseModel;

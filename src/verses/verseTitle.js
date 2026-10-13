@@ -17,6 +17,7 @@
 
 import {lastCitation} from './citations';
 import {lookup} from './corpusText';
+import {phoneticStream} from './phonetics';
 import {NativeModules} from 'react-native';
 
 const {VerseRecognition} = NativeModules;
@@ -34,6 +35,69 @@ const MIN_NAME = 10;
 
 /** The folded length of a name, ignoring the word breaks. */
 const weight = key => key.replace(/ /g, '').length;
+
+const words = key => key.trim().split(/\s+/).filter(Boolean);
+
+const editDistance = (left, right) => {
+  const row = Array.from({length: right.length + 1}, (_, i) => i);
+  for (let i = 1; i <= left.length; i++) {
+    let diagonal = row[0];
+    row[0] = i;
+    for (let j = 1; j <= right.length; j++) {
+      const above = row[j];
+      row[j] = left[i - 1] === right[j - 1]
+        ? diagonal
+        : 1 + Math.min(diagonal, row[j], row[j - 1]);
+      diagonal = above;
+    }
+  }
+  return row[right.length];
+};
+
+const soundWord = word => phoneticStream(word);
+
+// Compare one title word after phonetic normalisation. A one-character error
+// is useful for ordinary spelling variants, but short words stay exact so a
+// generic word such as "hari" cannot absorb an unrelated title.
+const wordSimilarity = (left, right) => {
+  if (left === right) return 1;
+  if (left.length < 4 || right.length < 4) return 0;
+  const distance = editDistance(left, right);
+  return distance <= 1 ? 0.8 : 0;
+};
+
+/**
+ * Match corpus words as an ordered subsequence of the recording title.
+ * Additional title words are allowed between or around the song name; the
+ * song's own words still have to appear in order.
+ */
+const titleMatch = (nameKey, titleKey) => {
+  const name = words(nameKey).map(soundWord);
+  const title = words(titleKey).map(soundWord);
+  let from = 0;
+  let score = 0;
+  let internalExtras = 0;
+
+  for (const wanted of name) {
+    let best = -1;
+    let bestSimilarity = 0;
+    for (let i = from; i < title.length; i++) {
+      const similarity = wordSimilarity(wanted, title[i]);
+      if (similarity > bestSimilarity) {
+        best = i;
+        bestSimilarity = similarity;
+      }
+    }
+    if (best === -1) return null;
+    if (from > 0) internalExtras += best - from;
+    score += bestSimilarity;
+    from = best + 1;
+  }
+
+  // Extra words are harmless, but a match with fewer internal gaps is more
+  // convincing than one assembled from distant common words.
+  return score / name.length - internalExtras * 0.04;
+};
 
 /**
  * Letters and word breaks, no diacritics, no case - what survives being written
@@ -56,6 +120,9 @@ const fold = text =>
     .replace(/[̀-ͯ]/g, '')
     .toLowerCase()
     .replace(/[^a-z]+/g, ' ')
+    // Titles commonly use the English spelling while the corpus uses IAST.
+    // Keep the word boundaries, but make this common spelling variant meet.
+    .replace(/\bkrishna\b/g, 'krsna')
     .trim()} `;
 
 // Built once, from the index rather than the text shards: this needs every
@@ -114,10 +181,18 @@ export const songFromTitle = (...parts) => {
   if (weight(text) < MIN_NAME) return null;
 
   let best = null;
+  let bestScore = 0;
   for (const name of songNames()) {
-    // Whole words, because both sides carry their own spaces.
-    if (!text.includes(name.key)) continue;
-    if (!best || weight(name.key) > weight(best.key)) best = name;
+    const score = titleMatch(name.key, text);
+    if (score === null) continue;
+    if (
+      !best ||
+      score > bestScore ||
+      (score === bestScore && weight(name.key) > weight(best.key))
+    ) {
+      best = name;
+      bestScore = score;
+    }
   }
   if (!best) return null;
 

@@ -405,10 +405,24 @@ const VLCPlayerComponent = forwardRef(
       if (skipSettleTimerRef.current) clearTimeout(skipSettleTimerRef.current);
       skipSettleTimerRef.current = null;
       if (vlcPlayerRef.current && durationRef.current > 0) {
+        // Slider seeks can be followed by one or more progress events from
+        // the old position. Keep the target here so those stale events cannot
+        // move the controlled slider backwards before VLC reaches the new
+        // position.
+        pendingSkipTargetRef.current = newTime;
         vlcPlayerRef.current.seek(newTime / durationRef.current);
         setCurrentTime(newTime);
+        currentTimeRef.current = newTime;
+        if (!isPaused) setIsBuffering(true);
+        skipSettleTimerRef.current = setTimeout(() => {
+          if (pendingSkipTargetRef.current !== newTime) return;
+          pendingSkipTargetRef.current = null;
+          skipSettleTimerRef.current = null;
+          setIsBuffering(false);
+          showControls();
+        }, 5000);
       }
-    }, []);
+    }, [isPaused, setIsBuffering, showControls]);
 
     const flushPendingSkip = useCallback(() => {
       skipTimerRef.current = null;

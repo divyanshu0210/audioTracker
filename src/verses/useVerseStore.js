@@ -326,7 +326,6 @@ const useVerseStore = create((set, get) => ({
   why: '',
 
   setEnabled: enabled => {
-    if (!enabled) get().reset();
     set({enabled, unavailable: null});
   },
 
@@ -462,18 +461,15 @@ const useVerseStore = create((set, get) => ({
     }
 
     const showing = get().current;
-    const following =
-      !!showing && showing.source !== 'title' && isFollowable(showing);
+    const following = !!showing && isFollowable(showing);
 
     let heldFit = 0;
     if (following) {
-      const where = follow(showing, heard);
+      const where = follow(showing, heard, get().followLine);
 
       if (where) {
-        // `line` is null when the song is still playing but the last few
-        // seconds could not be placed in it. The marker stays where it was:
-        // the singer has not gone anywhere, and one that lags is better than
-        // one that blinks out whenever a few seconds come out badly.
+        // `line` is null when the song is still playing but the latest audio
+        // could not be placed. Keep the last marker until a better fit arrives.
         set(state => ({
           _lostWindows: 0,
           followLine: where.line === null ? state.followLine : where.line,
@@ -678,7 +674,14 @@ const useVerseStore = create((set, get) => ({
    * claiming to be where the singing is while nobody is singing.
    */
   expectSong: (record, id) =>
-    set({expected: record && id ? {id, ref: record.ref} : null}),
+    set(state =>
+      record && id
+        ? {
+            expected: {id, ref: record.ref},
+            current: state.current || {...record, id, source: 'title', at: 0},
+          }
+        : {expected: null},
+    ),
 
   seedFromTitle: (record, id) =>
     set(state =>

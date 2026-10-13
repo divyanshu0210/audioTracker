@@ -42,29 +42,17 @@ const MIN_LINES = 6;
 // The window holds twenty-five seconds, which for a slow bhajan is two or three
 // lines. All of it finds where the passage is; the tail finds where the voice
 // is now, which is the thing to mark.
-const TAIL_CHARS = 70;
+const TAIL_CHARS = 50;
 
-// How many grams of that tail must agree on one alignment before the marker
-// moves.
-//
-// Measured over real recogniser output - 1558 windows placed inside the song
-// actually being sung, 222 placed inside songs that were not:
-//
-//   votes   marks the right song   marks a wrong one
-//      9           84.0%                 48.2%
-//     11           71.6%                 19.8%
-//     13           59.4%                 10.4%
-//     17           40.3%                  2.7%
-//
-// Thirteen. The right-hand column halves between eleven and thirteen for about
-// two points of coverage, and coverage is the cheaper thing to lose: a window
-// that places nothing leaves the marker where it was, which is very likely
-// still right.
+// The follower only needs a small aligned signal because the song is already
+// known. Song replacement remains the responsibility of the whole matcher.
 //
 // These are devotional songs, which is why the wrong column is so populated at
-// all - they share hari, gaura, pada, carana between them, and a handful of
-// five-grams of that is not evidence of anything.
-const MIN_VOTES = 13;
+// all - they share hari, gaura, pada, carana between them. The handover guard
+// below prevents this loose line placement from deciding the song itself.
+const STRONG_VOTES = 13;
+const MIN_WEAK_VOTES = 2;
+const MAX_NEARBY_LINE_JUMP = 6;
 
 // How far two grams' offsets may differ and still be one alignment.
 //
@@ -105,6 +93,8 @@ const BAND = 12;
 //   0.05           74.0%              0.0%            4.0%
 //   0.08           68.3%              0.0%            1.0%
 //
+// The current 0.04 setting gives the follower a little more room for noisy
+// Devanagari while remaining above the English-commentary case in the tests.
 // English prose never reaches 0.035 against any record tried. Hindi reaches
 // 0.09. 0.05 sits above everything English does and above most of what Hindi
 // does, and keeps nearly all of the gain: 84.7% of windows marked against
@@ -113,7 +103,7 @@ const BAND = 12;
 // Not taken to nothing in any case. Below about 0.02 a record is never given
 // up, the give-up rule becomes dead code, and a marker would sit on a stale
 // line for as long as nothing came along to replace it.
-const MIN_PRESENCE = 0.05;
+const MIN_PRESENCE = 0.04;
 
 // How wide that stretch may be, as a multiple of the window's own length.
 //
@@ -188,16 +178,25 @@ export const isFollowable = record =>
  * it survives exactly what goes wrong here - a few wrong characters move a few
  * votes and leave the winner standing.
  */
-const place = (tail, {bounds, positions}) => {
+const place = (
+  tail,
+  {bounds, positions},
+  size = GRAM_SIZE,
+  band = BAND,
+  range = null,
+) => {
   // Every gram of the tail that occurs in the record, as (where it sits in the
   // record, which alignment that implies).
   const seen = [];
-  grams(tail, GRAM_SIZE).forEach((gram, i) => {
+  grams(tail, size).forEach((gram, i) => {
     const where = positions.get(hashGram(gram));
     if (!where) return;
-    for (const p of where) seen.push({p, offset: p - i, i});
+    for (const p of where) {
+      if (range && (p < range.from || p > range.to)) continue;
+      seen.push({p, offset: p - i, i});
+    }
   });
-  if (seen.length < MIN_VOTES) return null;
+  if (seen.length < MIN_WEAK_VOTES) return null;
 
   // The densest run of offsets that spans no more than a band, found by
   // sorting and sliding rather than by comparing every pair.
@@ -214,14 +213,16 @@ const place = (tail, {bounds, positions}) => {
   let bestVotes = 0;
   let lo = 0;
   for (let hi = 0; hi < seen.length; hi++) {
-    while (seen[hi].offset - seen[lo].offset > 2 * BAND) lo++;
+    while (seen[hi].offset - seen[lo].offset > 2 * band) lo++;
     if (hi - lo + 1 > bestVotes) {
       bestVotes = hi - lo + 1;
       from = lo;
       to = hi;
     }
   }
-  if (bestVotes < MIN_VOTES) return null;
+  // Return the strongest alignment even when it is below the normal vote
+  // threshold. The caller decides whether the rest of the window supports
+  // treating that alignment as the current line.
 
   // Where the voice is now.
   //
@@ -246,7 +247,7 @@ const place = (tail, {bounds, positions}) => {
       at = seen[k].p;
     }
   }
-  at += GRAM_SIZE - 1;
+  at += size - 1;
 
   let line = bounds.findIndex(b => at >= b.from && at < b.to);
   if (line === -1) {
@@ -340,7 +341,7 @@ export const explains = (record, text) => {
  * not gone anywhere, and a marker that blinks out whenever a few seconds come
  * out badly is worse than one that lags.
  */
-export const follow = (record, text) => {
+export const follow = (record, text, fromLine = null) => {
   if (!isFollowable(record) || !text) return null;
 
   const prepared = prepare(record);
@@ -350,20 +351,59 @@ export const follow = (record, text) => {
   const heard = grams(whole, GRAM_SIZE);
 
   const tail = whole.slice(-TAIL_CHARS);
-  const placed = tail.length >= GRAM_SIZE * 2 ? place(tail, prepared) : null;
+  const startAt =
+    Number.isInteger(fromLine) && prepared.bounds[fromLine]
+      ? prepared.bounds[fromLine].from
+      : null;
+  const nearbyEnd =
+    startAt == null || !prepared.bounds[fromLine + MAX_NEARBY_LINE_JUMP]
+      ? Infinity
+      : prepared.bounds[fromLine + MAX_NEARBY_LINE_JUMP].to - 1;
+  let placed =
+    tail.length >= GRAM_SIZE * 2
+      ? place(
+          tail,
+          prepared,
+          GRAM_SIZE,
+          BAND,
+          startAt == null ? null : {from: startAt, to: nearbyEnd},
+        )
+      : null;
 
-  // Too little to judge by. Not evidence that the song ended - the model simply
-  // has not said much - so the benefit of the doubt, with no opinion on where.
-  if (heard.length < MIN_GRAMS) {
-    return placed
-      ? {...placed, presence: null}
-      : {line: null, votes: 0, presence: null};
+  // If the nearby window has no answer, still search the remaining forward
+  // part before considering a cyclic wrap. This avoids jumping to a distant
+  // repeated phrase merely because it had a slightly stronger score.
+  if (!placed && startAt != null && nearbyEnd !== Infinity) {
+    placed = place(tail, prepared, GRAM_SIZE, BAND, {from: startAt, to: Infinity});
+  }
+
+  // A repeated refrain may occur again only after the current line. Prefer
+  // that forward occurrence. If no forward occurrence exists, wrap around and
+  // search from the beginning for the next occurrence.
+  if (!placed && startAt != null) {
+    placed = place(tail, prepared, GRAM_SIZE, BAND, {from: 0, to: startAt - 1});
   }
 
   const presence = localShare(heard, prepared.positions);
 
-  // Placing the tail is itself proof of presence, and the stronger of the two.
-  if (placed) return {...placed, presence};
+  // Too little to judge by. Not evidence that the song ended - the model simply
+  // has not said much - so the benefit of the doubt, with no opinion on where.
+  if (heard.length < MIN_GRAMS) {
+    return placed && placed.votes >= STRONG_VOTES
+      ? {...placed, presence: null}
+      : {line: null, votes: 0, presence: null};
+  }
+
+  // A strong tail alignment is enough. A weaker alignment is accepted when the
+  // complete window still fits this known song: this is a locator decision,
+  // not a second song-identification decision.
+  if (
+    placed &&
+    (placed.votes >= STRONG_VOTES ||
+      (placed.votes >= MIN_WEAK_VOTES && presence >= MIN_PRESENCE))
+  ) {
+    return {...placed, presence};
+  }
   if (presence >= MIN_PRESENCE) return {line: null, votes: 0, presence};
   return null;
 };

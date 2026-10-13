@@ -32,15 +32,30 @@ import {
   stopListening,
 } from './verseRecognition';
 
+// Deliberately memory-only. This survives moving between player screens while
+// the JS process remains alive, but resets to off when the app process starts
+// again.
+let sessionDetectionRequested = false;
+
 const useVerseDetection = ({sourceId, title, path, isPaused, isPlaybackReady}) => {
   const updateSettings = useSettingsStore(state => state.updateSettings);
 
   const listening = useVerseStore(state => state.listening);
   const [preparing, setPreparing] = useState(false);
-  // Recognition is deliberately opt-in for each recording. The stored
+  // Recognition is explicitly opt-in for the current app session. The stored
   // setting remembers that the user has used the feature, but it must not
-  // start capture merely because a new video was opened.
-  const [sessionRequested, setSessionRequested] = useState(false);
+  // start capture after a fresh app launch.
+  const [sessionRequestedState, setSessionRequestedState] = useState(
+    () => sessionDetectionRequested,
+  );
+  const setSessionRequested = useCallback(value => {
+    setSessionRequestedState(previous => {
+      const next = typeof value === 'function' ? value(previous) : value;
+      sessionDetectionRequested = next;
+      return next;
+    });
+  }, []);
+  const sessionRequested = sessionRequestedState;
 
   // Whether this device can do it at all, which is a stronger question than
   // "is it Android": playback capture arrived in Android 10. Asked once - the
@@ -113,7 +128,6 @@ const useVerseDetection = ({sourceId, title, path, isPaused, isPlaybackReady}) =
 
   // A new recording is a new table of contents.
   useEffect(() => {
-    setSessionRequested(false);
     useVerseStore.getState().reset();
 
     // These files are usually named by the verse they are about, which fills

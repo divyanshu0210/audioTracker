@@ -6,7 +6,6 @@ import {createStackNavigator} from '@react-navigation/stack';
 import React, {useEffect, useRef} from 'react';
 import {
   ActivityIndicator,
-  InteractionManager,
   NativeEventEmitter,
   NativeModules,
   StyleSheet,
@@ -74,7 +73,6 @@ import {navigationRef} from './handlers/navigationRef';
 import GlobalOverlays from './components/modals/GlobalOverlays';
 import GlobalListeners from './handlers/GlobalLinkHandlers';
 import {track} from './utils/rerenderTracker';
-import {preloadVerseModel} from './verses/modelPrefetch';
 
 // const Stack = createStackNavigator();
 const Stack = createNativeStackNavigator();
@@ -89,21 +87,6 @@ const RootNavigator = track(function RootNavigator() {
     );
     return () => {
       useBackupStore.getState().cleanupEventListeners();
-    };
-  }, []);
-
-  // Wait until initial navigation and database work settle before allocating
-  // ONNX sessions. This only warms a model already downloaded by WorkManager.
-  useEffect(() => {
-    let timer;
-    const task = InteractionManager.runAfterInteractions(() => {
-      timer = setTimeout(() => {
-        preloadVerseModel();
-      }, 3000);
-    });
-    return () => {
-      task.cancel();
-      if (timer) clearTimeout(timer);
     };
   }, []);
 

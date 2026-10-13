@@ -1,7 +1,8 @@
 // modelPrefetch.js
 //
-// Asking for the speech model to be downloaded, so that verse detection is
-// ready before anybody asks for it.
+// Asking for the speech model to be downloaded ahead of time. The model stays
+// on disk after this request; ONNX sessions are created only when detection
+// is enabled so normal playback does not pay the memory cost.
 //
 // One line, because everything this used to do is WorkManager's now - see
 // VerseModelWorker.java. It checked the connection, counted attempts and drove
@@ -12,7 +13,7 @@
 // every launch. The answer to "what if they are offline during onboarding" is
 // that the job waits until they are not.
 
-import {capabilities, preloadModel, scheduleModelDownload} from './verseRecognition';
+import {scheduleModelDownload} from './verseRecognition';
 
 /**
  * Ask for the model. Resolves immediately and cannot fail.
@@ -23,16 +24,5 @@ import {capabilities, preloadModel, scheduleModelDownload} from './verseRecognit
  * alone.
  */
 export const prefetchVerseModel = () => scheduleModelDownload();
-
-/**
- * Warm the recogniser only for a model that is already downloaded. This is
- * intentionally separate from prefetchVerseModel: WorkManager owns fetching,
- * while this only allocates the ONNX sessions in the background.
- */
-export const preloadVerseModel = async () => {
-  const caps = await capabilities();
-  if (!caps.modelReady) return false;
-  return preloadModel();
-};
 
 export default prefetchVerseModel;

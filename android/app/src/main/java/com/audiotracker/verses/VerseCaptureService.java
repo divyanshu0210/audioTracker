@@ -4,6 +4,7 @@ import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.Service;
+import android.app.ActivityManager;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ServiceInfo;
@@ -14,7 +15,9 @@ import android.media.AudioRecord;
 import android.media.projection.MediaProjection;
 import android.media.projection.MediaProjectionManager;
 import android.os.Build;
+import android.os.Handler;
 import android.os.IBinder;
+import android.os.Looper;
 import android.util.Log;
 
 import androidx.annotation.Nullable;
@@ -80,6 +83,7 @@ public class VerseCaptureService extends Service {
     // reading.
     public static final String ACTION_PAUSE = "com.audiotracker.verses.PAUSE";
     public static final String ACTION_RESUME = "com.audiotracker.verses.RESUME";
+    public static final String ACTION_RELEASE_MODEL = "com.audiotracker.verses.RELEASE_MODEL";
 
     private static final String CHANNEL_ID = "verse_capture";
     private static final int NOTIFICATION_ID = 8821;
@@ -168,6 +172,10 @@ public class VerseCaptureService extends Service {
     private volatile boolean captureRequested;
     private volatile boolean modelReady;
 
+    private static final long IDLE_RELEASE_MS = 5 * 60 * 1000L;
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    private final Runnable releaseModelRunnable = this::releaseRecognizerForIdle;
+
     private static volatile boolean active = false;
 
     public static boolean isActive() {
@@ -194,6 +202,10 @@ public class VerseCaptureService extends Service {
         }
         if (ACTION_RESUME.equals(action)) {
             setCapturing(true);
+            return START_NOT_STICKY;
+        }
+        if (ACTION_RELEASE_MODEL.equals(action)) {
+            scheduleRecognizerRelease();
             return START_NOT_STICKY;
         }
 
@@ -303,6 +315,11 @@ public class VerseCaptureService extends Service {
     /** Load the native model away from the service/UI caller, then recognise. */
     private void loadAndRecogniseLoop() {
         try {
+            if (!hasMemoryHeadroom()) {
+                fail("AI detection stayed off because device memory is low");
+                stopSelf();
+                return;
+            }
             // Reuse an idle background preload when available. If preload is
             // still constructing the sessions, obtain() waits for it rather
             // than creating a second ONNX copy in memory.
@@ -311,6 +328,13 @@ public class VerseCaptureService extends Service {
             if (!running) return;
             if (captureRequested) setCapturing(true);
             recogniseLoop();
+        } catch (OutOfMemoryError e) {
+            modelReady = false;
+            Log.e(TAG, "not enough memory to load recogniser", e);
+            if (running) {
+                fail("AI detection stayed off because device memory is low");
+                stopSelf();
+            }
         } catch (Throwable t) {
             modelReady = false;
             if (running) {
@@ -340,8 +364,13 @@ public class VerseCaptureService extends Service {
     private synchronized void setCapturing(boolean want) {
         if (!running) return;
 
+        if (want) mainHandler.removeCallbacks(releaseModelRunnable);
         captureRequested = want;
         if (want && !modelReady) {
+            if (recogniser == null || !recogniser.isAlive()) {
+                recogniser = new Thread(this::loadAndRecogniseLoop, "verse-recognise");
+                recogniser.start();
+            }
             capturing = false;
             emitState("preparing", null);
             return;
@@ -358,6 +387,39 @@ public class VerseCaptureService extends Service {
         }
         capturing = want;
         emitState(want ? "listening" : "idle", null);
+    }
+
+    private void scheduleRecognizerRelease() {
+        mainHandler.removeCallbacks(releaseModelRunnable);
+        mainHandler.postDelayed(releaseModelRunnable, IDLE_RELEASE_MS);
+        Log.i(TAG, "model release scheduled idleMs=" + IDLE_RELEASE_MS);
+    }
+
+    /** Release ONNX sessions after leaving the player while retaining projection permission. */
+    private void releaseRecognizerForIdle() {
+        if (!running || captureRequested || capturing) return;
+        Thread thread = recogniser;
+        if (thread != null) {
+            thread.interrupt();
+            try {
+                thread.join(1500);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            recogniser = null;
+        }
+        close();
+        emitState("idle", "model released to reduce memory");
+        Log.i(TAG, "model released after idle timeout");
+    }
+
+    private boolean hasMemoryHeadroom() {
+        ActivityManager manager = (ActivityManager) getSystemService(ACTIVITY_SERVICE);
+        if (manager == null) return true;
+        ActivityManager.MemoryInfo info = new ActivityManager.MemoryInfo();
+        manager.getMemoryInfo(info);
+        // The recognizer currently needs roughly 800 MiB of native memory.
+        return !info.lowMemory && info.availMem >= 768L * 1024L * 1024L;
     }
 
     /**

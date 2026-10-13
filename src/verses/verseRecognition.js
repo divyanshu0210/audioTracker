@@ -133,17 +133,6 @@ export const scheduleModelDownload = async () => {
   }
 };
 
-/** Warm the native ONNX sessions when the completed model is already present. */
-export const preloadModel = async () => {
-  if (!isSupportedPlatform || !VerseRecognition) return false;
-  try {
-    return await VerseRecognition.preloadModel();
-  } catch (err) {
-    console.log('[verses] could not preload the model:', err?.message);
-    return false;
-  }
-};
-
 export const deleteModel = async () => {
   if (!isSupportedPlatform || !VerseRecognition) return false;
   return VerseRecognition.deleteModel();
@@ -211,6 +200,16 @@ export const setCapturing = async capturing => {
     await VerseRecognition.setCapturing(capturing);
   } catch (err) {
     console.warn('[verses] setCapturing failed:', err?.message);
+  }
+};
+
+/** Keep the capture grant but release the large recognizer after idle time. */
+export const releaseModelAfterIdle = async () => {
+  if (!isSupportedPlatform || !VerseRecognition) return;
+  try {
+    await VerseRecognition.releaseModelAfterIdle();
+  } catch (err) {
+    console.warn('[verses] could not schedule idle model release:', err?.message);
   }
 };
 

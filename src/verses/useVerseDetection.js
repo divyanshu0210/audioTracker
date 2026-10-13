@@ -26,6 +26,7 @@ import {
   deleteModel,
   enableListening,
   pauseListening,
+  releaseModelAfterIdle,
   isSupportedPlatform,
   setCapturing,
   stopListening,
@@ -200,6 +201,7 @@ const useVerseDetection = ({sourceId, title, path, isPaused, isPlaybackReady}) =
       // Keep the projection service alive between player screens so the next
       // video can reuse the existing system grant without another dialog.
       pauseListening();
+      releaseModelAfterIdle();
       useVerseStore.getState().reset();
     },
     [],

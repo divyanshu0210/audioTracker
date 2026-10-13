@@ -3,6 +3,8 @@ package com.audiotracker.verses;
 import android.Manifest;
 import android.app.Activity;
 import android.content.Context;
+import android.content.ComponentCallbacks2;
+import android.content.res.Configuration;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.media.projection.MediaProjectionManager;
@@ -39,7 +41,7 @@ import com.facebook.react.bridge.WritableMap;
  * So `start` reports *why* it cannot run rather than a bare false. A feature
  * that silently does nothing is worse than one that is unavailable.
  */
-public class VerseRecognitionModule extends ReactContextBaseJavaModule {
+public class VerseRecognitionModule extends ReactContextBaseJavaModule implements ComponentCallbacks2 {
 
     private static final String TAG = "VerseRecognition";
     private static final int REQUEST_CAPTURE = 7731;
@@ -86,8 +88,26 @@ public class VerseRecognitionModule extends ReactContextBaseJavaModule {
     public VerseRecognitionModule(ReactApplicationContext context) {
         super(context);
         context.addActivityEventListener(activityListener);
+        context.registerComponentCallbacks(this);
         VerseMatcher.preload(context);
     }
+
+    @Override
+    public void onTrimMemory(int level) {
+        if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) {
+            // No model is kept warm at app startup anymore, but release any
+            // legacy/background warm instance if another caller created one.
+            SanskritRecognizer.releasePreloaded();
+        }
+    }
+
+    @Override
+    public void onLowMemory() {
+        SanskritRecognizer.releasePreloaded();
+    }
+
+    @Override
+    public void onConfigurationChanged(Configuration newConfig) {}
 
     @Override
     public String getName() {
@@ -165,19 +185,6 @@ public class VerseRecognitionModule extends ReactContextBaseJavaModule {
         } catch (Throwable t) {
             Log.w(TAG, "could not enqueue the model download", t);
         }
-        if (promise != null) promise.resolve(true);
-    }
-
-    /** Warm the recogniser only when the completed model is already on disk. */
-    @ReactMethod
-    public void preloadModel(Promise promise) {
-        Context context = getReactApplicationContext();
-        if (!VerseModelStore.isReady(context)) {
-            if (promise != null) promise.resolve(false);
-            return;
-        }
-        Log.d(TAG, "background model preload requested");
-        SanskritRecognizer.preload(context);
         if (promise != null) promise.resolve(true);
     }
 
@@ -268,6 +275,19 @@ public class VerseRecognitionModule extends ReactContextBaseJavaModule {
         if (promise != null) promise.resolve(true);
     }
 
+    /** Keep the projection permission, but let the service release ONNX after idle. */
+    @ReactMethod
+    public void releaseModelAfterIdle(Promise promise) {
+        try {
+            Intent intent = new Intent(getReactApplicationContext(), VerseCaptureService.class);
+            intent.setAction(VerseCaptureService.ACTION_RELEASE_MODEL);
+            getReactApplicationContext().startService(intent);
+        } catch (Throwable t) {
+            Log.w(TAG, "could not schedule idle model release", t);
+        }
+        if (promise != null) promise.resolve(true);
+    }
+
     @ReactMethod
     public void stop(Promise promise) {
         try {
@@ -293,6 +313,7 @@ public class VerseRecognitionModule extends ReactContextBaseJavaModule {
     @Override
     public void invalidate() {
         stop(null);
+        getReactApplicationContext().unregisterComponentCallbacks(this);
         super.invalidate();
     }
 }

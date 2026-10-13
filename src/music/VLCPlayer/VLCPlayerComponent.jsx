@@ -80,7 +80,6 @@ const VLCPlayerComponent = forwardRef(
         getDuration: state.getDuration,
       })),
     );
-    const isBuffering = usePlayerTimeStore(state => state.isBuffering);
 
     // In PiP the window is only big enough for the video itself, and Android
     // doesn't deliver touches to it anyway — every control here is dead weight.
@@ -290,21 +289,36 @@ const VLCPlayerComponent = forwardRef(
     // Buffering must not leave only a spinner on screen. Keep the title,
     // scrubber, transport controls, and other player information visible for
     // the entire stall so the user can still understand and control playback.
+    // Buffering changes are frequent during a seek. Subscribe imperatively so
+    // they update the overlays and controls without re-rendering this whole
+    // component (and therefore without touching the native VLC view). The
+    // dedicated BufferingOverlay and BottomControls components still subscribe
+    // normally and only re-render their small subtrees.
     useEffect(() => {
-      clearTimeout(controlsTimeout.current);
-      if (isBuffering && !isPaused) {
-        setControlsVisible(true);
-        Animated.timing(controlsOpacity, {
-          toValue: 1,
-          duration: 150,
-          useNativeDriver: true,
-        }).start();
-        return;
-      }
-      if (!isBuffering && !isPaused && !isAudio) {
-        controlsTimeout.current = setTimeout(hideControls, 3000);
-      }
-    }, [controlsOpacity, hideControls, isAudio, isBuffering, isPaused, setControlsVisible]);
+      const applyBufferingControls = buffering => {
+        clearTimeout(controlsTimeout.current);
+        if (buffering && !isPaused) {
+          setControlsVisible(true);
+          Animated.timing(controlsOpacity, {
+            toValue: 1,
+            duration: 150,
+            useNativeDriver: true,
+          }).start();
+          return;
+        }
+        if (!buffering && !isPaused && !isAudio) {
+          controlsTimeout.current = setTimeout(hideControls, 3000);
+        }
+      };
+
+      const unsubscribe = usePlayerTimeStore.subscribe((state, previous) => {
+        if (state.isBuffering !== previous.isBuffering) {
+          applyBufferingControls(state.isBuffering);
+        }
+      });
+      applyBufferingControls(usePlayerTimeStore.getState().isBuffering);
+      return unsubscribe;
+    }, [controlsOpacity, hideControls, isAudio, isPaused, setControlsVisible]);
 
     // Show controls on mount via showControls() (not a bare
     // setControlsVisible(true)) so the initial display also schedules the

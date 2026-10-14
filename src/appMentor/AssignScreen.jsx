@@ -1,6 +1,8 @@
 import {
   ActivityIndicator,
   Alert,
+  Modal,
+  ScrollView,
   StyleSheet,
   Text,
   ToastAndroid,
@@ -86,6 +88,7 @@ const AssignScreen = () => {
   // seconds later over whatever screen they had moved on to. Staying put and
   // showing this is what makes success or failure mean something.
   const [assigning, setAssigning] = useState(false);
+  const [expandedMenteeId, setExpandedMenteeId] = useState(null);
 
   // ── What is being sent ────────────────────────────────────────────────
   //
@@ -148,11 +151,6 @@ const AssignScreen = () => {
   // in the seconds this screen is open would not be worth the requests.
   const assignmentsByMentee = useRef({});
   const [assignmentsVersion, setAssignmentsVersion] = useState(0);
-  const [checkingDuplicates, setCheckingDuplicates] = useState(false);
-  // A mentee whose assignments could not be read gets no badge, which looks
-  // exactly like one that has not loaded yet. Said once, in the manifest,
-  // rather than leaving the blank rows to be read as an answer.
-  const [checkFailed, setCheckFailed] = useState(false);
 
   const menteeIdOf = entry => entry.user?.id ?? entry.id;
 
@@ -177,9 +175,6 @@ const AssignScreen = () => {
     for (const menteeId of missing) {
       assignmentsByMentee.current[String(menteeId)] = undefined;
     }
-
-    let cancelled = false;
-    setCheckingDuplicates(true);
 
     const askAbout = async menteeId => {
       try {
@@ -208,15 +203,8 @@ const AssignScreen = () => {
         assignmentsByMentee.current[id] = map;
       }
       setAssignmentsVersion(v => v + 1);
-      if (!cancelled) {
-        setCheckingDuplicates(false);
-        if (results.some(([, map]) => map === null)) setCheckFailed(true);
-      }
     });
 
-    return () => {
-      cancelled = true;
-    };
   }, [mentees, sendable, userInfo?.id]);
 
   // The new (item, mentee) pairs: what a press of Assign would actually
@@ -277,34 +265,6 @@ const AssignScreen = () => {
     [removeFromSelection, unsendableKeys],
   );
 
-  // Per item: which of the selected mentees already have it. Drives the chip
-  // on each manifest row, so "already assigned" is visible before the send
-  // rather than being quietly deduplicated behind the mentor's back.
-  //
-  // The people themselves, not a tally. "Already with 2 of 3" made the mentor
-  // work out which two by unpicking mentees one at a time; their faces answer
-  // it where the question is asked.
-  const duplicates = useMemo(() => {
-    const result = {};
-    if (selectedUsers.length === 0) return result;
-
-    for (const entry of sendable) {
-      const users = [];
-      for (const menteeEntry of selectedUsers) {
-        const map = assignmentsByMentee.current[String(menteeIdOf(menteeEntry))];
-        if (map && existingAssignmentFor(map, entry)) users.push(menteeEntry.user);
-      }
-      if (users.length > 0) {
-        result[entry.key] = {
-          users,
-          all: users.length === selectedUsers.length,
-        };
-      }
-    }
-    return result;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sendable, selectedUsers, assignmentsVersion]);
-
   // Per mentee, for the badge on their row.
   const newCountFor = useCallback(
     mentee => {
@@ -313,6 +273,15 @@ const AssignScreen = () => {
       return sendable.filter(entry => !existingAssignmentFor(map, entry)).length;
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
+    [sendable, assignmentsVersion],
+  );
+
+  const existingItemsFor = useCallback(
+    mentee => {
+      const map = assignmentsByMentee.current[String(mentee.id ?? getUserId(mentee))];
+      if (!map) return null;
+      return sendable.filter(entry => existingAssignmentFor(map, entry));
+    },
     [sendable, assignmentsVersion],
   );
 
@@ -621,17 +590,6 @@ const AssignScreen = () => {
       // business claiming anything about this person.
       if (newCount === null) return null;
 
-      if (newCount === 0) {
-        return (
-          <View style={[styles.menteeBadge, styles.menteeBadgeDone]}>
-            <Ionicons name="checkmark-done" size={12} color="#1d4ed8" />
-            <Text style={[styles.menteeBadgeText, {color: '#1d4ed8'}]}>
-              {sendable.length === 1 ? 'Has it' : 'Has all'}
-            </Text>
-          </View>
-        );
-      }
-
       // One label, whether or not this mentee already has part of the
       // selection. It briefly said "3 new" for a partial overlap and "3 items"
       // for none — two sentences for the identical fact that three items would
@@ -643,20 +601,101 @@ const AssignScreen = () => {
       // "New" is the true half of it — new to this mentee, i.e. not already
       // assigned — and it is the same idea the blue badge states when the
       // count is zero.
+      const existing = existingItemsFor(mentee) || [];
+      const menteeId = String(mentee.id ?? getUserId(mentee));
+      const expanded = expandedMenteeId === menteeId;
+      const shownNames = existing.slice(0, 2).map(entry => entry.title).join(', ');
+      const remaining = existing.length - Math.min(existing.length, 2);
+      const label = existing.length > 0
+        ? `Has ${shownNames}${remaining > 0 ? ` +${remaining}` : ''}${
+            newCount > 0 ? ` · ${newCount} new` : ''
+          }`
+        : `${newCount} new`;
+
+      if (existing.length === 0) {
+        return (
+          <View style={[styles.menteeBadge, styles.menteeBadgeNew]}>
+            <Text style={[styles.menteeBadgeText, styles.menteeBadgeTextAlone, {color: '#047857'}]}>
+              {newCount} new
+            </Text>
+          </View>
+        );
+      }
+
       return (
-        <View style={[styles.menteeBadge, styles.menteeBadgeNew]}>
-          <Text
+        <>
+          <TouchableOpacity
+            onPress={() => setExpandedMenteeId(expanded ? null : menteeId)}
+            activeOpacity={0.75}
+            accessibilityRole="button"
+            accessibilityLabel={label}
             style={[
-              styles.menteeBadgeText,
-              styles.menteeBadgeTextAlone,
-              {color: '#047857'},
+              styles.menteeBadge,
+              styles.menteeBadgeDone,
             ]}>
-            {newCount} new
-          </Text>
-        </View>
+            <Text
+              numberOfLines={1}
+              style={[
+                styles.menteeBadgeText,
+                styles.menteeBadgeTextAlone,
+                {color: '#1d4ed8'},
+              ]}>
+              {newCount} new
+            </Text>
+            <Ionicons
+              name={expanded ? 'chevron-up' : 'chevron-down'}
+              size={12}
+              color="#1d4ed8"
+            />
+          </TouchableOpacity>
+          <Modal
+          visible={expanded}
+          transparent
+          animationType="slide"
+          onRequestClose={() => setExpandedMenteeId(null)}>
+          <View style={styles.existingSheetRoot}>
+            <TouchableOpacity
+              style={styles.existingSheetBackdrop}
+              activeOpacity={1}
+              onPress={() => setExpandedMenteeId(null)}
+            />
+            <View style={styles.existingSheet}>
+              <View style={styles.existingSheetHandle} />
+              <Text style={styles.existingSheetTitle}>Already assigned</Text>
+              <ScrollView
+                style={styles.existingSheetList}
+                contentContainerStyle={styles.existingSheetListContent}
+                showsVerticalScrollIndicator>
+                {existing.map((entry, index) => (
+                  <View
+                    key={`${entry.key ?? entry.id ?? entry.title}-${index}`}
+                    style={styles.existingSheetItem}>
+                    <Ionicons
+                      name={entry.icon || 'document-text-outline'}
+                      size={18}
+                      color="#4b5563"
+                      style={styles.existingSheetItemIcon}
+                    />
+                    <View style={styles.existingSheetItemText}>
+                      <Text numberOfLines={2} style={styles.existingSheetItemTitle}>
+                        {entry.title}
+                      </Text>
+                      {!!entry.typeLabel && (
+                        <Text numberOfLines={1} style={styles.existingSheetItemType}>
+                          {entry.typeLabel}
+                        </Text>
+                      )}
+                    </View>
+                  </View>
+                ))}
+              </ScrollView>
+            </View>
+          </View>
+          </Modal>
+        </>
       );
     },
-    [sendable.length, newCountFor],
+    [expandedMenteeId, existingItemsFor, newCountFor, sendable.length],
   );
 
   return (
@@ -664,7 +703,32 @@ const AssignScreen = () => {
       <View style={styles.header}>
         <View style={styles.headerRow}>
           <Text style={styles.headerText}>Assign to</Text>
-          {mentees.length > 0 && (
+          {selectedUsers.length > 0 ? (
+            <View style={styles.selectionActions}>
+              <Text style={styles.selectedCount}>{selectedUsers.length} selected</Text>
+              <TouchableOpacity
+                style={styles.allToggle}
+                onPress={toggleSelectAll}
+                disabled={assigning}
+                accessibilityRole="checkbox"
+                accessibilityState={{checked: allSelected}}>
+                <Ionicons
+                  name={allSelected ? 'checkmark-circle' : 'ellipse-outline'}
+                  size={18}
+                  color={allSelected ? '#007AFF' : '#6b7280'}
+                />
+                <Text style={styles.allToggleText}>All</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => {
+                setSelectedUsers([]);
+                setUserSelectionMode(false);
+              }} disabled={assigning}>
+                <Text style={[styles.cancelSelection, assigning && styles.selectAllDisabled]}>
+                  Cancel
+                </Text>
+              </TouchableOpacity>
+            </View>
+          ) : mentees.length > 0 && (
             <TouchableOpacity onPress={toggleSelectAll} disabled={assigning}>
               <Text
                 style={[styles.selectAll, assigning && styles.selectAllDisabled]}>
@@ -674,11 +738,7 @@ const AssignScreen = () => {
           )}
         </View>
         <Text style={styles.headerSub}>
-          {selectedUsers.length > 0
-            ? `${selectedUsers.length} mentee${
-                selectedUsers.length === 1 ? '' : 's'
-              } selected`
-            : 'Choose mentees below'}
+          Choose mentees below
         </Text>
       </View>
 
@@ -688,17 +748,13 @@ const AssignScreen = () => {
       <AssignManifest
         plan={plan}
         summary={summary}
-        duplicates={duplicates}
         loading={planLoading}
-        checkingDuplicates={checkingDuplicates}
-        checkFailed={checkFailed}
-        menteeCount={selectedUsers.length}
         onRemove={removeEntry}
         onRemoveUnsendable={removeUnsendable}
         removable={!assigning}
       />
 
-      <MenteeList renderTrailing={renderMenteeBadge} />
+      <MenteeList renderTrailing={renderMenteeBadge} showSelectionHeader={false} />
 
       {selectedUsers.length > 0 && (
         <View style={styles.bottomBar}>
@@ -804,6 +860,31 @@ const styles = StyleSheet.create({
   selectAllDisabled: {
     color: '#9ca3af',
   },
+  selectionActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+  },
+  selectedCount: {
+    color: '#111827',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  allToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  allToggleText: {
+    color: '#374151',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  cancelSelection: {
+    color: '#007AFF',
+    fontSize: 14,
+    fontWeight: '600',
+  },
   headerSub: {
     marginTop: 4,
     fontSize: 14,
@@ -821,6 +902,68 @@ const styles = StyleSheet.create({
   menteeBadgeDone: {backgroundColor: '#eff6ff'},
   menteeBadgeNew: {backgroundColor: '#ecfdf5'},
   menteeBadgeText: {fontSize: 11, fontWeight: '700', marginLeft: 3},
+  existingSheetRoot: {
+    flex: 1,
+    justifyContent: 'flex-end',
+  },
+  existingSheetBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.35)',
+  },
+  existingSheet: {
+    maxHeight: '65%',
+    minHeight: 150,
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 18,
+    borderTopRightRadius: 18,
+    paddingHorizontal: 18,
+    paddingTop: 10,
+    paddingBottom: 24,
+    elevation: 12,
+  },
+  existingSheetHandle: {
+    alignSelf: 'center',
+    width: 42,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: '#cbd5e1',
+    marginBottom: 12,
+  },
+  existingSheetTitle: {
+    color: '#111827',
+    fontSize: 16,
+    fontWeight: '700',
+    marginBottom: 8,
+  },
+  existingSheetList: {
+    flexGrow: 0,
+  },
+  existingSheetListContent: {
+    paddingBottom: 4,
+  },
+  existingSheetItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 7,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#dbeafe',
+  },
+  existingSheetItemIcon: {
+    marginRight: 9,
+  },
+  existingSheetItemText: {
+    flex: 1,
+  },
+  existingSheetItemTitle: {
+    color: '#1e3a8a',
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  existingSheetItemType: {
+    color: '#6b7280',
+    fontSize: 11,
+    marginTop: 2,
+  },
   // The margin above sits between the icon and the label; without an icon it
   // is just an off-centre badge.
   menteeBadgeTextAlone: {marginLeft: 0},

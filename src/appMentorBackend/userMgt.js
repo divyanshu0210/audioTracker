@@ -5,7 +5,7 @@ import {runNativeMenteeSyncNow} from '../appMentor/menteeNotesSync';
 
 const DEV_BASE_URL = 'http://10.0.2.2:8000';
 const RELEASE_BASE_URL = 'https://audiotrackerbackend.onrender.com';
-export const BASE_URL = __DEV__ ? DEV_BASE_URL : RELEASE_BASE_URL;
+export const BASE_URL = __DEV__ ? RELEASE_BASE_URL : RELEASE_BASE_URL;
 
 // Websocket and notification hosts, from when notifications had their own
 // service. Nothing imports them any more; left as a record of the addresses.

@@ -90,7 +90,7 @@ const DuplicateChip = ({users}) => {
   );
 };
 
-const Row = ({entry, duplicate, onRemove, removable}) => {
+const Row = ({entry, onRemove, removable}) => {
   const style = STATUS_STYLE[entry.status];
   const skipped = entry.status !== AssignStatus.READY;
 
@@ -117,16 +117,12 @@ const Row = ({entry, duplicate, onRemove, removable}) => {
           {entry.reason ? ` · ${entry.reason}` : ''}
         </Text>
       </View>
-      {duplicate ? (
-        <DuplicateChip users={duplicate.users} />
-      ) : (
-        <View style={[styles.chip, {backgroundColor: style.bg}]}>
-          <Ionicons name={style.icon} size={13} color={style.color} />
-          <Text style={[styles.chipText, {color: style.color}]}>
-            {statusLabel(entry)}
-          </Text>
-        </View>
-      )}
+      <View style={[styles.chip, {backgroundColor: style.bg}]}>
+        <Ionicons name={style.icon} size={13} color={style.color} />
+        <Text style={[styles.chipText, {color: style.color}]}>
+          {statusLabel(entry)}
+        </Text>
+      </View>
 
       {/* Telling a mentor that four of their eight items cannot be sent, and
           then making them walk back two screens to do anything about it, is
@@ -157,11 +153,7 @@ const Pill = ({color, bg, text}) => (
 const AssignManifest = ({
   plan,
   summary,
-  duplicates,
   loading,
-  checkingDuplicates,
-  checkFailed,
-  menteeCount,
   onRemove,
   onRemoveUnsendable,
   removable,
@@ -210,8 +202,11 @@ const AssignManifest = ({
 
   // Counted here rather than in `summary`, which is about the items alone:
   // this one depends on who is selected.
-  const duplicateCount = Object.values(duplicates).filter(d => d?.all).length;
   const unsendable = summary.noCopy + summary.unsupported;
+  const orderedPlan = [
+    ...plan.filter(entry => entry.status !== AssignStatus.READY),
+    ...plan.filter(entry => entry.status === AssignStatus.READY),
+  ];
 
   return (
     <View style={styles.card}>
@@ -220,49 +215,25 @@ const AssignManifest = ({
         onPress={toggle}
         activeOpacity={0.7}>
         <View style={styles.headerText}>
-          <Text style={styles.headerTitle}>
-            {summary.ready === 0
-              ? 'Nothing here can be assigned'
-              : `${summary.ready} of ${summary.total} ${
-                  summary.total === 1 ? 'item' : 'items'
-                } can be assigned`}
-          </Text>
-          <View style={styles.pillRow}>
-            {summary.noCopy > 0 && (
-              <Pill
-                color="#b45309"
-                bg="#fffbeb"
-                text={`${summary.noCopy} not shareable`}
-              />
-            )}
-            {summary.unsupported > 0 && (
-              <Pill
-                color="#6b7280"
-                bg="#f3f4f6"
-                text={`${summary.unsupported} unsupported`}
-              />
-            )}
-            {checkFailed && !checkingDuplicates && (
-              <Pill
-                color="#b45309"
-                bg="#fffbeb"
-                text="Could not check what mentees already have"
-              />
-            )}
-            {checkingDuplicates ? (
-              <Pill color="#1d4ed8" bg="#eff6ff" text="Checking mentees…" />
-            ) : (
-              duplicateCount > 0 && (
-                <Pill
-                  color="#1d4ed8"
-                  bg="#eff6ff"
-                  text={
-                    menteeCount === 1
-                      ? `${duplicateCount} already assigned`
-                      : `${duplicateCount} already with everyone`
-                  }
-                />
-              )
+          <View style={styles.headerTitleRow}>
+            <Text style={styles.headerTitle}>
+              {summary.ready === 0
+                ? 'Nothing here can be assigned'
+                : `${summary.ready} of ${summary.total} ${
+                    summary.total === 1 ? 'item' : 'items'
+                  } can be assigned`}
+            </Text>
+            {unsendable > 0 && (
+              <TouchableOpacity
+                style={styles.bulkAction}
+                onPress={onRemoveUnsendable}
+                disabled={!removable}
+                activeOpacity={0.7}>
+                <Ionicons name="close-circle-outline" size={15} color="#b91c1c" />
+                <Text style={styles.bulkActionText} numberOfLines={1}>
+                  Remove {unsendable}
+                </Text>
+              </TouchableOpacity>
             )}
           </View>
         </View>
@@ -277,19 +248,6 @@ const AssignManifest = ({
           tap meant for this must not also collapse what it is talking about.
           Shown collapsed as well as expanded: it is the one action a mentor
           can take without reading the rows one by one. */}
-      {unsendable > 0 && (
-        <TouchableOpacity
-          style={styles.bulkAction}
-          onPress={onRemoveUnsendable}
-          disabled={!removable}
-          activeOpacity={0.7}>
-          <Ionicons name="close-circle-outline" size={15} color="#b45309" />
-          <Text style={styles.bulkActionText}>
-            Remove the {unsendable} that cannot be sent
-          </Text>
-        </TouchableOpacity>
-      )}
-
       {expanded && (
         // Capped rather than free-growing: a forty-item selection would
         // otherwise leave no mentee list to tap on, which is the one thing
@@ -297,12 +255,13 @@ const AssignManifest = ({
         <ScrollView
           style={styles.list}
           nestedScrollEnabled
+          showsVerticalScrollIndicator
+          persistentScrollbar
           keyboardShouldPersistTaps="handled">
-          {plan.map(entry => (
+          {orderedPlan.map(entry => (
             <Row
               key={entry.key}
               entry={entry}
-              duplicate={duplicates[entry.key]}
               onRemove={onRemove}
               removable={removable}
             />
@@ -334,10 +293,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   headerText: {flex: 1, marginRight: 8},
+  headerTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
   headerTitle: {
     fontSize: 14,
     fontWeight: '700',
     color: '#111827',
+    flexShrink: 1,
   },
   pillRow: {
     flexDirection: 'row',
@@ -361,6 +325,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: 7,
+    paddingRight: 20,
     borderTopWidth: 1,
     borderTopColor: '#f3f4f6',
   },
@@ -389,16 +354,17 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     alignSelf: 'flex-start',
-    marginTop: 8,
+    marginTop: 0,
+    marginRight: 4,
     paddingVertical: 4,
     paddingHorizontal: 8,
     borderRadius: 12,
-    backgroundColor: '#fffbeb',
+    backgroundColor: '#fef2f2',
   },
   bulkActionText: {
     fontSize: 12,
     fontWeight: '600',
-    color: '#b45309',
+    color: '#b91c1c',
     marginLeft: 5,
   },
   remove: {

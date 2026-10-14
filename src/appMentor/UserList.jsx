@@ -32,6 +32,7 @@ export default UserList = ({
   // asking rather than about the person, so it is passed in rather than read
   // from a store here.
   renderTrailing,
+  showSelectionHeader = true,
 }) => {
   const {
     selectedUsers,
@@ -161,7 +162,7 @@ const {selectedItems, setSelectedCategory} = useSelectionStore(
   };
   return (
     <View style={styles.container}>
-      {userSelectionMode && (
+      {showSelectionHeader && userSelectionMode && (
         <View style={styles.selectionHeader}>
           <TouchableOpacity onPress={cancelSelection}>
             <Text style={styles.cancel}>Cancel</Text>

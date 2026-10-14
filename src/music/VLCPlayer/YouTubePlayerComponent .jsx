@@ -34,6 +34,7 @@ const YouTubePlayerComponent = forwardRef(
       pauseOnStart,
       startTime,
       onEnd,
+      onFullscreenChange,
     },
     ref,
   ) => {
@@ -209,12 +210,14 @@ const YouTubePlayerComponent = forwardRef(
               console.log('Unknown seek status:', data.status);
           }
         } else if (data.fullscreen !== undefined) {
-          // Handle fullscreen state change
+          // WebView fullscreen is separate from the surrounding BacePlayer
+          // layout. Keep both in sync so leaving YouTube fullscreen follows
+          // the same portrait-minimized rule as the VLC controls.
           console.log(
             'Fullscreen state:',
             data.fullscreen ? 'Entered' : 'Exited',
           );
-          // Optionally, you can trigger any updates in React Native here
+          onFullscreenChange?.(Boolean(data.fullscreen));
         } else if (data.error !== undefined) {
           // Handle fullscreen state change
           console.log('Fullscreen error:', data.error);

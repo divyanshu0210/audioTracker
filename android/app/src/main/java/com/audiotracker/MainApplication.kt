@@ -31,6 +31,7 @@ class MainApplication : Application(), ReactApplication {
               add(BackupModulePackage())
               add(PlaybackServicePackage())
               add(PipPackage())
+              add(OrientationPackage())
               add(FocusSignalsPackage())
               add(DriveStreamPackage())
               add(VerseRecognitionPackage())

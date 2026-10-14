@@ -79,10 +79,12 @@ const formatPosition = seconds => {
   return `${h > 0 ? `${h}:` : ''}${mm}:${String(s).padStart(2, '0')}`;
 };
 
-const VersePanel = ({onSeek}) => {
+const VersePanel = ({onSeek, playbackStarted = true, isPaused = false}) => {
   const [expanded, setExpanded] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [songScript, setSongScript] = useState('devanagari');
+  const [viewedHistoryKey, setViewedHistoryKey] = useState(null);
+  const [acknowledgedNewestKey, setAcknowledgedNewestKey] = useState(null);
 
   // The purport is fetched rather than bundled - see purport.js - so it has
   // three states the panel has to tell apart: not asked for, fetching, and
@@ -93,7 +95,7 @@ const VersePanel = ({onSeek}) => {
   // One subscription rather than several: this sits under a player that is
   // already re-rendering on progress, and should not add to that.
   const {
-    enabled, listening, unavailable, current, history, followLine, expected,
+    enabled, listening, unavailable, detectedCurrent, history, followLine, expected,
     debug, heardCount, lastHeard, lastConfidence, candidates, why,
   } = useVerseStore(
     useShallow(state => ({
@@ -101,10 +103,10 @@ const VersePanel = ({onSeek}) => {
       expected: state.expected,
       followLine: state.followLine,
       listening: state.listening,
+      unavailable: state.unavailable,
       lastConfidence: state.lastConfidence,
       why: state.why,
-      unavailable: state.unavailable,
-      current: state.current,
+      detectedCurrent: state.current,
       history: state.history,
       debug: state.debug,
       heardCount: state.heardCount,
@@ -116,6 +118,26 @@ const VersePanel = ({onSeek}) => {
   const dismiss = useVerseStore(state => state.dismiss);
   const rate = useVerseStore(state => state.rate);
   const showFromHistory = useVerseStore(state => state.showFromHistory);
+
+  // Keep an older entry on screen when new recognition results arrive. The
+  // store's current record can continue advancing in the background; this is
+  // only a display selection until the user taps the New button.
+  const current = useMemo(
+    () =>
+      viewedHistoryKey
+        ? history.find(entry => entry.key === viewedHistoryKey) || detectedCurrent
+        : detectedCurrent,
+    [detectedCurrent, history, viewedHistoryKey],
+  );
+
+  useEffect(() => {
+    if (
+      viewedHistoryKey &&
+      !history.some(entry => entry.key === viewedHistoryKey)
+    ) {
+      setViewedHistoryKey(null);
+    }
+  }, [history, viewedHistoryKey]);
 
   const currentId = current?.id;
 
@@ -183,6 +205,7 @@ const VersePanel = ({onSeek}) => {
     entry => {
       // Show the one that was asked for, not whichever was matched last.
       showFromHistory(entry);
+      setViewedHistoryKey(entry.key || null);
       setShowHistory(false);
     },
     [showFromHistory],
@@ -197,8 +220,61 @@ const VersePanel = ({onSeek}) => {
     [handleShow, onSeek],
   );
 
-  // Newest first: the thing just heard is the thing most likely wanted.
-  const recent = useMemo(() => [...history].reverse(), [history]);
+  // Keep the table of contents in media-time order. Detection order is not
+  // playback order after somebody seeks back and hears another verse.
+  const recent = useMemo(
+    () =>
+      history
+        .map((entry, index) => ({entry, index}))
+        .sort(
+          (a, b) =>
+            (b.entry.at || 0) - (a.entry.at || 0) ||
+            (b.entry.heardAt || 0) - (a.entry.heardAt || 0) ||
+            b.index - a.index,
+        )
+        .map(({entry}) => entry),
+    [history],
+  );
+
+  const currentHistoryIndex = useMemo(
+    () => recent.findIndex(entry => entry.key === current?.key),
+    [recent, current?.key],
+  );
+
+  const navigateHistory = useCallback(
+    direction => {
+      if (currentHistoryIndex < 0) return;
+      const target = recent[currentHistoryIndex + direction];
+      if (target) handleShow(target);
+    },
+    [currentHistoryIndex, handleShow, recent],
+  );
+
+  const newestEntry = recent[0];
+  useEffect(() => {
+    // When following the newest entry normally, it is already seen. Keep the
+    // marker unchanged while an older entry is pinned so a later detection can
+    // surface the New button.
+    if (
+      !viewedHistoryKey &&
+      newestEntry?.key &&
+      newestEntry.key !== acknowledgedNewestKey
+    ) {
+      setAcknowledgedNewestKey(newestEntry.key);
+    }
+  }, [acknowledgedNewestKey, newestEntry?.key, viewedHistoryKey]);
+
+  const hasNewerEntry =
+    !!viewedHistoryKey &&
+    !!newestEntry &&
+    newestEntry.key !== acknowledgedNewestKey;
+
+  const showNewestEntry = useCallback(() => {
+    if (!newestEntry) return;
+    setViewedHistoryKey(null);
+    setAcknowledgedNewestKey(newestEntry.key);
+    showFromHistory(newestEntry);
+  }, [newestEntry, showFromHistory]);
 
   // Line index -> the name of the prayer starting there.
   //
@@ -327,15 +403,25 @@ const VersePanel = ({onSeek}) => {
       </ScrollView>
   );
 
-  if (!enabled) return null;
+  // Recognition can already be warming up in the background. Keep its
+  // preparation state out of the layout until playback has actually produced
+  // a clock update; real failures remain visible so the user can act on them.
+  if (!playbackStarted && !current && !unavailable) return null;
+  if (!enabled && !current && !unavailable) return null;
 
-  if (unavailable) {
+  const errorBanner = unavailable ? (
+    <View style={styles.errorNotice}>
+      <Icon name="info-outline" size={16} color={C.muted} />
+      <Text style={styles.quietText} numberOfLines={2}>
+        {unavailable}
+      </Text>
+    </View>
+  ) : null;
+
+  if (!current && unavailable) {
     return (
       <View style={[styles.container, styles.quiet]}>
-        <Icon name="info-outline" size={16} color={C.muted} />
-        <Text style={styles.quietText} numberOfLines={2}>
-          {unavailable}
-        </Text>
+        {errorBanner}
         {debugBlock}
       </View>
     );
@@ -352,6 +438,7 @@ const VersePanel = ({onSeek}) => {
     if (showHistory && (recent.length > 0 || expected)) {
       return (
         <View style={styles.container}>
+          {errorBanner}
           <View style={styles.header}>
             {/* Only "heard" if something was. Opened before anything has
                 matched, the single row in this list is the recording's own
@@ -378,6 +465,7 @@ const VersePanel = ({onSeek}) => {
 
     return (
       <View style={[styles.container, styles.quiet]}>
+        {errorBanner}
         {listening ? (
           <>
             <View style={styles.pulse} />
@@ -385,6 +473,13 @@ const VersePanel = ({onSeek}) => {
               {expected
                 ? `Listening for ${expected.ref}`
                 : 'Listening — verses and songs will appear here'}
+            </Text>
+          </>
+        ) : isPaused ? (
+          <>
+            <Icon name="pause-circle-outline" size={16} color={C.muted} />
+            <Text style={styles.quietText}>
+              Paused — listening resumes when playback continues
             </Text>
           </>
         ) : (
@@ -440,6 +535,7 @@ const VersePanel = ({onSeek}) => {
 
   return (
     <View style={styles.container}>
+      {errorBanner}
       <View style={styles.header}>
         {listening && <View style={styles.pulse} />}
 
@@ -459,6 +555,60 @@ const VersePanel = ({onSeek}) => {
         </Text>
 
         <View style={styles.headerActions}>
+          {hasNewerEntry && (
+            <TouchableOpacity
+              onPress={showNewestEntry}
+              style={styles.newVerseButton}
+              hitSlop={{top: 6, bottom: 6, left: 6, right: 6}}
+              accessibilityRole="button"
+              accessibilityLabel="Show newly detected verse">
+              <Icon name="auto-awesome" size={13} color="#fff" />
+              <Text style={styles.newVerseText}>New</Text>
+            </TouchableOpacity>
+          )}
+
+          {recent.length > 1 && currentHistoryIndex >= 0 && (
+            <View style={styles.historyNav}>
+              <TouchableOpacity
+                onPress={() => navigateHistory(-1)}
+                disabled={currentHistoryIndex <= 0}
+                style={styles.iconBtn}
+                hitSlop={{top: 8, bottom: 8, left: 4, right: 4}}
+                accessibilityRole="button"
+                accessibilityLabel="Show newer verse">
+                <Icon
+                  name="chevron-left"
+                  size={18}
+                  color={
+                    currentHistoryIndex <= 0
+                      ? C.faint
+                      : C.body
+                  }
+                />
+              </TouchableOpacity>
+              <Text style={styles.historyPosition}>
+                {currentHistoryIndex + 1}/{recent.length}
+              </Text>
+              <TouchableOpacity
+                onPress={() => navigateHistory(1)}
+                disabled={currentHistoryIndex >= recent.length - 1}
+                style={styles.iconBtn}
+                hitSlop={{top: 8, bottom: 8, left: 4, right: 4}}
+                accessibilityRole="button"
+                accessibilityLabel="Show older verse">
+                <Icon
+                  name="chevron-right"
+                  size={18}
+                  color={
+                    currentHistoryIndex >= recent.length - 1
+                      ? C.faint
+                      : C.body
+                  }
+                />
+              </TouchableOpacity>
+            </View>
+          )}
+
           {isSong && script.length > 0 && current.lines?.length > 0 && (
             <TouchableOpacity
               onPress={() =>
@@ -791,6 +941,12 @@ const styles = StyleSheet.create({
     fontSize: 12,
     flexShrink: 1,
   },
+  errorNotice: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 8,
+  },
   // A filled dot rather than a spinner: this is on for a whole lecture, and
   // something that spins for an hour reads as "stuck", not "working".
   pulse: {
@@ -860,6 +1016,31 @@ const styles = StyleSheet.create({
     // label in the middle of the row.
     marginLeft: 'auto',
     gap: 4,
+  },
+  historyNav: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 1,
+  },
+  historyPosition: {
+    color: C.body,
+    fontSize: 11,
+    minWidth: 28,
+    textAlign: 'center',
+  },
+  newVerseButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: 10,
+    backgroundColor: '#7c3aed',
+  },
+  newVerseText: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '700',
   },
   iconBtn: {
     flexDirection: 'row',

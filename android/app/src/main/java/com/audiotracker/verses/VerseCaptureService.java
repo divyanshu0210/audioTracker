@@ -67,6 +67,10 @@ import ai.onnxruntime.OrtException;
  */
 @RequiresApi(api = Build.VERSION_CODES.Q)
 public class VerseCaptureService extends Service {
+    // Keep the preflight permissive enough for lower-memory phones. The model
+    // load still has a hard safety net below: OutOfMemoryError stops capture
+    // and reports the failure instead of leaving a half-started service.
+    private static final long MIN_AVAILABLE_MEMORY_BYTES = 400L * 1024L * 1024L;
 
     private static final String TAG = "VerseCapture";
 
@@ -418,8 +422,7 @@ public class VerseCaptureService extends Service {
         if (manager == null) return true;
         ActivityManager.MemoryInfo info = new ActivityManager.MemoryInfo();
         manager.getMemoryInfo(info);
-        // The recognizer currently needs roughly 800 MiB of native memory.
-        return !info.lowMemory && info.availMem >= 768L * 1024L * 1024L;
+        return !info.lowMemory && info.availMem >= MIN_AVAILABLE_MEMORY_BYTES;
     }
 
     /**

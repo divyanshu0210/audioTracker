@@ -266,6 +266,10 @@ const useVerseStore = create((set, get) => ({
   // Set when the recogniser could not start, so the panel can say why rather
   // than sitting blank.
   unavailable: null,
+  // Stable category for lifecycle decisions. The UI may show `unavailable`,
+  // but the toggle needs to distinguish a denied permission from a retryable
+  // model or recogniser failure.
+  unavailableCode: null,
 
   // {id, ref, kind, lines, devanagari, translation, title, source, at}
   //   source: 'heard' - matched from the recitation itself
@@ -326,11 +330,17 @@ const useVerseStore = create((set, get) => ({
   why: '',
 
   setEnabled: enabled => {
-    set({enabled, unavailable: null});
+    // Turning the feature off after a failed start must not erase the reason
+    // before the panel has had a chance to show it. A new recording's reset,
+    // or enabling it again, clears the old error explicitly.
+    set(enabled
+      ? {enabled, unavailable: null, unavailableCode: null}
+      : {enabled});
   },
 
   setListening: listening => set({listening}),
-  setUnavailable: reason => set({unavailable: reason, listening: false}),
+  setUnavailable: (reason, code = null) =>
+    set({unavailable: reason, unavailableCode: code, listening: false}),
 
   /** Everything heard recently, as one string. */
   heardText: () => get()._window.map(entry => entry.text).join(' '),
@@ -659,8 +669,9 @@ const useVerseStore = create((set, get) => ({
    *
    * The weakest source and treated as such: it says what the lecture is
    * *about*, not what is being recited, so the first thing actually heard or
-   * cited replaces it. It never enters the history, because the history records
-   * moments in the recording and this belongs to no moment.
+   * cited replaces it. It enters the history as a title entry at position zero
+   * so it remains available in the verse list, but it is not added to feedback
+   * rows because no audio was heard.
    */
   /**
    * Note the song the recording is named after, without showing it.
@@ -684,9 +695,21 @@ const useVerseStore = create((set, get) => ({
     ),
 
   seedFromTitle: (record, id) =>
-    set(state =>
-      state.current ? {} : {current: {...record, id, source: 'title', at: 0}},
-    ),
+    set(state => {
+      if (state.current || !record || !id) return {};
+      const entry = {
+        ...record,
+        id,
+        key: `title-${id}`,
+        source: 'title',
+        at: 0,
+        heardAt: nowMs(),
+      };
+      return {
+        current: entry,
+        history: [...state.history, entry],
+      };
+    }),
 
   commitRecord: (record, id, source, evidence) =>
     set(state => {
@@ -695,11 +718,23 @@ const useVerseStore = create((set, get) => ({
       // two matches with two separate verdicts, because either can be right
       // while the other is wrong.
       const key = `${id}-${heardAt}`;
-      const entry = {...record, id, source, key, at: positionSeconds, heardAt};
+      const lastHistoryEntry = state.history[state.history.length - 1];
+      const repeatsLatest = lastHistoryEntry?.id === id;
+      const entryKey = repeatsLatest && lastHistoryEntry?.key
+        ? lastHistoryEntry.key
+        : key;
+      const entry = {
+        ...record,
+        id,
+        source,
+        key: entryKey,
+        at: positionSeconds,
+        heardAt,
+      };
 
       const rows = new Map(state._rows);
-      rows.set(key, {
-        key,
+      rows.set(entryKey, {
+        key: entryKey,
         verdict: 'shown',
         id,
         ref: record.ref,
@@ -717,7 +752,11 @@ const useVerseStore = create((set, get) => ({
         // both positions are real and either might be the one being looked for.
         // Consecutive duplicates are not, and those are what the cooldown
         // above prevents.
-        history: [...state.history, entry],
+        // Do not add the same verse twice in a row. If it follows a different
+        // verse later, it is a real second occurrence and is appended normally.
+        history: repeatsLatest
+          ? [...state.history.slice(0, -1), entry]
+          : [...state.history, entry],
         _votes: new Map(),
         _lastCommitAt: nowMs(),
         // A new record is a new place to find. Carrying the old line number
@@ -827,6 +866,9 @@ const useVerseStore = create((set, get) => ({
       lastConfidence: 0,
       why: '',
       candidates: [],
+      listening: false,
+      unavailable: null,
+      unavailableCode: null,
     });
   },
 

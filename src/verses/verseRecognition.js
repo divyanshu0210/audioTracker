@@ -149,7 +149,7 @@ export const startListening = async () => {
   const store = useVerseStore.getState();
 
   if (!isSupportedPlatform || !VerseRecognition) {
-    store.setUnavailable(EXPLANATIONS[VerseError.unsupported]);
+    store.setUnavailable(EXPLANATIONS[VerseError.unsupported], VerseError.unsupported);
     return false;
   }
 
@@ -170,7 +170,11 @@ export const startListening = async () => {
       // held, but nothing is being read.
       else if (state === 'idle' || state === 'stopped') current.setListening(false);
       else if (state === 'failed') {
-        current.setUnavailable(reason || EXPLANATIONS[VerseError.failed]);
+        const text = String(reason || '').toLowerCase();
+        const code = text.includes('permission') || text.includes('allow')
+          ? VerseError.permission
+          : VerseError.failed;
+        current.setUnavailable(reason || EXPLANATIONS[code], code);
       }
     }),
   ];
@@ -181,7 +185,13 @@ export const startListening = async () => {
   } catch (err) {
     detach();
     const code = err?.code || VerseError.failed;
-    store.setUnavailable(EXPLANATIONS[code] || err?.message || EXPLANATIONS[VerseError.failed]);
+    const failureCode = code === VerseError.permission || code === VerseError.declined
+      ? code
+      : VerseError.failed;
+    store.setUnavailable(
+      EXPLANATIONS[code] || err?.message || EXPLANATIONS[VerseError.failed],
+      failureCode,
+    );
     return false;
   }
 };
@@ -263,12 +273,12 @@ export const enableListening = async () => {
 
   const caps = await capabilities();
   if (!caps.supported) {
-    store.setUnavailable(EXPLANATIONS[VerseError.unsupported]);
+    store.setUnavailable(EXPLANATIONS[VerseError.unsupported], VerseError.unsupported);
     return false;
   }
 
   if (!caps.hasPermission && !(await requestPermission())) {
-    store.setUnavailable(EXPLANATIONS[VerseError.permission]);
+    store.setUnavailable(EXPLANATIONS[VerseError.permission], VerseError.permission);
     return false;
   }
 
@@ -276,7 +286,10 @@ export const enableListening = async () => {
     try {
       if (!(await waitForModel())) throw new Error('model download could not be queued');
     } catch (err) {
-      store.setUnavailable('The speech model is waiting for a suitable connection.');
+      store.setUnavailable(
+        'The speech model is waiting for a suitable connection.',
+        VerseError.noModel,
+      );
       return false;
     }
   }

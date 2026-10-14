@@ -211,6 +211,7 @@ const BacePlayer = () => {
   const autoPauseOnTyping = settings?.autoPauseOnTyping ?? true;
 
   const [isDataLoaded, setIsDataLoaded] = useState(false);
+  const [hasPlaybackStarted, setHasPlaybackStarted] = useState(false);
 
   // Playlist state
   const [playlist, setPlaylist] = useState(routeItems || (item ? [item] : []));
@@ -600,7 +601,13 @@ const BacePlayer = () => {
   // const [isDragging, setIsDragging] = useState(false);
   const [isMinimized, setIsMinimized] = useState(true);
   const [isHidden, setIsHidden] = useState(false);
+  const [playerViewportHeight, setPlayerViewportHeight] = useState(0);
   const previousWindowHeight = useRef(SCREEN_HEIGHT);
+
+  const handlePlayerViewportLayout = useCallback(event => {
+    const height = event.nativeEvent.layout.height;
+    if (height > 0) setPlayerViewportHeight(height);
+  }, []);
 
   // Keep the player height and minimized detent in sync after rotation or a
   // window-size change. Otherwise the portrait height can survive in
@@ -615,6 +622,14 @@ const BacePlayer = () => {
     if (isHidden) return;
     playerHeight.setValue(isMinimized ? minimizedHeight : SCREEN_HEIGHT);
   }, [SCREEN_HEIGHT, isAudio, isHidden, isMinimized, MINIMIZED_HEIGHT, playerHeight]);
+
+  // The root layout is the reliable drawable height after Android applies its
+  // status/navigation insets. Window dimensions can still report the old
+  // orientation for one render, leaving a black strip below a rotated player.
+  useEffect(() => {
+    if (!playerViewportHeight || isHidden || isMinimized) return;
+    playerHeight.setValue(playerViewportHeight);
+  }, [isHidden, isMinimized, playerHeight, playerViewportHeight]);
 
   // Notes context
   const [showNotes, setShowNotes] = useState(false);
@@ -686,6 +701,7 @@ const BacePlayer = () => {
   useEffect(() => {
     if (currentItem) {
       console.log('bace player ', currentItem);
+      setHasPlaybackStarted(false);
       currentItemTitleRef.current = currentItem.title;
       canPlayInBackgroundRef.current = currentItem.type !== 'youtube_video';
       setNotesList([]);
@@ -894,6 +910,7 @@ const BacePlayer = () => {
 
   const handleCurrentTimeChange = useCallback(
     time => {
+      if (time > 0) setHasPlaybackStarted(true);
       // Track time jumps immediately when child updates
       if (tracker.current) {
         console.log(
@@ -1318,18 +1335,26 @@ const BacePlayer = () => {
   }, [MINIMIZED_HEIGHT, playerHeight]);
 
   const minimizePlayer = useCallback(() => {
+    // A minimized player is the portrait-sized bottom panel. If the user
+    // minimizes while the device is landscape, release of the fullscreen
+    // layout alone leaves that small panel trapped in landscape. Lock the
+    // Activity to portrait before applying the minimized height.
+    NativeModules.OrientationModule?.lockPortrait?.();
     showPlayerMinimized();
   }, [MINIMIZED_HEIGHT, playerHeight]);
 
   const maximizePlayer = useCallback(() => {
+    // Fullscreen is allowed to rotate again. This also lets the existing
+    // landscape effect maximize the player when the device is turned sideways.
+    NativeModules.OrientationModule?.unlock?.();
     Animated.timing(playerHeight, {
-      toValue: SCREEN_HEIGHT,
+      toValue: playerViewportHeight || SCREEN_HEIGHT,
       duration: 300,
       useNativeDriver: false,
     }).start();
     setIsHidden(false);
     setIsMinimized(false);
-  }, [playerHeight, SCREEN_HEIGHT]);
+  }, [playerHeight, playerViewportHeight, SCREEN_HEIGHT]);
 
   const togglePlayerSize = useCallback(() => {
     if (!isMinimized) {
@@ -1461,7 +1486,7 @@ const BacePlayer = () => {
   );
 
   return (
-    <View style={styles.container}>
+    <View style={styles.container} onLayout={handlePlayerViewportLayout}>
       {currentItem ? (
         <>
           <Animated.View
@@ -1499,6 +1524,13 @@ const BacePlayer = () => {
                     pauseOnStart={pauseOnStart}
                     startTime={startFrom?.current}
                     onEnd={handleAutoAdvance}
+                    onFullscreenChange={isFullscreen => {
+                      if (isFullscreen) {
+                        maximizePlayer();
+                      } else {
+                        minimizePlayer();
+                      }
+                    }}
                   />
                 )
               ) : currentItem.file_path ? (
@@ -1642,12 +1674,9 @@ const BacePlayer = () => {
                   <TouchableOpacity
                     style={styles.focusPillHit}
                     onPress={verses.toggle}
-                    // Holding it shows what the recogniser is actually
-                    // producing. Not behind __DEV__ because the question it
-                    // answers - is this hearing nothing, hearing nonsense, or
-                    // hearing fine and failing to match - only arises on a real
-                    // recording, on somebody's own phone.
-                    onLongPress={verses.toggleDebug}
+                    // The recognizer debug view is only a development aid.
+                    // Keep the production control limited to its normal tap.
+                    onLongPress={__DEV__ ? verses.toggleDebug : undefined}
                     delayLongPress={650}
                     disabled={verses.preparing}
                     accessibilityRole="switch"
@@ -1664,18 +1693,20 @@ const BacePlayer = () => {
                       style={[
                         styles.focusPill,
                         {
-                          backgroundColor: verses.enabled ? '#1e293b' : '#3f3f46',
+                          backgroundColor: verses.enabled
+                            ? '#1e293b'
+                            : FOCUS_PILL_LOOKS.off.bg,
                         },
                       ]}>
                       {verses.preparing ? (
                         <ActivityIndicator size="small" color="#e2e8f0" />
                       ) : (
                         <Icon
-                          name={verses.enabled ? 'hearing' : 'hearing-disabled'}
+                          name="auto-awesome"
                           size={20}
-                          // Green while it is actually hearing something, so
-                          // the pill answers "is this working" without the
-                          // panel having to be open.
+                          // Green while it is actually listening, while the
+                          // sparkle keeps the control recognizable as AI in
+                          // every state.
                           color={
                             verses.enabled
                               ? verses.listening
@@ -1684,7 +1715,7 @@ const BacePlayer = () => {
                                 ? '#94a3b8'
                                 : '#fbbf24'
                               : verses.modelReady
-                              ? '#a1a1aa'
+                              ? FOCUS_PILL_LOOKS.off.ink
                               : '#fbbf24'
                           }
                         />
@@ -1765,14 +1796,18 @@ const BacePlayer = () => {
               not in PiP. Detection keeps running through both; only the
               display goes away, so a verse recognised while writing a note is
               still there when the note is closed. */}
-          {!isInPip && !showNotes && (
+          {!isInPip && !showNotes && btnRowHeight > 0 && (
             <View
               style={{
                 marginTop: btnRowHeight,
                 marginBottom: bottomOverlay,
                 flexShrink: 1,
               }}>
-              <VersePanel onSeek={seekToSeconds} />
+              <VersePanel
+                onSeek={seekToSeconds}
+                playbackStarted={hasPlaybackStarted}
+                isPaused={isPausedNow}
+              />
             </View>
           )}
 

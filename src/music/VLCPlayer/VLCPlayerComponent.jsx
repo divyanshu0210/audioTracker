@@ -753,7 +753,6 @@ const BottomControls = React.memo(
         style={[
           styles.bottomControls,
           !isAudio && styles.bottomControlsVideo,
-          !isAudio && {bottom: isMinimized ? 0 : 28},
           isAudio && styles.bottomControlsAudio,
           {opacity: controlsOpacity},
         ]}>
@@ -811,7 +810,11 @@ const BottomControls = React.memo(
                   onVisibilityChange={onSettingsVisibilityChange}
                 />
                 <TouchableOpacity
-                  style={styles.controlButton}
+                  // Keep this touch target and glyph in the top layer. The
+                  // settings panel is an absolute child of the same row; on
+                  // Android it can otherwise paint over the fullscreen glyph
+                  // while the underlying TouchableOpacity remains clickable.
+                  style={[styles.controlButton, styles.fullscreenButton]}
                   onPress={onToggleSize}>
                   <Icon
                     name={isMinimized ? 'fullscreen' : 'fullscreen-exit'}
@@ -884,12 +887,11 @@ const styles = StyleSheet.create({
     zIndex: 10,
     paddingBottom: 0,
   },
-  // Android's navigation/gesture inset can sit over the very bottom of a
-  // Keep a small lift in the minimized player. Fullscreen applies a larger
-  // runtime lift above this style to clear Android's navigation/gesture inset,
-  // including on the first fullscreen transition before orientation settles.
+  // Keep the controls anchored to the bottom edge in both minimized and
+  // fullscreen layouts. The player viewport now accounts for the available
+  // window height, so a separate fullscreen lift is unnecessary.
   bottomControlsVideo: {
-    bottom: 8,
+    bottom: 0,
   },
   // An audio player is AUDIO_MINIMIZED_RATIO of the screen - around 144dp on a
   // usual phone - and this block is anchored to the bottom and grows upward,
@@ -910,7 +912,20 @@ const styles = StyleSheet.create({
   },
   timeControlsContainer: {flex: 1},
   sliderInline: {flex: 1, marginHorizontal: 8},
-  inlineButtonRow: {flexDirection: 'row', alignItems: 'center', marginLeft: 8},
+  inlineButtonRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginLeft: 8,
+    flexShrink: 0,
+    position: 'relative',
+    zIndex: 30,
+    elevation: 30,
+  },
+  fullscreenButton: {
+    position: 'relative',
+    zIndex: 40,
+    elevation: 40,
+  },
   controlButton: {padding: 7},
   audioButtonRow: {
     flexDirection: 'row',

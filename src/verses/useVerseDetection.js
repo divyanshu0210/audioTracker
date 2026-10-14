@@ -41,6 +41,7 @@ const useVerseDetection = ({sourceId, title, path, isPaused, isPlaybackReady}) =
   const updateSettings = useSettingsStore(state => state.updateSettings);
 
   const listening = useVerseStore(state => state.listening);
+  const unavailable = useVerseStore(state => state.unavailable);
   const [preparing, setPreparing] = useState(false);
   // Recognition is explicitly opt-in for the current app session. The stored
   // setting remembers that the user has used the feature, but it must not
@@ -143,7 +144,8 @@ const useVerseDetection = ({sourceId, title, path, isPaused, isPlaybackReady}) =
   }, [sourceId, title, path]);
 
   // The store's `enabled` flag follows the explicit button press for this
-  // recording. A saved preference is intentionally not enough to start audio.
+  // recording. Listening may begin while the player is still opening; the
+  // panel independently waits for real playback before showing its status.
   useEffect(() => {
     useVerseStore.getState().setEnabled(sessionRequested && available !== false);
   }, [sessionRequested, available]);
@@ -177,6 +179,13 @@ const useVerseDetection = ({sourceId, title, path, isPaused, isPlaybackReady}) =
           // A failed start must not leave the flag set, or nothing will try
           // again for the rest of the session.
           runningRef.current = false;
+          // Any failed startup should leave the feature visibly off. This
+          // includes model/network failures as well as permission denial. We
+          // do not revoke Android permission here, so a later manual retry can
+          // proceed without showing the permission prompt again.
+          setSessionRequested(false);
+          updateSettings({verseDetectionEnabled: false});
+          useVerseStore.getState().setEnabled(false);
         } else {
           // `start()` can resolve with an already-active service. That happens
           // after the player was paused or after leaving and re-entering the
@@ -295,6 +304,7 @@ const useVerseDetection = ({sourceId, title, path, isPaused, isPlaybackReady}) =
     modelReady: modelReady === true,
     enabled: sessionRequested,
     listening,
+    unavailable,
     preparing,
     toggle,
     removeModel,

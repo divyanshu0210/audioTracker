@@ -93,12 +93,14 @@ const styles = StyleSheet.create({
   stackedContainer: {
     width: '100%',
     alignItems: 'center',
+    overflow: 'visible',
   },
   stackedTopRow: {
     width: '95%',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    overflow: 'visible',
   },
   stackedTimeText: {
     width: 'auto',

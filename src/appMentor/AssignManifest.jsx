@@ -25,7 +25,6 @@ import {
   View,
 } from 'react-native';
 import Ionicons from 'react-native-vector-icons/Ionicons';
-import UserAvatar from './UserAvatar';
 import {AssignStatus} from './assignPlan';
 
 if (
@@ -38,20 +37,12 @@ if (
 const STATUS_STYLE = {
   [AssignStatus.READY]: {color: '#047857', bg: '#ecfdf5', icon: 'checkmark-circle'},
   [AssignStatus.NO_COPY]: {color: '#b45309', bg: '#fffbeb', icon: 'alert-circle'},
-  [AssignStatus.UNSUPPORTED]: {color: '#6b7280', bg: '#f3f4f6', icon: 'remove-circle'},
+  [AssignStatus.UNSUPPORTED]: {color: '#b45309', bg: '#fffbeb', icon: 'alert-circle'},
 };
 
 // Already-assigned is not a property of the item — the same file is sendable
 // to one mentee and a duplicate for another — so it is drawn over the top of
 // whatever the item's own status is.
-const DUPLICATE_STYLE = {color: '#1d4ed8', bg: '#eff6ff', icon: 'repeat'};
-
-const statusLabel = entry => {
-  if (entry.status === AssignStatus.READY) return 'Will be sent';
-  if (entry.status === AssignStatus.NO_COPY) return 'Not shareable';
-  return 'Cannot be assigned';
-};
-
 // Who already has this one, as faces rather than a fraction.
 //
 // "Already with 2 of 3" is a number the mentor then has to decode, and the
@@ -59,37 +50,6 @@ const statusLabel = entry => {
 // count move. The faces are the answer, in the place the question is asked,
 // and they are the same avatars the rows below and the bar at the bottom use —
 // so recognising them costs nothing.
-const MAX_FACES = 3;
-
-const DuplicateChip = ({users}) => {
-  const shown = users.slice(0, MAX_FACES);
-  const overflow = users.length - shown.length;
-
-  return (
-    <View style={[styles.chip, {backgroundColor: DUPLICATE_STYLE.bg}]}>
-      <Text style={[styles.chipText, styles.chipLead, {color: DUPLICATE_STYLE.color}]}>
-        Already with
-      </Text>
-      <View style={styles.facepile}>
-        {shown.map((user, index) => (
-          <View
-            key={user?.id ?? user?.email ?? index}
-            // Ringed in the chip's own colour so overlapping faces stay
-            // separable at this size.
-            style={[styles.face, index > 0 && styles.faceOverlap]}>
-            <UserAvatar user={user} size={20} />
-          </View>
-        ))}
-        {overflow > 0 && (
-          <View style={[styles.face, styles.faceOverlap, styles.faceOverflow]}>
-            <Text style={styles.faceOverflowText}>+{overflow}</Text>
-          </View>
-        )}
-      </View>
-    </View>
-  );
-};
-
 const Row = ({entry, onRemove, removable}) => {
   const style = STATUS_STYLE[entry.status];
   const skipped = entry.status !== AssignStatus.READY;
@@ -119,9 +79,6 @@ const Row = ({entry, onRemove, removable}) => {
       </View>
       <View style={[styles.chip, {backgroundColor: style.bg}]}>
         <Ionicons name={style.icon} size={13} color={style.color} />
-        <Text style={[styles.chipText, {color: style.color}]}>
-          {statusLabel(entry)}
-        </Text>
       </View>
 
       {/* Telling a mentor that four of their eight items cannot be sent, and
@@ -143,12 +100,6 @@ const Row = ({entry, onRemove, removable}) => {
     </View>
   );
 };
-
-const Pill = ({color, bg, text}) => (
-  <View style={[styles.pill, {backgroundColor: bg}]}>
-    <Text style={[styles.pillText, {color}]}>{text}</Text>
-  </View>
-);
 
 const AssignManifest = ({
   plan,
@@ -216,17 +167,30 @@ const AssignManifest = ({
         activeOpacity={0.7}>
         <View style={styles.headerText}>
           <View style={styles.headerTitleRow}>
+            {unsendable > 0 && (
+              <Ionicons
+                name="warning-outline"
+                size={16}
+                color="#b45309"
+                style={styles.warningHeadingIcon}
+              />
+            )}
             <Text style={styles.headerTitle}>
-              {summary.ready === 0
-                ? 'Nothing here can be assigned'
+              {unsendable > 0
+                ? `${unsendable} of ${summary.total} ${
+                    summary.total === 1 ? 'item' : 'items'
+                  } can't be assigned`
                 : `${summary.ready} of ${summary.total} ${
                     summary.total === 1 ? 'item' : 'items'
                   } can be assigned`}
             </Text>
-            {unsendable > 0 && (
+            {expanded && unsendable > 0 && (
               <TouchableOpacity
                 style={styles.bulkAction}
-                onPress={onRemoveUnsendable}
+                onPress={event => {
+                  event?.stopPropagation?.();
+                  onRemoveUnsendable();
+                }}
                 disabled={!removable}
                 activeOpacity={0.7}>
                 <Ionicons name="close-circle-outline" size={15} color="#b91c1c" />
@@ -235,13 +199,18 @@ const AssignManifest = ({
                 </Text>
               </TouchableOpacity>
             )}
+            </View>
           </View>
-        </View>
-        <Ionicons
-          name={expanded ? 'chevron-up' : 'chevron-down'}
-          size={20}
-          color="#6b7280"
-        />
+          <View style={styles.detailsToggle}>
+            <Text style={styles.detailsToggleText}>
+              Details
+            </Text>
+            <Ionicons
+              name={expanded ? 'chevron-up' : 'chevron-down'}
+              size={18}
+              color="#6b7280"
+            />
+          </View>
       </TouchableOpacity>
 
       {/* Outside the header's TouchableOpacity, which toggles the list — a
@@ -249,24 +218,23 @@ const AssignManifest = ({
           Shown collapsed as well as expanded: it is the one action a mentor
           can take without reading the rows one by one. */}
       {expanded && (
-        // Capped rather than free-growing: a forty-item selection would
-        // otherwise leave no mentee list to tap on, which is the one thing
-        // this screen exists to do.
-        <ScrollView
-          style={styles.list}
-          nestedScrollEnabled
-          showsVerticalScrollIndicator
-          persistentScrollbar
-          keyboardShouldPersistTaps="handled">
-          {orderedPlan.map(entry => (
-            <Row
-              key={entry.key}
-              entry={entry}
-              onRemove={onRemove}
-              removable={removable}
-            />
-          ))}
-        </ScrollView>
+        <View>
+          <ScrollView
+            style={styles.list}
+            nestedScrollEnabled
+            showsVerticalScrollIndicator
+            persistentScrollbar
+            keyboardShouldPersistTaps="handled">
+            {orderedPlan.map(entry => (
+              <Row
+                key={entry.key}
+                entry={entry}
+                onRemove={onRemove}
+                removable={removable}
+              />
+            ))}
+          </ScrollView>
+        </View>
       )}
     </View>
   );
@@ -293,6 +261,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   headerText: {flex: 1, marginRight: 8},
+  detailsToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+  },
+  detailsToggleText: {
+    color: '#6b7280',
+    fontSize: 11,
+    fontWeight: '600',
+  },
   headerTitleRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -303,20 +281,9 @@ const styles = StyleSheet.create({
     color: '#111827',
     flexShrink: 1,
   },
-  pillRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    marginTop: 2,
+  warningHeadingIcon: {
+    marginRight: 5,
   },
-  pill: {
-    borderRadius: 10,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    marginRight: 6,
-    marginTop: 4,
-  },
-  pillText: {fontSize: 11, fontWeight: '600'},
-
   list: {
     marginTop: 8,
     maxHeight: 220,
@@ -341,9 +308,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 7,
     paddingVertical: 3,
   },
-  chipText: {fontSize: 11, fontWeight: '700', marginLeft: 3},
-  chipLead: {marginLeft: 0, marginRight: 5},
-
   emptyText: {
     fontSize: 13,
     color: '#6b7280',
@@ -372,20 +336,4 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
   },
 
-  facepile: {flexDirection: 'row', alignItems: 'center'},
-  face: {
-    borderWidth: 1.5,
-    borderColor: '#eff6ff',
-    borderRadius: 12,
-  },
-  faceOverlap: {marginLeft: -7},
-  faceOverflow: {
-    width: 23,
-    height: 23,
-    borderRadius: 12,
-    backgroundColor: '#bfdbfe',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  faceOverflowText: {fontSize: 9, fontWeight: '700', color: '#1e3a8a'},
 });

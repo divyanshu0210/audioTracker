@@ -18,7 +18,7 @@ import {
 } from 'react-native';
 import {useFocusEffect, useRoute} from '@react-navigation/native';
 import RNFS from 'react-native-fs';
-import ShimmerPlaceholder from 'react-native-shimmer-placeholder';
+import ShimmerPlaceholder from '../components/AppShimmerPlaceholder';
 
 import {getDownloadedItems} from '../database/R';
 import AppHeader from '../components/headers/AppHeader';

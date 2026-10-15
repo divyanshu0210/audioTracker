@@ -9,7 +9,7 @@ import {
   Dimensions,
 } from 'react-native';
 import {useFocusEffect} from '@react-navigation/core';
-import ShimmerPlaceholder from 'react-native-shimmer-placeholder';
+import ShimmerPlaceholder from '../components/AppShimmerPlaceholder';
 import {HistoryItem} from './HistoryCard';
 import { getRecentlyWatchedVideos } from '../database/R';
 import { navigationRef } from '../handlers/navigationRef';

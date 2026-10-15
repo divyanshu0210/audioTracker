@@ -13,11 +13,13 @@ import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import MenteeList from './MenteeList';
 import {useAppState} from '../contexts/AppStateContext';
 import Ionicons from 'react-native-vector-icons/Ionicons';
+import ShimmerPlaceholder from '../components/AppShimmerPlaceholder';
 import {useFocusEffect} from '@react-navigation/core';
 import useMentorMenteeStore from './useMentorMenteeStore';
 import {addCategory, addItemToCategory} from '../categories/catDB';
 import {BASE_URL} from '../appMentorBackend/userMgt';
 import {fetchMenteeAssignments} from '../appMentorBackend/assignmentsMgt';
+import {countMenteeNotesBySource} from '../database/menteeNotesDB';
 import {useSelectionStore} from '../stores/useSelectionStore';
 import {useShallow} from 'zustand/react/shallow';
 import {navigationRef} from '../handlers/navigationRef';
@@ -54,6 +56,71 @@ const mapWithLimit = async (items, limit, task) => {
   return results;
 };
 
+const AssignmentCountShimmer = () => {
+  return <ShimmerPlaceholder style={styles.menteeBadgeShimmer} autoRun />;
+};
+
+const ExistingAssignmentRow = ({entry}) => (
+  <View style={styles.existingSheetItem}>
+    <Ionicons
+      name={entry.icon || 'document-text-outline'}
+      size={18}
+      color="#4b5563"
+      style={styles.existingSheetItemIcon}
+    />
+    <View style={styles.existingSheetItemText}>
+      <Text numberOfLines={2} style={styles.existingSheetItemTitle}>
+        {entry.title}
+      </Text>
+      {!!entry.typeLabel && (
+        <Text numberOfLines={1} style={styles.existingSheetItemType}>
+          {entry.typeLabel}
+        </Text>
+      )}
+      <View style={styles.existingSheetProgressMeta}>
+        <Ionicons
+          name={
+            entry.assignment.status === 'seen' ||
+            entry.assignment.status === 'delivered'
+              ? 'checkmark-done'
+              : 'checkmark'
+          }
+          size={14}
+          color={entry.assignment.status === 'seen' ? '#1a73e8' : '#9aa0a6'}
+        />
+        <Text style={styles.existingSheetStatus}>
+          {entry.assignment.status === 'seen'
+            ? 'Seen'
+            : entry.assignment.status === 'delivered'
+            ? 'Delivered'
+            : 'Not received'}
+        </Text>
+        <Text style={styles.existingSheetNotes}>
+          {entry.noteCount} {entry.noteCount === 1 ? 'note' : 'notes'}
+        </Text>
+        {entry.assignment.percent != null && (
+          <Text style={styles.existingSheetPercent}>
+            {Math.round(entry.assignment.percent)}% watched
+          </Text>
+        )}
+      </View>
+      <View style={styles.existingSheetProgressTrack}>
+        <View
+          style={[
+            styles.existingSheetProgressFill,
+            {
+              width: `${Math.max(
+                0,
+                Math.min(100, entry.assignment.percent ?? 0),
+              )}%`,
+            },
+          ]}
+        />
+      </View>
+    </View>
+  </View>
+);
+
 const AssignScreen = () => {
   const {selectedItems, setSelectedItems, setSelectionMode} = useSelectionStore(
     useShallow(state => ({
@@ -78,8 +145,9 @@ const AssignScreen = () => {
     useCallback(() => {
       return () => {
         setSelectedUsers([]);
+        setUserSelectionMode(false);
       };
-    }, []),
+    }, [setSelectedUsers, setUserSelectionMode]),
   );
 
   // Only true while the request is in flight. The screen used to call
@@ -150,6 +218,7 @@ const AssignScreen = () => {
   // it should not cost a request each time. Anything assigned from elsewhere
   // in the seconds this screen is open would not be worth the requests.
   const assignmentsByMentee = useRef({});
+  const noteCountsByMentee = useRef({});
   const [assignmentsVersion, setAssignmentsVersion] = useState(0);
 
   const menteeIdOf = entry => entry.user?.id ?? entry.id;
@@ -178,8 +247,17 @@ const AssignScreen = () => {
 
     const askAbout = async menteeId => {
       try {
-        const assignments = await fetchMenteeAssignments(userInfo.id, menteeId);
-        return [String(menteeId), indexAssignments(assignments)];
+        const [assignments, noteCounts] = await Promise.all([
+          fetchMenteeAssignments(userInfo.id, menteeId),
+          countMenteeNotesBySource(menteeId).catch(error => {
+            console.warn(
+              `Could not read notes for mentee ${menteeId}:`,
+              error?.message ?? error,
+            );
+            return {};
+          }),
+        ]);
+        return [String(menteeId), indexAssignments(assignments), noteCounts];
       } catch (error) {
         console.warn(
           `Could not read what mentee ${menteeId} already has:`,
@@ -188,7 +266,7 @@ const AssignScreen = () => {
         // Null, not an empty map, so the difference between "has nothing"
         // and "could not ask" survives: the first is a fact worth showing,
         // the second must not make the screen claim an item is new.
-        return [String(menteeId), null];
+        return [String(menteeId), null, null];
       }
     };
 
@@ -199,8 +277,9 @@ const AssignScreen = () => {
       // Written even when this effect run has been superseded. The answer is
       // about a mentee, not about a particular selection, so it is still true
       // — dropping it would only mean asking for it again.
-      for (const [id, map] of results) {
+      for (const [id, map, noteCounts] of results) {
         assignmentsByMentee.current[id] = map;
+        noteCountsByMentee.current[id] = noteCounts;
       }
       setAssignmentsVersion(v => v + 1);
     });
@@ -265,22 +344,23 @@ const AssignScreen = () => {
     [removeFromSelection, unsendableKeys],
   );
 
-  // Per mentee, for the badge on their row.
-  const newCountFor = useCallback(
-    mentee => {
-      const map = assignmentsByMentee.current[String(mentee.id ?? getUserId(mentee))];
-      if (!map) return null;
-      return sendable.filter(entry => !existingAssignmentFor(map, entry)).length;
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [sendable, assignmentsVersion],
-  );
-
   const existingItemsFor = useCallback(
     mentee => {
-      const map = assignmentsByMentee.current[String(mentee.id ?? getUserId(mentee))];
+      const menteeId = String(mentee.id ?? getUserId(mentee));
+      const map = assignmentsByMentee.current[menteeId];
       if (!map) return null;
-      return sendable.filter(entry => existingAssignmentFor(map, entry));
+      const noteCounts = noteCountsByMentee.current[menteeId] ?? {};
+      return sendable.flatMap(entry => {
+        const assignment = existingAssignmentFor(map, entry);
+        if (!assignment) return [];
+
+        const noteKey = assignment.origin_video_id || assignment.video_id || entry.id;
+        return [{
+          ...entry,
+          assignment,
+          noteCount: noteCounts[String(noteKey)] ?? noteCounts[String(entry.id)] ?? 0,
+        }];
+      });
     },
     [sendable, assignmentsVersion],
   );
@@ -585,11 +665,6 @@ const AssignScreen = () => {
     mentee => {
       if (sendable.length === 0) return null;
 
-      const newCount = newCountFor(mentee);
-      // Not known yet, or the request failed. Either way the screen has no
-      // business claiming anything about this person.
-      if (newCount === null) return null;
-
       // One label, whether or not this mentee already has part of the
       // selection. It briefly said "3 new" for a partial overlap and "3 items"
       // for none — two sentences for the identical fact that three items would
@@ -601,9 +676,25 @@ const AssignScreen = () => {
       // "New" is the true half of it — new to this mentee, i.e. not already
       // assigned — and it is the same idea the blue badge states when the
       // count is zero.
-      const existing = existingItemsFor(mentee) || [];
+      const existing = existingItemsFor(mentee);
+      if (existing === null) {
+        const menteeKey = String(mentee.id ?? getUserId(mentee));
+        return assignmentsByMentee.current[menteeKey] === undefined ? (
+          <AssignmentCountShimmer />
+        ) : null;
+      }
+      const newCount = sendable.length - existing.length;
       const menteeId = String(mentee.id ?? getUserId(mentee));
       const expanded = expandedMenteeId === menteeId;
+      const menteeGroups = mentees.map(person => {
+        const items = existingItemsFor(person);
+        return {
+          id: String(person.id ?? getUserId(person)),
+          person,
+          items: items ?? [],
+          loading: items === null,
+        };
+      });
       const shownNames = existing.slice(0, 2).map(entry => entry.title).join(', ');
       const remaining = existing.length - Math.min(existing.length, 2);
       const label = existing.length > 0
@@ -661,31 +752,47 @@ const AssignScreen = () => {
             />
             <View style={styles.existingSheet}>
               <View style={styles.existingSheetHandle} />
-              <Text style={styles.existingSheetTitle}>Already assigned</Text>
+              <Text style={styles.existingSheetTitle}>Already Assigned Selected items</Text>
               <ScrollView
                 style={styles.existingSheetList}
                 contentContainerStyle={styles.existingSheetListContent}
                 showsVerticalScrollIndicator>
-                {existing.map((entry, index) => (
+                {menteeGroups.map((group, groupIndex) => (
                   <View
-                    key={`${entry.key ?? entry.id ?? entry.title}-${index}`}
-                    style={styles.existingSheetItem}>
-                    <Ionicons
-                      name={entry.icon || 'document-text-outline'}
-                      size={18}
-                      color="#4b5563"
-                      style={styles.existingSheetItemIcon}
-                    />
-                    <View style={styles.existingSheetItemText}>
-                      <Text numberOfLines={2} style={styles.existingSheetItemTitle}>
-                        {entry.title}
+                    key={group.id}
+                    style={[
+                      styles.existingSheetGroup,
+                      groupIndex < menteeGroups.length - 1 &&
+                        menteeGroups[groupIndex + 1].id === menteeId &&
+                        styles.existingSheetGroupBeforeSelected,
+                      group.id === menteeId && styles.existingSheetGroupSelected,
+                    ]}>
+                    <View style={styles.existingSheetGroupHeader}>
+                      <Text numberOfLines={1} style={styles.existingSheetGroupName}>
+                        {group.person.full_name || group.person.email || 'Mentee'}
                       </Text>
-                      {!!entry.typeLabel && (
-                        <Text numberOfLines={1} style={styles.existingSheetItemType}>
-                          {entry.typeLabel}
+                      <View style={styles.existingSheetGroupCountPill}>
+                        <Text style={styles.existingSheetGroupCount}>
+                          {group.loading
+                            ? `—/${sendable.length}`
+                            : `${group.items.length}/${sendable.length}`} assigned
                         </Text>
-                      )}
+                      </View>
                     </View>
+                    {group.loading ? (
+                      <Text style={styles.existingSheetUnavailable}>Loading…</Text>
+                    ) : group.items.length === 0 ? (
+                      <Text style={styles.existingSheetUnavailable}>
+                        No items assigned yet
+                      </Text>
+                    ) : (
+                      group.items.map((entry, index) => (
+                        <ExistingAssignmentRow
+                          key={`${entry.key ?? entry.id ?? entry.title}-${index}`}
+                          entry={entry}
+                        />
+                      ))
+                    )}
                   </View>
                 ))}
               </ScrollView>
@@ -695,7 +802,7 @@ const AssignScreen = () => {
         </>
       );
     },
-    [expandedMenteeId, existingItemsFor, newCountFor, sendable.length],
+    [expandedMenteeId, existingItemsFor, mentees, sendable.length],
   );
 
   return (
@@ -703,7 +810,7 @@ const AssignScreen = () => {
       <View style={styles.header}>
         <View style={styles.headerRow}>
           <Text style={styles.headerText}>Assign to</Text>
-          {selectedUsers.length > 0 ? (
+          {mentees.length > 0 && (
             <View style={styles.selectionActions}>
               <Text style={styles.selectedCount}>{selectedUsers.length} selected</Text>
               <TouchableOpacity
@@ -719,27 +826,22 @@ const AssignScreen = () => {
                 />
                 <Text style={styles.allToggleText}>All</Text>
               </TouchableOpacity>
-              <TouchableOpacity onPress={() => {
-                setSelectedUsers([]);
-                setUserSelectionMode(false);
-              }} disabled={assigning}>
-                <Text style={[styles.cancelSelection, assigning && styles.selectAllDisabled]}>
-                  Cancel
-                </Text>
-              </TouchableOpacity>
+              {selectedUsers.length > 0 && (
+                <TouchableOpacity onPress={() => {
+                  setSelectedUsers([]);
+                  setUserSelectionMode(false);
+                }} disabled={assigning}>
+                  <Text style={[styles.cancelSelection, assigning && styles.disabledActionText]}>
+                    Cancel
+                  </Text>
+                </TouchableOpacity>
+              )}
             </View>
-          ) : mentees.length > 0 && (
-            <TouchableOpacity onPress={toggleSelectAll} disabled={assigning}>
-              <Text
-                style={[styles.selectAll, assigning && styles.selectAllDisabled]}>
-                {allSelected ? 'Clear' : 'Select all'}
-              </Text>
-            </TouchableOpacity>
           )}
         </View>
-        <Text style={styles.headerSub}>
+        {/* <Text style={styles.headerSub}>
           Choose mentees below
-        </Text>
+        </Text> */}
       </View>
 
       {/* What is being assigned, item by item. The selection was made on a
@@ -852,12 +954,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#111827',
   },
-  selectAll: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#007AFF',
-  },
-  selectAllDisabled: {
+  disabledActionText: {
     color: '#9ca3af',
   },
   selectionActions: {
@@ -902,6 +999,13 @@ const styles = StyleSheet.create({
   menteeBadgeDone: {backgroundColor: '#eff6ff'},
   menteeBadgeNew: {backgroundColor: '#ecfdf5'},
   menteeBadgeText: {fontSize: 11, fontWeight: '700', marginLeft: 3},
+  menteeBadgeShimmer: {
+    width: 48,
+    height: 20,
+    borderRadius: 10,
+    marginLeft: 8,
+    backgroundColor: '#e5e7eb',
+  },
   existingSheetRoot: {
     flex: 1,
     justifyContent: 'flex-end',
@@ -913,7 +1017,7 @@ const styles = StyleSheet.create({
   existingSheet: {
     maxHeight: '65%',
     minHeight: 150,
-    backgroundColor: '#fff',
+    backgroundColor: '#f8fbff',
     borderTopLeftRadius: 18,
     borderTopRightRadius: 18,
     paddingHorizontal: 18,
@@ -930,16 +1034,65 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   existingSheetTitle: {
-    color: '#111827',
+    color: '#173b67',
     fontSize: 16,
     fontWeight: '700',
-    marginBottom: 8,
+    marginBottom: 2,
   },
   existingSheetList: {
     flexGrow: 0,
   },
   existingSheetListContent: {
     paddingBottom: 4,
+  },
+  existingSheetGroup: {
+    paddingBottom: 10,
+    marginBottom: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#d1d5db',
+  },
+  existingSheetGroupSelected: {
+    backgroundColor: '#eff6ff',
+    borderWidth: 1,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderColor: '#bfdbfe',
+    borderRadius: 10,
+    paddingHorizontal: 8,
+    marginHorizontal: -8,
+    paddingBottom: 2,
+    marginBottom: 0,
+  },
+  existingSheetGroupBeforeSelected: {
+    marginBottom: 0,
+  },
+  existingSheetGroupHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 7,
+  },
+  existingSheetGroupName: {
+    flex: 1,
+    color: '#111827',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  existingSheetGroupCountPill: {
+    backgroundColor: '#e0e7ff',
+    borderWidth: 1,
+    borderColor: '#a5b4fc',
+    borderRadius: 10,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+  },
+  existingSheetGroupCount: {
+    color: '#4338ca',
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  existingSheetUnavailable: {
+    color: '#9ca3af',
+    fontSize: 11,
+    paddingBottom: 7,
   },
   existingSheetItem: {
     flexDirection: 'row',
@@ -963,6 +1116,40 @@ const styles = StyleSheet.create({
     color: '#6b7280',
     fontSize: 11,
     marginTop: 2,
+  },
+  existingSheetProgressMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    marginTop: 4,
+  },
+  existingSheetStatus: {
+    color: '#6b7280',
+    fontSize: 10,
+    fontWeight: '600',
+  },
+  existingSheetNotes: {
+    color: '#6b7280',
+    fontSize: 10,
+    marginLeft: 8,
+  },
+  existingSheetPercent: {
+    color: '#1d4ed8',
+    fontSize: 10,
+    fontWeight: '600',
+    marginLeft: 8,
+  },
+  existingSheetProgressTrack: {
+    height: 3,
+    borderRadius: 2,
+    backgroundColor: '#e5e7eb',
+    overflow: 'hidden',
+    marginTop: 4,
+  },
+  existingSheetProgressFill: {
+    height: '100%',
+    borderRadius: 2,
+    backgroundColor: '#2563eb',
   },
   // The margin above sits between the icon and the label; without an icon it
   // is just an off-centre badge.

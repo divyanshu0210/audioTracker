@@ -14,6 +14,7 @@
 // through a notification the way downloads do.
 
 import {Alert, ToastAndroid} from 'react-native';
+import RNFS from 'react-native-fs';
 import useShareStore from '../stores/useShareStore';
 import {useMediaStore} from '../stores/useMediaStore';
 import {isContentUri, mediaExists} from '../utils/mediaFile';
@@ -24,7 +25,7 @@ import {
   enqueueUpload,
 } from '../backgroundService/backgroundDownloadService';
 import {resolveDestPath} from '../Linking/utils/handleLinkSubmit';
-import {trashDriveFile} from './driveUpload';
+import {getDriveStorageQuota, trashDriveFile} from './driveUpload';
 
 // Said in full before anything is uploaded. Putting a file from the phone into
 // the user's Drive is not something to infer from a tap on "Copy Link", so it
@@ -77,6 +78,34 @@ export const shareDeviceFile = async item => {
     return false;
   }
 
+  // Warn before placing a large device file into Drive. Quota lookup is best
+  // effort; an unavailable quota endpoint must not block a share that Drive
+  // may still accept.
+  try {
+    const stat = !isContentUri(item.file_path)
+      ? await RNFS.stat(item.file_path)
+      : null;
+    const bytes = Number(stat?.size) || 0;
+    if (bytes > 0) {
+      const quota = await getDriveStorageQuota();
+      if (quota.remaining != null && bytes > quota.remaining) {
+        Alert.alert(
+          'Not enough Google Drive space',
+          `This file needs about ${formatBytes(bytes)}, but only ${formatBytes(quota.remaining)} remains. Free space in Drive and try again.`,
+        );
+        return false;
+      }
+      if (quota.percent != null && quota.percent >= 85) {
+        ToastAndroid.show(
+          `Google Drive is ${quota.percent}% full`,
+          ToastAndroid.LONG,
+        );
+      }
+    }
+  } catch (error) {
+    console.warn('Could not check Drive storage quota:', error?.message);
+  }
+
   await enqueueUpload({
     id: item.id,
     sourceId: item.source_id,
@@ -90,6 +119,11 @@ export const shareDeviceFile = async item => {
     ToastAndroid.SHORT,
   );
   return true;
+};
+
+const formatBytes = bytes => {
+  if (bytes < 1024 * 1024) return `${Math.ceil(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 };
 
 // Undoes a share, for when the file it belongs to is being deleted.

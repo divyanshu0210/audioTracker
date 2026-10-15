@@ -16,6 +16,7 @@
 // them with one implementation and none of them with a modal.
 
 import React, {useEffect, useRef, useState} from 'react';
+import {Linking} from 'react-native';
 import {
   ActivityIndicator,
   StyleSheet,
@@ -43,7 +44,7 @@ const getRecovery = item => {
   return null;
 };
 
-const MediaUnavailable = ({item, onRetry, onDownloaded}) => {
+const MediaUnavailable = ({item, onRetry, onDownloaded, failureKind}) => {
   const recovery = getRecovery(item);
 
   const download = useDownloadStore(state => state.downloads[item?.source_id]);
@@ -138,9 +139,13 @@ const MediaUnavailable = ({item, onRetry, onDownloaded}) => {
       ) : (
         <>
           <Text style={styles.message}>
-            {status === 'failed'
+            {failureKind === 'access-denied'
+              ? 'You do not have permission to play this Drive recording.'
+              : status === 'failed'
               ? "That download didn't finish."
-              : "Couldn't reach this recording."}
+              : recovery === 'copy'
+              ? 'The original device file is unavailable, and its Drive copy could not be reached.'
+              : "Couldn't reach this Drive recording."}
           </Text>
 
           {/* One action, and it is not downloading. This panel was written when
@@ -151,9 +156,26 @@ const MediaUnavailable = ({item, onRetry, onDownloaded}) => {
               on the row's own menu, where it already is.
               Reached only when online and the resolve still failed, which is
               rare enough to deserve a plain retry and nothing more. */}
-          <TouchableOpacity style={styles.button} onPress={onRetry}>
-            <Text style={styles.buttonText}>Try again</Text>
-          </TouchableOpacity>
+          {failureKind === 'access-denied' ? (
+            <>
+              <TouchableOpacity
+                style={styles.button}
+                onPress={() =>
+                  Linking.openURL(
+                    `https://drive.google.com/file/d/${item.drive_file_id || item.source_id}/view`,
+                  )
+                }>
+                <Text style={styles.buttonText}>Request access in Drive</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.secondaryButton} onPress={onRetry}>
+                <Text style={styles.secondaryButtonText}>Try again</Text>
+              </TouchableOpacity>
+            </>
+          ) : (
+            <TouchableOpacity style={styles.button} onPress={onRetry}>
+              <Text style={styles.buttonText}>Try again</Text>
+            </TouchableOpacity>
+          )}
         </>
       )}
     </View>

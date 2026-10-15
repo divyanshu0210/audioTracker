@@ -11,6 +11,26 @@ import RNFetchBlob from 'react-native-blob-util';
 import {getGoogleAccessToken} from '../auth/tokenManager';
 import {getOrCreateDriveFolder} from '../backupRestore/restoreManager';
 
+export const getDriveStorageQuota = async () => {
+  const accessToken = await getGoogleAccessToken();
+  const response = await fetch(
+    'https://www.googleapis.com/drive/v3/about?fields=storageQuota',
+    {headers: {Authorization: `Bearer ${accessToken}`}},
+  );
+  if (!response.ok) {
+    throw new Error(`Could not read Drive storage quota (HTTP ${response.status})`);
+  }
+  const quota = (await response.json()).storageQuota || {};
+  const usage = Number(quota.usage) || 0;
+  const limit = quota.limit == null ? null : Number(quota.limit);
+  return {
+    usage,
+    limit,
+    remaining: limit == null ? null : Math.max(0, limit - usage),
+    percent: limit ? Math.round((usage / limit) * 100) : null,
+  };
+};
+
 // Shared files go in their own folder rather than loose in My Drive, so a user
 // can see what the app has put there and delete it in one place.
 export const SHARED_FOLDER_NAME = 'audioTracker Shared';

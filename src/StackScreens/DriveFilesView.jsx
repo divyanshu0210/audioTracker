@@ -8,6 +8,7 @@ import {ItemTypes, ScreenTypes} from '../contexts/constants';
 import {useMediaStore} from '../stores/useMediaStore';
 import useLoadingStore from '../stores/useLoadingStore';
 import {logRender} from '../contexts/renderLog';
+import DriveStorageBanner from '../components/DriveStorageBanner';
 
 const DriveFilesView = ({onRefresh}) => {
   const emptyText = 'Press + to Add Files using Drive Link';
@@ -27,6 +28,7 @@ const DriveFilesView = ({onRefresh}) => {
       loading={loading}
       type={ItemTypes.DRIVE}
       screen={ScreenTypes.MAIN}
+      listHeaderComponent={<DriveStorageBanner />}
     />
   );
 };

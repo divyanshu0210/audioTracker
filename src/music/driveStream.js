@@ -30,6 +30,7 @@ import RNFS from 'react-native-fs';
 
 import {isContentUri, mediaExists} from '../utils/mediaFile';
 import {repairDeviceFile} from '../utils/fileIdentity';
+import {getGoogleAccessToken} from '../auth/tokenManager';
 
 const {DriveStream} = NativeModules;
 
@@ -62,6 +63,22 @@ export const isStreamUrl = path =>
   typeof path === 'string' && path.startsWith('http');
 
 export {isContentUri};
+
+export const inspectDriveFileAccess = async fileId => {
+  try {
+    const token = await getGoogleAccessToken();
+    const response = await fetch(
+      `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?fields=id`,
+      {headers: {Authorization: `Bearer ${token}`}},
+    );
+    if (response.ok) return 'available';
+    if (response.status === 403) return 'access-denied';
+    if (response.status === 404) return 'missing';
+    return 'unknown';
+  } catch {
+    return 'unknown';
+  }
+};
 
 /** The proxy url for a Drive file id. Starts the server on first use. */
 export const getDriveStreamUrl = async sourceId => {

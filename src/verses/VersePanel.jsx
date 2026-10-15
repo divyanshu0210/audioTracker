@@ -14,6 +14,7 @@
 // indexed acquires a table of contents as it plays - and every entry is a seek.
 
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   ActivityIndicator,
   Dimensions,
@@ -50,6 +51,7 @@ const {height: SCREEN} = Dimensions.get('window');
 // The one thing still capped. The debug block is a diagnostic, not the point of
 // the panel, and left to itself it will happily push the verse off the top.
 const MAX_DEBUG = Math.min(130, Math.round(SCREEN * 0.16));
+const PANEL_SETTINGS_KEY = 'verse-panel-settings-v1';
 
 /**
  * Whether a line is actually in Devanagari.
@@ -85,6 +87,44 @@ const VersePanel = ({
   isPaused = false,
 }) => {
   const [expanded, setExpanded] = useState(false);
+  const [showTextSettings, setShowTextSettings] = useState(false);
+  const [fontScale, setFontScale] = useState(1);
+  const [panelTheme, setPanelTheme] = useState('dark');
+  const [panelSettingsReady, setPanelSettingsReady] = useState(false);
+  const isLightPanel = panelTheme === 'light';
+
+  useEffect(() => {
+    let active = true;
+    AsyncStorage.getItem(PANEL_SETTINGS_KEY)
+      .then(raw => {
+        if (!active || !raw) return;
+        try {
+          const saved = JSON.parse(raw);
+          if (saved.theme === 'light' || saved.theme === 'dark') {
+            setPanelTheme(saved.theme);
+          }
+          if (Number.isFinite(saved.fontScale)) {
+            setFontScale(Math.min(1.3, Math.max(0.8, saved.fontScale)));
+          }
+        } catch (_) {
+          // Ignore malformed settings and keep the defaults.
+        }
+      })
+      .finally(() => {
+        if (active) setPanelSettingsReady(true);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!panelSettingsReady) return;
+    AsyncStorage.setItem(
+      PANEL_SETTINGS_KEY,
+      JSON.stringify({theme: panelTheme, fontScale}),
+    ).catch(() => {});
+  }, [fontScale, panelSettingsReady, panelTheme]);
   const [showHistory, setShowHistory] = useState(false);
   const [songScript, setSongScript] = useState('devanagari');
   const [viewedHistoryKey, setViewedHistoryKey] = useState(null);
@@ -538,7 +578,7 @@ const VersePanel = ({
   const showLatin = !isSong || songScript === 'latin';
 
   return (
-    <View>
+    <View style={styles.panelRoot}>
       {errorBanner && <View style={styles.externalStatus}>{errorBanner}</View>}
       {started && isPaused && (
         <View style={styles.externalStatus}>
@@ -550,18 +590,23 @@ const VersePanel = ({
           </View>
         </View>
       )}
-      <View style={styles.container}>
+      <View
+        style={[
+          styles.container,
+          expanded && styles.containerExpanded,
+          isLightPanel && styles.lightContainer,
+        ]}>
       <View style={styles.header}>
         {listening && <View style={styles.pulse} />}
 
-        <Text style={styles.ref} numberOfLines={1}>
+        <Text style={[styles.ref, isLightPanel && styles.lightText]} numberOfLines={1}>
           {isSong ? current.title || current.ref : current.ref}
         </Text>
 
         {/* Where it came from. A verse from the title is only what the
             recording is *about*; one the lecturer named is a statement; one
             matched from the sound is the only kind that can be wrong. */}
-        <Text style={styles.source}>
+        <Text style={[styles.source, isLightPanel && styles.lightMutedText]}>
           {current.source === 'title'
             ? 'from title'
             : current.source === 'cited'
@@ -685,7 +730,7 @@ const VersePanel = ({
                     isSong ? (
                       <React.Fragment key={i}>
                         {!!sectionAt[i] && (
-                          <Text style={styles.prayerName}>{sectionAt[i]}</Text>
+                          <Text style={[styles.prayerName, isLightPanel && styles.lightMutedText]}>{sectionAt[i]}</Text>
                         )}
                         <View
                           onLayout={e => {
@@ -695,6 +740,8 @@ const VersePanel = ({
                           <Text
                             style={[
                               styles.devanagari,
+                              isLightPanel && styles.lightText,
+                              {fontSize: 14 * fontScale, lineHeight: 22 * fontScale},
                               i === followLine && styles.lineHere,
                             ]}>
                             {line}
@@ -702,7 +749,13 @@ const VersePanel = ({
                         </View>
                       </React.Fragment>
                     ) : (
-                      <Text key={i} style={styles.devanagari}>
+                      <Text
+                        key={i}
+                        style={[
+                          styles.devanagari,
+                          isLightPanel && styles.lightText,
+                          {fontSize: 14 * fontScale, lineHeight: 22 * fontScale},
+                        ]}>
                         {line}
                       </Text>
                     ),
@@ -726,14 +779,20 @@ const VersePanel = ({
           {showLatin && current.lines?.map((line, i) => (
             <React.Fragment key={i}>
               {!!sectionAt[i] && (
-                <Text style={styles.prayerName}>{sectionAt[i]}</Text>
+                <Text style={[styles.prayerName, isLightPanel && styles.lightMutedText]}>{sectionAt[i]}</Text>
               )}
               <View
                 onLayout={e => {
                   lineTops.current[i] = e.nativeEvent.layout.y;
                 }}
                 style={[styles.lineRow, i === followLine && styles.lineRowHere]}>
-                <Text style={[styles.line, i === followLine && styles.lineHere]}>
+                <Text
+                  style={[
+                    styles.line,
+                    isLightPanel && styles.lightText,
+                    {fontSize: 12.5 * fontScale, lineHeight: 19 * fontScale},
+                    i === followLine && styles.lineHere,
+                  ]}>
                   {line}
                 </Text>
               </View>
@@ -744,12 +803,19 @@ const VersePanel = ({
             <>
               {!!current.translation && (
                 <View style={styles.section}>
-                  <Text style={styles.sectionLabel}>Translation</Text>
-                  <Text style={styles.translation}>{current.translation}</Text>
+                  <Text style={[styles.sectionLabel, isLightPanel && styles.lightMutedText]}>Translation</Text>
+                  <Text
+                    style={[
+                      styles.translation,
+                      isLightPanel && styles.lightBodyText,
+                      {fontSize: 12 * fontScale, lineHeight: 18 * fontScale},
+                    ]}>
+                    {current.translation}
+                  </Text>
                   {/* Only where the translation is not Prabhupada's - see the
                       note in tools/verse-corpus/sources/sbCompletion.js. */}
                   {!!current.translator && (
-                    <Text style={styles.translator}>{current.translator}</Text>
+                    <Text style={[styles.translator, isLightPanel && styles.lightMutedText]}>{current.translator}</Text>
                   )}
                 </View>
               )}
@@ -760,7 +826,7 @@ const VersePanel = ({
                   corpus stays small enough to ship. */}
               {mayHavePurport(current.id) && (
                 <View style={styles.section}>
-                  <Text style={styles.sectionLabel}>Purport</Text>
+                  <Text style={[styles.sectionLabel, isLightPanel && styles.lightMutedText]}>Purport</Text>
 
                   {purportState === 'idle' && (
                     <TouchableOpacity
@@ -777,7 +843,7 @@ const VersePanel = ({
                   {purportState === 'loading' && (
                     <View style={styles.purportAction}>
                       <ActivityIndicator size="small" color={C.muted} />
-                      <Text style={styles.purportActionText}>Fetching…</Text>
+                      <Text style={styles.purportActionText}>Opening..</Text>
                     </View>
                   )}
 
@@ -795,7 +861,14 @@ const VersePanel = ({
 
                   {purportState === 'done' &&
                     (purport ? (
-                      <Text style={styles.purport}>{purport}</Text>
+                      <Text
+                        style={[
+                          styles.purport,
+                          isLightPanel && styles.lightBodyText,
+                          {fontSize: 12 * fontScale, lineHeight: 19 * fontScale},
+                        ]}>
+                        {purport}
+                      </Text>
                     ) : (
                       <Text style={styles.purportActionText}>
                         No purport for this verse.
@@ -842,10 +915,54 @@ const VersePanel = ({
             <Icon
               name={expanded ? 'expand-less' : 'expand-more'}
               size={16}
-              color={C.body}
+              color={isLightPanel ? '#475569' : C.body}
             />
            
           </TouchableOpacity>
+
+          <TouchableOpacity
+            onPress={() => setShowTextSettings(value => !value)}
+            style={[styles.footerAction, styles.textSizeIcon]}
+            hitSlop={{top: 8, bottom: 8, left: 8, right: 8}}
+            accessibilityRole="button"
+            accessibilityLabel="Adjust verse text size"
+            accessibilityState={{expanded: showTextSettings}}>
+            <Icon
+              name="settings"
+              size={16}
+              color={isLightPanel ? '#475569' : C.body}
+            />
+          </TouchableOpacity>
+
+          {showTextSettings && (
+            <View style={[styles.textSizeControls, styles.textSizeFloating]}>
+              <TouchableOpacity
+                onPress={() => setPanelTheme(value => value === 'dark' ? 'light' : 'dark')}
+                style={styles.textSizeButton}
+                accessibilityRole="button"
+                accessibilityLabel="Switch verse panel theme">
+                <Icon
+                  name={isLightPanel ? 'dark-mode' : 'light-mode'}
+                  size={14}
+                  color={isLightPanel ? '#475569' : C.body}
+                />
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => setFontScale(value => Math.max(0.8, value - 0.1))}
+                style={styles.textSizeButton}
+                accessibilityRole="button"
+                accessibilityLabel="Decrease verse text size">
+                <Text style={[styles.textSizeButtonText, isLightPanel && styles.lightBodyText]}>A−</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => setFontScale(value => Math.min(1.3, value + 0.1))}
+                style={styles.textSizeButton}
+                accessibilityRole="button"
+                accessibilityLabel="Increase verse text size">
+                <Text style={[styles.textSizeButtonText, isLightPanel && styles.lightBodyText]}>A+</Text>
+              </TouchableOpacity>
+            </View>
+          )}
 
           {/* Only for something matched from the sound. A verse named in the
               title, or a citation read out loud, was not a judgement the
@@ -891,8 +1008,8 @@ const VersePanel = ({
         </View>
       )}
 
-      </View>
       {debugBlock}
+      </View>
     </View>
   );
 };
@@ -922,6 +1039,9 @@ const C = {
 };
 
 const styles = StyleSheet.create({
+  panelRoot: {
+    flexShrink: 1,
+  },
   container: {
     backgroundColor: C.surface,
     // Shrinks into whatever room is left below the player; see the note at the
@@ -932,6 +1052,25 @@ const styles = StyleSheet.create({
     marginTop: 8,
     paddingHorizontal: 12,
     paddingVertical: 10,
+  },
+  containerExpanded: {
+    // Let short expanded content keep its natural height, but bound long
+    // translations/purports so the body can scroll within the viewport.
+    maxHeight: Math.round(SCREEN * 0.65),
+  },
+  lightContainer: {
+    backgroundColor: '#f8fafc',
+    borderColor: '#e2e8f0',
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  lightText: {
+    color: '#1e293b',
+  },
+  lightBodyText: {
+    color: '#334155',
+  },
+  lightMutedText: {
+    color: '#64748b',
   },
   quiet: {
     // Wraps so the debug block sits under the line rather than beside it.
@@ -989,6 +1128,7 @@ const styles = StyleSheet.create({
     fontSize: 11,
   },
   footer: {
+    position: 'relative',
     flexDirection: 'row',
     alignItems: 'center',
     marginTop: 8,
@@ -1000,6 +1140,35 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 3,
+  },
+  textSizeControls: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    marginLeft: 4,
+  },
+  textSizeIcon: {
+    position: 'absolute',
+    right: 0,
+  },
+  textSizeFloating: {
+    position: 'absolute',
+    right: 26,
+    bottom: 0,
+    marginLeft: 0,
+  },
+  textSizeButton: {
+    minWidth: 26,
+    paddingHorizontal: 5,
+    paddingVertical: 2,
+    alignItems: 'center',
+    borderRadius: 4,
+    backgroundColor: 'rgba(148, 163, 184, 0.16)',
+  },
+  textSizeButtonText: {
+    color: C.body,
+    fontSize: 11,
+    fontWeight: '600',
   },
   footerLabel: {
     color: C.body,
@@ -1088,7 +1257,8 @@ const styles = StyleSheet.create({
   },
   body: {
     marginTop: 6,
-    // No height and no maximum: it shrinks into whatever the panel has left.
+    // The expanded container supplies a maximum only when needed; otherwise
+    // this keeps the panel at its natural content height.
     flexShrink: 1,
   },
   // The verse itself, and the one size that matters: a lecturer recites
@@ -1125,8 +1295,9 @@ const styles = StyleSheet.create({
     marginTop: 10,
   },
   sectionLabel: {
-    color: C.faint,
+    color: C.muted,
     fontSize: 11,
+    fontWeight: '600',
     textTransform: 'uppercase',
     letterSpacing: 0.6,
     marginBottom: 3,
@@ -1271,4 +1442,13 @@ const styles = StyleSheet.create({
   },
 });
 
-export default VersePanel;
+// The player updates its clock and layout frequently. The panel has its own
+// store subscription, so those parent renders do not need to rebuild the
+// panel when its three inputs are unchanged.
+export default React.memo(
+  VersePanel,
+  (previous, next) =>
+    previous.onSeek === next.onSeek &&
+    previous.playbackStarted === next.playbackStarted &&
+    previous.isPaused === next.isPaused,
+);

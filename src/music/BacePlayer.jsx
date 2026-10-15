@@ -46,7 +46,12 @@ import {
 } from '../backgroundService/playbackKeepAlive';
 import {usePipMode} from './usePipMode';
 import SaveToListBar from '../components/SaveToListBar';
-import {isContentUri, isStreamUrl, resolvePlaybackPath} from './driveStream';
+import {
+  inspectDriveFileAccess,
+  isContentUri,
+  isStreamUrl,
+  resolvePlaybackPath,
+} from './driveStream';
 import useFocusSession, {CHECK_GRACE_MS} from './useFocusSession';
 import useFocusSignals, {FocusSignal, isAlwaysSignal} from './useFocusSignals';
 import FocusCheck from './FocusCheck';
@@ -251,7 +256,13 @@ const BacePlayer = () => {
   // effect: a new reference each render would re-subscribe it, losing the
   // record of having been offline and with it the transition to watch for.
   const [resolveAttempt, setResolveAttempt] = useState(0);
-  const retrySource = useCallback(() => setResolveAttempt(n => n + 1), []);
+  const [sourceFailureId, setSourceFailureId] = useState(null);
+  const [sourceFailureKind, setSourceFailureKind] = useState(null);
+  const retrySource = useCallback(() => {
+    setSourceFailureId(null);
+    setSourceFailureKind(null);
+    setResolveAttempt(n => n + 1);
+  }, []);
 
   const currentSourceId = currentItem?.source_id;
   useEffect(() => {
@@ -287,6 +298,7 @@ const BacePlayer = () => {
         hasPath: !!path,
       });
       setIsResolvingSource(false);
+      setSourceFailureId(path ? null : currentSourceId);
       if (path === currentItem.file_path) return;
 
       // null is written through rather than ignored. An empty file_path is what
@@ -1493,6 +1505,37 @@ const BacePlayer = () => {
     queueUp ? queueBarHeight : 0,
     saveBarUp ? saveBarHeight : 0,
   );
+  const needsSourceResolution = !!currentItem && (
+    currentItem.type === 'drive_file' ||
+    isContentUri(currentItem.file_path) ||
+    (currentItem.type === 'device_file' && !!currentItem.drive_file_id)
+  ) && !isStreamUrl(currentItem.file_path) && sourceFailureId !== currentSourceId;
+  const handlePlaybackError = useCallback(
+    error => {
+      console.warn('[Playback] VLC could not open recording', {
+        sourceId: currentSourceId,
+        error: error?.message || error,
+      });
+      const driveId = currentItem?.drive_file_id ||
+        (currentItem?.type === 'drive_file' ? currentItem?.source_id : null);
+      if (driveId) {
+        inspectDriveFileAccess(driveId).then(kind => {
+          setSourceFailureKind(kind);
+        });
+      } else {
+        setSourceFailureKind('unknown');
+      }
+      setSourceFailureId(currentSourceId);
+      // Clear the unusable stream path so the existing MediaUnavailable UI
+      // can show its message and retry action.
+      setPlaylist(prev =>
+        prev.map(item =>
+          item.source_id === currentSourceId ? {...item, file_path: null} : item,
+        ),
+      );
+    },
+    [currentSourceId],
+  );
 
   return (
     <View style={styles.container} onLayout={handlePlayerViewportLayout}>
@@ -1514,7 +1557,7 @@ const BacePlayer = () => {
                 styles.viewShot,
                 isHidden && !isInPip && {opacity: 0, height: 0},
               ]}>
-              {!isDataLoaded && (
+              {!isDataLoaded && source_type === 'youtube_video' && (
                 <View style={styles.loadingContainer}>
                   <ActivityIndicator size="large" color="#fff" />
                 </View>
@@ -1542,6 +1585,13 @@ const BacePlayer = () => {
                     }}
                   />
                 )
+              ) : !isDataLoaded || isResolvingSource || needsSourceResolution ? (
+                // Resolve Drive/device sources before mounting VLC. This
+                // prevents a transient error while a stale local path is
+                // checked or replaced by the proxy URL.
+                <View style={styles.loadingContainer}>
+                  <ActivityIndicator size="large" color="#fff" />
+                </View>
               ) : currentItem.file_path ? (
                 isDataLoaded && (
                   <VLCPlayerComponent
@@ -1559,6 +1609,10 @@ const BacePlayer = () => {
                     startTime={startFrom?.current}
                     onEnd={handleAutoAdvance}
                     focusMode={focus.focusOn}
+                    onPlaybackError={handlePlaybackError}
+                    playbackFailureKind={
+                      sourceFailureId === currentSourceId ? sourceFailureKind : null
+                    }
                   />
                 )
               ) : isResolvingSource ? (
@@ -1577,6 +1631,9 @@ const BacePlayer = () => {
                   item={currentItem}
                   onRetry={retrySource}
                   onDownloaded={handleMediaDownloaded}
+                  failureKind={
+                    sourceFailureId === currentSourceId ? sourceFailureKind : null
+                  }
                 />
               )}
             </ViewShot>
@@ -1821,6 +1878,7 @@ const BacePlayer = () => {
                 marginTop: btnRowHeight,
                 marginBottom: bottomOverlay,
                 flexShrink: 1,
+                overflow: 'hidden',
               }}>
               <VersePanel
                 onSeek={seekToSeconds}

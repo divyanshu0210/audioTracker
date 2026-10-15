@@ -50,6 +50,7 @@ const VLCPlayerComponent = forwardRef(
       startTime,
       onEnd,
       focusMode = false,
+      onPlaybackError,
     },
     ref,
   ) => {
@@ -233,6 +234,15 @@ const VLCPlayerComponent = forwardRef(
         setIsBuffering(false);
       }
     }, [setIsBuffering]);
+
+    const handlePlaybackError = useCallback(error => {
+      console.warn('[Playback] VLC could not open recording', {
+        sourceId: item?.source_id,
+        error: error?.message || error,
+      });
+      onPlaybackError?.(error);
+      setIsBuffering(false);
+    }, [item?.source_id, onPlaybackError, setIsBuffering]);
 
     // The speed the settings panel picks and the speed the cycle button picks
     // are now the same piece of state, so neither can be silently overridden
@@ -640,6 +650,7 @@ const VLCPlayerComponent = forwardRef(
           }}
           onBuffering={handleBuffering}
           onPlaying={handlePlaying}
+          onError={handlePlaybackError}
           // Off under focus mode, and this is the load-bearing half of it.
           // BacePlayer pauses on the way to the background, but a pause is a
           // request to a player that has been told to keep decoding regardless
@@ -856,7 +867,6 @@ const styles = StyleSheet.create({
     // mid-buffer cannot land on top of the spinner.
     zIndex: 11,
   },
-
   hiddenInPip: {display: 'none'},
   videoPlayer: {flex: 1, width: '100%'},
   audioPlayer: {height: 100, width: '100%'},

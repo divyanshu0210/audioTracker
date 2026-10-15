@@ -41,6 +41,7 @@ const useVerseDetection = ({sourceId, title, path, isPaused, isPlaybackReady}) =
   const updateSettings = useSettingsStore(state => state.updateSettings);
 
   const listening = useVerseStore(state => state.listening);
+  const started = useVerseStore(state => state.started);
   const unavailable = useVerseStore(state => state.unavailable);
   const [preparing, setPreparing] = useState(false);
   // Recognition is explicitly opt-in for the current app session. The stored
@@ -241,7 +242,9 @@ const useVerseDetection = ({sourceId, title, path, isPaused, isPlaybackReady}) =
       setSessionRequested(false);
       updateSettings({verseDetectionEnabled: false});
       await setCapturing(false);
-      useVerseStore.getState().reset();
+      // Keep the last detected verse and its history visible when live
+      // listening is turned off. A new recording/player session resets the
+      // store; switching detection off only stops capture.
       return;
     }
 
@@ -304,6 +307,7 @@ const useVerseDetection = ({sourceId, title, path, isPaused, isPlaybackReady}) =
     modelReady: modelReady === true,
     enabled: sessionRequested,
     listening,
+    started,
     unavailable,
     preparing,
     toggle,

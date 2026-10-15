@@ -29,6 +29,7 @@ import VLCPlayerComponent from './VLCPlayer/VLCPlayerComponent';
 import MediaUnavailable from './MediaUnavailable';
 import YouTubePlayerComponent from './VLCPlayer/YouTubePlayerComponent ';
 import AddNewNoteBtn from '../components/buttons/AddNewNoteBtn';
+import ShimmerBtn from '../components/ShimmerBtn';
 import PlayerQueue from './PlayerQueue';
 import {saveDatatoBackend} from '../appMentorBackend/reportMgt';
 import {useNotesStore} from '../stores/useNotesStore';
@@ -146,6 +147,7 @@ const randomKeepOnMessage = () =>
 const FOCUS_PILL_LOOKS = {
   off: {bg: '#f3f4f6', ink: '#6b7280'},
   on: {bg: '#eff6ff', ink: '#1d4ed8'},
+  aiOn: {bg: '#dcfce7', ink: '#15803d'},
   locked: {bg: '#fffbeb', ink: '#b45309'},
 };
 
@@ -342,6 +344,7 @@ const BacePlayer = () => {
   // How far the button row reaches past the player container, so the verse
   // panel below it can clear it. See the panel's mount site.
   const [btnRowHeight, setBtnRowHeight] = useState(0);
+  const [showVersePanel, setShowVersePanel] = useState(true);
 
   // What floats over the bottom of the player, so the verse panel can stop
   // above it rather than under it.
@@ -422,6 +425,12 @@ const BacePlayer = () => {
     isPaused: isPausedNow,
     isPlaybackReady: isDataLoaded && !!currentItem,
   });
+
+  // Panel visibility is independent from AI listening. Closing the panel is a
+  // display choice; changing recordings starts with the panel available again.
+  useEffect(() => {
+    setShowVersePanel(true);
+  }, [currentItem?.source_id]);
 
   // Pulled out by name because both are stable across renders while `verses`
   // itself is not - see handleCurrentTimeChange.
@@ -1671,8 +1680,9 @@ const BacePlayer = () => {
                     disabled: below Android 10 there is no playback capture at
                     all, and a permanently dead control invites tapping. */}
                 {verses.available && (
-                  <TouchableOpacity
-                    style={styles.focusPillHit}
+                  <ShimmerBtn
+                    hitStyle={styles.focusPillHit}
+                    style={styles.focusPill}
                     onPress={verses.toggle}
                     // The recognizer debug view is only a development aid.
                     // Keep the production control limited to its normal tap.
@@ -1681,48 +1691,57 @@ const BacePlayer = () => {
                     disabled={verses.preparing}
                     accessibilityRole="switch"
                     accessibilityState={{checked: verses.enabled}}
-                    accessibilityLabel={`Verse detection, AI model ${
-                      verses.modelReady ? 'ready' : 'waiting to download'
-                    }`}
+                    accessibilityLabel="Verse detection"
                     accessibilityHint={
                       verses.enabled
                         ? 'Double tap to stop listening for verses, or double tap and hold to show what it is hearing'
                         : 'Double tap to name the verses and songs in this recording'
-                    }>
-                    <View
-                      style={[
-                        styles.focusPill,
-                        {
-                          backgroundColor: verses.enabled
-                            ? '#1e293b'
-                            : FOCUS_PILL_LOOKS.off.bg,
-                        },
-                      ]}>
-                      {verses.preparing ? (
-                        <ActivityIndicator size="small" color="#e2e8f0" />
-                      ) : (
-                        <Icon
-                          name="auto-awesome"
-                          size={20}
-                          // Green while it is actually listening, while the
-                          // sparkle keeps the control recognizable as AI in
-                          // every state.
-                          color={
-                            verses.enabled
-                              ? verses.listening
-                                ? '#4ade80'
-                                : verses.modelReady
-                                ? '#94a3b8'
-                                : '#fbbf24'
-                              : verses.modelReady
-                              ? FOCUS_PILL_LOOKS.off.ink
-                              : '#fbbf24'
-                          }
-                        />
-                      )}
-                    </View>
-                  </TouchableOpacity>
+                    }
+                    loading={verses.enabled && !verses.started}
+                    active={verses.enabled && verses.started}
+                    colors={{
+                      base: FOCUS_PILL_LOOKS.off.bg,
+                      loading: '#d1d5db',
+                      active: FOCUS_PILL_LOOKS.aiOn.bg,
+                    }}
+                    icon={
+                      <Icon
+                        name="auto-awesome"
+                        size={20}
+                        color={
+                          verses.enabled && verses.started
+                            ? FOCUS_PILL_LOOKS.aiOn.ink
+                            : FOCUS_PILL_LOOKS.off.ink
+                        }
+                      />
+                    }
+                  />
                 )}
+
+                <TouchableOpacity
+                  style={styles.focusPillHit}
+                  onPress={() => setShowVersePanel(value => !value)}
+                  accessibilityRole="button"
+                  accessibilityState={{expanded: showVersePanel}}
+                  accessibilityLabel={
+                    showVersePanel ? 'Hide verse panel' : 'Show verse panel'
+                  }>
+                  <View
+                    style={[
+                      styles.focusPill,
+                      {
+                        backgroundColor: showVersePanel
+                          ? '#dbeafe'
+                          : FOCUS_PILL_LOOKS.off.bg,
+                      },
+                    ]}>
+                    <Icon
+                      name="menu-book"
+                      size={19}
+                      color={showVersePanel ? '#2563eb' : FOCUS_PILL_LOOKS.off.ink}
+                    />
+                  </View>
+                </TouchableOpacity>
 
                 {__DEV__ && verses.available && (
                   <TouchableOpacity
@@ -1796,7 +1815,7 @@ const BacePlayer = () => {
               not in PiP. Detection keeps running through both; only the
               display goes away, so a verse recognised while writing a note is
               still there when the note is closed. */}
-          {!isInPip && !showNotes && btnRowHeight > 0 && (
+          {!isInPip && !showNotes && showVersePanel && btnRowHeight > 0 && (
             <View
               style={{
                 marginTop: btnRowHeight,
@@ -2013,6 +2032,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
+    position: 'relative',
   },
   autoAdvanceOverlay: {
     position: 'absolute',

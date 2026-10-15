@@ -79,7 +79,11 @@ const formatPosition = seconds => {
   return `${h > 0 ? `${h}:` : ''}${mm}:${String(s).padStart(2, '0')}`;
 };
 
-const VersePanel = ({onSeek, playbackStarted = true, isPaused = false}) => {
+const VersePanel = ({
+  onSeek,
+  playbackStarted = true,
+  isPaused = false,
+}) => {
   const [expanded, setExpanded] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [songScript, setSongScript] = useState('devanagari');
@@ -95,11 +99,12 @@ const VersePanel = ({onSeek, playbackStarted = true, isPaused = false}) => {
   // One subscription rather than several: this sits under a player that is
   // already re-rendering on progress, and should not add to that.
   const {
-    enabled, listening, unavailable, detectedCurrent, history, followLine, expected,
+    enabled, started, listening, unavailable, detectedCurrent, history, followLine, expected,
     debug, heardCount, lastHeard, lastConfidence, candidates, why,
   } = useVerseStore(
     useShallow(state => ({
       enabled: state.enabled,
+      started: state.started,
       expected: state.expected,
       followLine: state.followLine,
       listening: state.listening,
@@ -115,7 +120,6 @@ const VersePanel = ({onSeek, playbackStarted = true, isPaused = false}) => {
     })),
   );
 
-  const dismiss = useVerseStore(state => state.dismiss);
   const rate = useVerseStore(state => state.rate);
   const showFromHistory = useVerseStore(state => state.showFromHistory);
 
@@ -475,7 +479,7 @@ const VersePanel = ({onSeek, playbackStarted = true, isPaused = false}) => {
                 : 'Listening — verses and songs will appear here'}
             </Text>
           </>
-        ) : isPaused ? (
+        ) : started && isPaused ? (
           <>
             <Icon name="pause-circle-outline" size={16} color={C.muted} />
             <Text style={styles.quietText}>
@@ -534,8 +538,19 @@ const VersePanel = ({onSeek, playbackStarted = true, isPaused = false}) => {
   const showLatin = !isSong || songScript === 'latin';
 
   return (
-    <View style={styles.container}>
-      {errorBanner}
+    <View>
+      {errorBanner && <View style={styles.externalStatus}>{errorBanner}</View>}
+      {started && isPaused && (
+        <View style={styles.externalStatus}>
+          <View style={styles.pausedNotice}>
+            <Icon name="pause-circle-outline" size={15} color={C.muted} />
+            <Text style={styles.pausedNoticeText}>
+              Paused — listening resumes when playback continues
+            </Text>
+          </View>
+        </View>
+      )}
+      <View style={styles.container}>
       <View style={styles.header}>
         {listening && <View style={styles.pulse} />}
 
@@ -572,8 +587,8 @@ const VersePanel = ({onSeek, playbackStarted = true, isPaused = false}) => {
               <TouchableOpacity
                 onPress={() => navigateHistory(-1)}
                 disabled={currentHistoryIndex <= 0}
-                style={styles.iconBtn}
-                hitSlop={{top: 8, bottom: 8, left: 4, right: 4}}
+                style={[styles.iconBtn, styles.historyArrow]}
+                hitSlop={{top: 10, bottom: 10, left: 8, right: 8}}
                 accessibilityRole="button"
                 accessibilityLabel="Show newer verse">
                 <Icon
@@ -586,14 +601,22 @@ const VersePanel = ({onSeek, playbackStarted = true, isPaused = false}) => {
                   }
                 />
               </TouchableOpacity>
-              <Text style={styles.historyPosition}>
-                {currentHistoryIndex + 1}/{recent.length}
-              </Text>
+              <TouchableOpacity
+                onPress={() => setShowHistory(v => !v)}
+                style={styles.historyListControl}
+                hitSlop={{top: 8, bottom: 8, left: 6, right: 6}}
+                accessibilityRole="button"
+                accessibilityLabel={`${currentHistoryIndex + 1} of ${recent.length} verses; open history`}>
+                <Text style={styles.historyListPosition}>
+                  {currentHistoryIndex + 1}/{recent.length}
+                </Text>
+                <Icon name="list" size={15} color={C.body} />
+              </TouchableOpacity>
               <TouchableOpacity
                 onPress={() => navigateHistory(1)}
                 disabled={currentHistoryIndex >= recent.length - 1}
-                style={styles.iconBtn}
-                hitSlop={{top: 8, bottom: 8, left: 4, right: 4}}
+                style={[styles.iconBtn, styles.historyArrow]}
+                hitSlop={{top: 10, bottom: 10, left: 8, right: 8}}
                 accessibilityRole="button"
                 accessibilityLabel="Show older verse">
                 <Icon
@@ -630,26 +653,6 @@ const VersePanel = ({onSeek, playbackStarted = true, isPaused = false}) => {
             </TouchableOpacity>
           )}
 
-          {recent.length > 1 && (
-            <TouchableOpacity
-              onPress={() => setShowHistory(v => !v)}
-              style={styles.iconBtn}
-              hitSlop={{top: 8, bottom: 8, left: 8, right: 8}}
-              accessibilityRole="button"
-              accessibilityLabel={`${recent.length} verses heard so far`}>
-              <Icon name="list" size={18} color={C.body} />
-              <Text style={styles.count}>{recent.length}</Text>
-            </TouchableOpacity>
-          )}
-
-          <TouchableOpacity
-            onPress={dismiss}
-            style={styles.iconBtn}
-            hitSlop={{top: 8, bottom: 8, left: 8, right: 8}}
-            accessibilityRole="button"
-            accessibilityLabel="Dismiss">
-            <Icon name="close" size={18} color={C.muted} />
-          </TouchableOpacity>
         </View>
       </View>
 
@@ -888,6 +891,7 @@ const VersePanel = ({onSeek, playbackStarted = true, isPaused = false}) => {
         </View>
       )}
 
+      </View>
       {debugBlock}
     </View>
   );
@@ -941,11 +945,25 @@ const styles = StyleSheet.create({
     fontSize: 12,
     flexShrink: 1,
   },
+  externalStatus: {
+    marginHorizontal: 10,
+    marginTop: 8,
+  },
+  pausedNotice: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    marginTop: 5,
+    // paddingHorizontal: 2,
+  },
+  pausedNoticeText: {
+    fontSize: 11,
+  },
   errorNotice: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    marginBottom: 8,
+    // marginBottom: 8,
   },
   // A filled dot rather than a spinner: this is on for a whole lecture, and
   // something that spins for an hour reads as "stuck", not "working".
@@ -1020,12 +1038,28 @@ const styles = StyleSheet.create({
   historyNav: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 1,
+    gap: 3,
+    marginRight: 4,
   },
-  historyPosition: {
+  historyArrow: {
+    minWidth: 26,
+    paddingHorizontal: 5,
+    justifyContent: 'center',
+  },
+  historyListControl: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    paddingHorizontal: 4,
+    paddingVertical: 2,
+    borderRadius: 6,
+    backgroundColor: 'rgba(148, 163, 184, 0.14)',
+  },
+  historyListPosition: {
     color: C.body,
     fontSize: 11,
-    minWidth: 28,
+    fontWeight: '600',
+    minWidth: 26,
     textAlign: 'center',
   },
   newVerseButton: {

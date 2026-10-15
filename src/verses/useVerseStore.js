@@ -263,6 +263,9 @@ const useVerseStore = create((set, get) => ({
   // listening, while playback is paused or the model is downloading.
   enabled: false,
   listening: false,
+  // True after native capture/model startup succeeds for this recording.
+  // It remains true while playback is paused.
+  started: false,
   // Set when the recogniser could not start, so the panel can say why rather
   // than sitting blank.
   unavailable: null,
@@ -334,13 +337,16 @@ const useVerseStore = create((set, get) => ({
     // before the panel has had a chance to show it. A new recording's reset,
     // or enabling it again, clears the old error explicitly.
     set(enabled
-      ? {enabled, unavailable: null, unavailableCode: null}
-      : {enabled});
+      ? {enabled, started: false, unavailable: null, unavailableCode: null}
+      : {enabled, started: false});
   },
 
-  setListening: listening => set({listening}),
+  setListening: listening => set(state => ({
+    listening,
+    started: listening ? true : state.started,
+  })),
   setUnavailable: (reason, code = null) =>
-    set({unavailable: reason, unavailableCode: code, listening: false}),
+    set({unavailable: reason, unavailableCode: code, listening: false, started: false}),
 
   /** Everything heard recently, as one string. */
   heardText: () => get()._window.map(entry => entry.text).join(' '),
@@ -867,6 +873,7 @@ const useVerseStore = create((set, get) => ({
       why: '',
       candidates: [],
       listening: false,
+      started: false,
       unavailable: null,
       unavailableCode: null,
     });

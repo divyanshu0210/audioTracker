@@ -13,6 +13,7 @@ import {getGoogleAccessToken} from '../auth/tokenManager';
 import {performUpload} from '../share/uploadTask';
 import useShareStore from '../stores/useShareStore';
 import {useMediaStore} from '../stores/useMediaStore';
+import {getMediaFileSize} from '../utils/mediaFile';
 import {
   downloadResumable,
   discardDownloadCheckpoint,
@@ -105,8 +106,8 @@ const resolveQueueSize = async file => {
   if (queueSizeRequests.has(file.sourceId)) return queueSizeRequests.get(file.sourceId);
   const request = (async () => {
     try {
-      if (file.kind === 'upload' && file.localPath && await RNFS.exists(file.localPath)) {
-        return Number((await RNFS.stat(file.localPath)).size) || null;
+      if (file.kind === 'upload' && file.localPath) {
+        return await getMediaFileSize(file.localPath);
       }
       if (!file.url) return null;
       const headers = file.googleAuth
@@ -121,7 +122,10 @@ const resolveQueueSize = async file => {
   queueSizeRequests.set(file.sourceId, request);
   const value = await request;
   queueSizeRequests.delete(file.sourceId);
-  queueSizeCache.set(file.sourceId, value);
+  // Do not permanently cache an unanswered query. A provider can be busy or
+  // temporarily unavailable while the upload is starting; a later progress
+  // refresh should be allowed to resolve the same URI again.
+  if (value > 0) queueSizeCache.set(file.sourceId, value);
   return value;
 };
 
@@ -150,6 +154,17 @@ const updateServiceNotification = async () => {
   const shareActive = activeKind === 'upload' && activeFile?.showReady !== false;
   const verb = shareActive ? 'Sharing' : activeKind === 'upload' ? 'Uploading' : 'Downloading';
   const title = verb;
+
+  // Resolve the active upload too. Previously only waiting rows were checked,
+  // so the foreground notification could remain "unknown" until the first
+  // upload callback even when the content URI already exposed its size.
+  if (activeFile && activeKind === 'upload' && !fileProgress.get(activeSource)?.total) {
+    const activeSize = await resolveQueueSize(activeFile);
+    if (activeSize > 0) {
+      const current = fileProgress.get(activeSource) || {written: 0};
+      fileProgress.set(activeSource, {written: current.written || 0, total: activeSize});
+    }
+  }
 
   let taskDesc;
   let progressBar;
@@ -524,16 +539,26 @@ const pumpTransferQueue = async () => {
   } finally {
     activeTransferSource = null;
     schedulerRunning = false;
-    if (transferServiceRunning && !(await getQueue()).length) await stopTransferService();
   }
 };
 
 const downloadTask = async () => {
-  if (!(await getQueue()).length) {
+  const assignmentQueue = await import('../appMentor/assignmentQueue');
+  while (transferServiceRunning) {
+    if ((await getQueue()).length) await pumpTransferQueue();
+
+    // A persisted assignment may still be waiting for its post-upload API
+    // work. Keep the foreground service alive and retry after a network
+    // interruption instead of waiting for the next app launch.
+    await assignmentQueue.resumePendingAssignments();
+    if ((await getQueue()).length) continue;
+    if (await assignmentQueue.hasPendingAssignment()) {
+      await new Promise(resolve => setTimeout(resolve, 30000));
+      continue;
+    }
     await stopTransferService();
-    return;
+    break;
   }
-  pumpTransferQueue();
 };
 
 // Starts (or restarts, e.g. after the app/service was killed mid-transfer)
@@ -554,6 +579,7 @@ const startDownloadService = async taskTitle => {
   if (transferServiceRunning) return;
   if (transferStartPromise) return transferStartPromise;
   transferStartPromise = (async () => {
+    registerTransferForegroundService();
     transferServiceRunning = true;
     pendingCount = 0;
     await requestPermissions().catch(() => {});
@@ -581,6 +607,12 @@ const startDownloadService = async taskTitle => {
     transferStartPromise = null;
   });
   return transferStartPromise;
+};
+
+// Assignments without a device upload still need a foreground task: their
+// access grants and API calls must survive leaving the Assign screen too.
+export const startAssignmentService = async () => {
+  await startDownloadService('Assigning items');
 };
 
 export const stopTransferService = async () => {
@@ -643,7 +675,18 @@ export const enqueueUpload = async ({
   const queue = await getQueue();
   if (queue.some(f => f.sourceId === sourceId)) return;
 
-  const file = {kind: 'upload', priority, showReady, id, sourceId, title, localPath, mimeType};
+  const size = await getMediaFileSize(localPath);
+  const file = {
+    kind: 'upload',
+    priority,
+    showReady,
+    id,
+    sourceId,
+    title,
+    localPath,
+    mimeType,
+    size: size || null,
+  };
   await saveQueue([...queue, file]);
   useShareStore.getState().setUploading(id, 0);
 

@@ -16,6 +16,10 @@
 
 import {ItemTypes} from '../contexts/constants';
 import {getDriveCopyId} from '../database/sharedDriveCopies';
+import {getDeviceFileMeta} from '../database/deviceFileMeta';
+import {getMediaFileSize} from '../utils/mediaFile';
+
+export const MAX_ASSIGNABLE_DEVICE_BYTES = 5 * 1024 * 1024;
 
 export const AssignStatus = Object.freeze({
   // Addressable on the mentee's device and ready to post.
@@ -93,6 +97,10 @@ const buildEntry = async item => {
     icon,
     driveCopyId: null,
     payload: null,
+    sourceId: item.source_id,
+    localPath: item.file_path,
+    mimeType: item.mimeType,
+    databaseId: item.dbId ?? item.id,
   };
 
   if (!ASSIGNABLE.has(type)) {
@@ -103,12 +111,32 @@ const buildEntry = async item => {
   // is the copy in the mentor's Drive, so no copy means no assignment — see
   // the payload note below for why it still travels as 'device'.
   if (type === ItemTypes.DEVICE) {
-    const driveCopyId = item.dbId ? await getDriveCopyId(item.dbId) : null;
+    const driveCopyId = await getDriveCopyId(item.dbId ?? item.id);
     if (!driveCopyId) {
+      let size = Number(item.size || item.file_size || 0);
+      try {
+        if (!size) {
+          const metadata = await getDeviceFileMeta(item.dbId ?? item.id);
+          size = Number(metadata?.size) || 0;
+        }
+      } catch {}
+      if (!size) size = (await getMediaFileSize(item.file_path)) || 0;
+      if (size > 0 && size <= MAX_ASSIGNABLE_DEVICE_BYTES) {
+        return {...base, status: AssignStatus.READY, reason: 'Will be uploaded when assigned', requiresUpload: true, size};
+      }
       return {
         ...base,
         status: AssignStatus.NO_COPY,
-        reason: 'No copy in your Drive yet — share this file first',
+        ...(size > MAX_ASSIGNABLE_DEVICE_BYTES
+          ? {
+              reason: 'File size more than 50 MB. Mobile data usage warning!.',
+              requiresConsent: true,
+              requiresUpload: true,
+              size,
+            }
+          : {
+              reason: 'File size could not be verified for direct assignment',
+            }),
       };
     }
     return {

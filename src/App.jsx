@@ -85,6 +85,14 @@ const RootNavigator = track(function RootNavigator() {
     import('./backgroundService/backgroundDownloadService').then(m =>
       m.restoreDownloadState(),
     );
+    // Resume an assignment job that was persisted before the app or its
+    // screen was closed. Uploads and the final assignment call share the same
+    // durable flow.
+    import('./appMentor/assignmentQueue').then(async m => {
+      if (!(await m.hasPendingAssignment())) return;
+      const service = await import('./backgroundService/backgroundDownloadService');
+      service.startAssignmentService();
+    });
     return () => {
       useBackupStore.getState().cleanupEventListeners();
     };

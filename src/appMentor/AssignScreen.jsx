@@ -16,14 +16,16 @@ import Ionicons from 'react-native-vector-icons/Ionicons';
 import ShimmerPlaceholder from '../components/AppShimmerPlaceholder';
 import {useFocusEffect} from '@react-navigation/core';
 import useMentorMenteeStore from './useMentorMenteeStore';
-import {addCategory, addItemToCategory} from '../categories/catDB';
-import {BASE_URL} from '../appMentorBackend/userMgt';
 import {fetchMenteeAssignments} from '../appMentorBackend/assignmentsMgt';
 import {countMenteeNotesBySource} from '../database/menteeNotesDB';
 import {useSelectionStore} from '../stores/useSelectionStore';
 import {useShallow} from 'zustand/react/shallow';
 import {navigationRef} from '../handlers/navigationRef';
-import {grantReaderAccess} from '../share/driveUpload';
+import {startAssignmentService} from '../backgroundService/backgroundDownloadService';
+import {
+  resumePendingAssignments,
+  savePendingAssignment,
+} from './assignmentQueue';
 import UserAvatar from './UserAvatar';
 import {getUserId} from './UserList';
 import AssignManifest from './AssignManifest';
@@ -32,7 +34,6 @@ import {
   buildAssignPlan,
   existingAssignmentFor,
   indexAssignments,
-  readyEntries,
   summarisePlan,
 } from './assignPlan';
 
@@ -168,6 +169,7 @@ const AssignScreen = () => {
   // ones were posted anyway, as rows the mentee's app has no branch for.
   const [plan, setPlan] = useState([]);
   const [planLoading, setPlanLoading] = useState(true);
+  const [consentKeys, setConsentKeys] = useState(() => new Set());
 
   // The plan is rebuilt whenever the selection changes, which now includes a
   // mentor removing one item from it. Only the first build shows the spinner:
@@ -197,8 +199,35 @@ const AssignScreen = () => {
     };
   }, [selectedItems]);
 
+  useEffect(() => {
+    const validKeys = new Set(
+      plan.filter(entry => entry.requiresConsent).map(entry => entry.key),
+    );
+    setConsentKeys(previous => {
+      const next = new Set([...previous].filter(key => validKeys.has(key)));
+      return next.size === previous.size ? previous : next;
+    });
+  }, [plan]);
+
   const summary = useMemo(() => summarisePlan(plan), [plan]);
-  const sendable = useMemo(() => readyEntries(plan), [plan]);
+  const sendable = useMemo(
+    () =>
+      plan.filter(
+        entry =>
+          entry.status === AssignStatus.READY ||
+          (entry.requiresConsent && consentKeys.has(entry.key)),
+      ),
+    [plan, consentKeys],
+  );
+
+  const toggleConsent = useCallback(key => {
+    setConsentKeys(previous => {
+      const next = new Set(previous);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, []);
 
   // ── What each mentee already has ──────────────────────────────────────
   //
@@ -334,7 +363,7 @@ const AssignScreen = () => {
   const unsendableKeys = useMemo(
     () =>
       plan
-        .filter(entry => entry.status !== AssignStatus.READY)
+        .filter(entry => entry.status !== AssignStatus.READY && !entry.requiresConsent)
         .map(entry => entry.key),
     [plan],
   );
@@ -374,11 +403,7 @@ const AssignScreen = () => {
     [selectedUsers, newVideosFor],
   );
 
-  const menteesWithNothingNew = useMemo(
-    () => selectedUsers.filter(m => newVideosFor(m).length === 0).length,
-    [selectedUsers, newVideosFor],
-  );
-
+  /*
   const addItemstomenteeCategory = async (menteeEntry, entries) => {
     const mentee = menteeEntry.user;
     const menteeKey = `[MENTEE_CAT_Filter] ${mentee.full_name} (${mentee.email}) [MENTEE_CAT_Filter]`;
@@ -434,6 +459,39 @@ const AssignScreen = () => {
     return [...new Set(failures)];
   };
 
+  const prepareDeviceUploads = async entries => {
+    const pending = entries.filter(entry => entry.requiresUpload);
+    for (const entry of pending) {
+      await enqueueUpload({
+        id: entry.databaseId,
+        sourceId: entry.sourceId || String(entry.id),
+        title: entry.title,
+        localPath: entry.localPath,
+        mimeType: entry.mimeType,
+        priority: 'share',
+        showReady: true,
+      });
+
+      let driveCopyId = null;
+      for (let attempt = 0; attempt < 600; attempt += 1) {
+        driveCopyId = await getDriveCopyId(entry.databaseId);
+        if (driveCopyId) break;
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+      if (!driveCopyId) {
+        throw new Error(`Could not create a Drive copy for ${entry.title}`);
+      }
+      entry.driveCopyId = driveCopyId;
+      entry.requiresUpload = false;
+      entry.reason = 'Will be sent as your Drive copy';
+      entry.payload = {
+        video_id: driveCopyId,
+        video_type: ItemTypes.DEVICE,
+        origin_video_id: entry.id,
+      };
+    }
+  };
+
   const postAssignment = async (emails, videos) => {
     const response = await fetch(`${BASE_URL}/assign/assign_videos_to_mentees/`, {
       method: 'POST',
@@ -450,6 +508,9 @@ const AssignScreen = () => {
       throw new Error(data?.error || `HTTP ${response.status}`);
     }
   };
+
+  };
+  */
 
   const shareWithMentees = async () => {
     if (!userInfo?.id || selectedUsers.length === 0 || sendable.length === 0) {
@@ -490,14 +551,59 @@ const AssignScreen = () => {
       return;
     }
 
+    const pendingAssignmentJob = {
+      mentorId: userInfo.id,
+      entries: sendable.map(entry => ({...entry})),
+      groups: [...groups.values()].map(group => ({
+        entryKeys: group.entries.map(entry => entry.key),
+        mentees: group.mentees.map(menteeEntry => ({
+          id: menteeIdOf(menteeEntry),
+          email: menteeEntry.user.email,
+          full_name: menteeEntry.user.full_name,
+        })),
+      })),
+      completedGroups: [],
+    };
+    await savePendingAssignment(pendingAssignmentJob);
+    const legacyUploadCount = sendable.filter(entry => entry.requiresUpload).length;
+    ToastAndroid.show(
+      `${sendable.length} item(s) will be assigned to ${selectedUsers.length} mentee(s). ` +
+        (legacyUploadCount > 0
+          ? 'Upload progress is shown in the notification.'
+          : 'Assignment progress is shown in the notification.'),
+      ToastAndroid.LONG,
+    );
+    void resumePendingAssignments();
+    void startAssignmentService();
+    setSelectionMode(false);
+    setUserSelectionMode(false);
+    setSelectedUsers([]);
+    setSelectedItems([]);
+    setAssigning(false);
+    navigationRef.goBack();
+    return;
+
+    /*
+    // Kept below temporarily for the retry behavior while the durable runner
+    // takes over; it is unreachable after the job is persisted above.
+    markAssignmentRunnerRunning();
     setAssigning(true);
+    const uploadCountLegacy = sendable.filter(entry => entry.requiresUpload).length;
+    ToastAndroid.show(
+      `${sendable.length} item(s) will be assigned to ${selectedUsers.length} mentee(s). ` +
+        (uploadCountLegacy > 0
+          ? 'Upload progress is shown in the notification.'
+          : 'Assignment progress is shown in the notification.'),
+      ToastAndroid.LONG,
+    );
     try {
+      await prepareDeviceUploads(sendable);
       const accessFailures = new Set();
       const failedGroups = [];
       let assignedMentees = 0;
       let assignedPairs = 0;
 
-      for (const {mentees: groupMentees, entries} of groups.values()) {
+      for (const [groupIndex, {mentees: groupMentees, entries}] of [...groups.values()].entries()) {
         const emails = groupMentees.map(m => m.user.email).filter(Boolean);
         const driveCopyIds = entries
           .map(entry => entry.driveCopyId)
@@ -543,6 +649,8 @@ const AssignScreen = () => {
 
         assignedMentees += groupMentees.length;
         assignedPairs += groupMentees.length * entries.length;
+        pendingAssignmentJob.completedGroups.push(groupIndex);
+        await savePendingAssignment(pendingAssignmentJob);
       }
 
       setAssignmentsVersion(v => v + 1);
@@ -550,6 +658,10 @@ const AssignScreen = () => {
       // Every group failed: nothing was sent, so this is the network-error
       // case and the selection is worth keeping.
       if (assignedMentees === 0) {
+        await onDisplayNotification(
+          'Assignment could not be completed',
+          'No mentees were assigned. Your selection has been kept.',
+        );
         Alert.alert(
           'Could not assign',
           'The assignment could not be sent. Your selection has been kept.',
@@ -591,10 +703,17 @@ const AssignScreen = () => {
           `${menteesWithNothingNew} mentee(s) already had everything`,
         );
       }
-      ToastAndroid.show(
+      await onDisplayNotification(
+        failedGroups.length > 0
+          ? 'Assignment partially completed'
+          : 'Assignment completed',
         `Assigned ${assignedPairs} item(s) to ${assignedMentees} mentee(s).` +
-          (skippedParts.length ? ` Skipped: ${skippedParts.join(', ')}.` : ''),
-        ToastAndroid.LONG,
+          (skippedParts.length ? ` Skipped: ${skippedParts.join(', ')}.` : '') +
+          (failedGroups.length > 0
+            ? ` Failed mentees: ${failedGroups
+                .map(mentee => mentee.user.email)
+                .join(', ')}.`
+            : ''),
       );
 
       // Cleared only when the whole thing went through. A partial failure
@@ -606,16 +725,23 @@ const AssignScreen = () => {
       setUserSelectionMode(false);
       setSelectedUsers([]);
       setSelectedItems([]);
+      await clearPendingAssignment();
       navigationRef.goBack();
     } catch (error) {
       console.error('Assign failed:', error);
+      await onDisplayNotification(
+        'Assignment failed',
+        'The assignment could not be sent. Your selection has been kept.',
+      );
       Alert.alert(
         'Network error',
         'The assignment could not be sent. Your selection has been kept.',
       );
     } finally {
+      releaseAssignmentRunner();
       setAssigning(false);
     }
+    */
   };
 
   // Four is what fits beside the summary text without crowding the FAB on a
@@ -854,6 +980,8 @@ const AssignScreen = () => {
         onRemove={removeEntry}
         onRemoveUnsendable={removeUnsendable}
         removable={!assigning}
+        consentKeys={consentKeys}
+        onToggleConsent={toggleConsent}
       />
 
       <MenteeList renderTrailing={renderMenteeBadge} showSelectionHeader={false} />
@@ -918,17 +1046,6 @@ const AssignScreen = () => {
       {/* Blocking, because the work is not cancellable and every control here
           would either do nothing or make things worse mid-request — changing
           the mentee selection while it is being sent, most of all. */}
-      {assigning && (
-        <View style={styles.overlay}>
-          <View style={styles.overlayCard}>
-            <ActivityIndicator size="large" color="#007AFF" />
-            <Text style={styles.overlayText}>
-              Assigning to {selectedUsers.length} mentee
-              {selectedUsers.length === 1 ? '' : 's'}…
-            </Text>
-          </View>
-        </View>
-      )}
     </View>
   );
 };

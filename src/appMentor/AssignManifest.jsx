@@ -50,9 +50,10 @@ const STATUS_STYLE = {
 // count move. The faces are the answer, in the place the question is asked,
 // and they are the same avatars the rows below and the bar at the bottom use —
 // so recognising them costs nothing.
-const Row = ({entry, onRemove, removable}) => {
-  const style = STATUS_STYLE[entry.status];
-  const skipped = entry.status !== AssignStatus.READY;
+const Row = ({entry, onRemove, removable, consentGranted, onToggleConsent}) => {
+  const approved = entry.status === AssignStatus.READY || consentGranted;
+  const style = approved ? STATUS_STYLE[AssignStatus.READY] : STATUS_STYLE[entry.status];
+  const skipped = !approved;
 
   return (
     <View style={styles.row}>
@@ -77,9 +78,30 @@ const Row = ({entry, onRemove, removable}) => {
           {entry.reason ? ` · ${entry.reason}` : ''}
         </Text>
       </View>
-      <View style={[styles.chip, {backgroundColor: style.bg}]}>
-        <Ionicons name={style.icon} size={13} color={style.color} />
-      </View>
+      {entry.requiresConsent && (
+        <TouchableOpacity
+          onPress={() => onToggleConsent(entry.key)}
+          disabled={!removable}
+          style={[
+            styles.consentToggle,
+            consentGranted && styles.consentToggleGranted,
+          ]}
+          accessibilityRole="checkbox"
+          accessibilityState={{checked: consentGranted}}>
+          {!consentGranted && <Text style={styles.consentText}>Allow</Text>}
+
+          <Ionicons
+            name={consentGranted ? 'checkmark-circle' : 'ellipse-outline'}
+            size={13}
+            color={consentGranted ? '#047857' : '#9ca3af'}
+          />
+        </TouchableOpacity>
+      )}
+      {!consentGranted && (
+        <View style={[styles.chip, {backgroundColor: style.bg}]}>
+          <Ionicons name={style.icon} size={13} color={style.color} />
+        </View>
+      )}
 
       {/* Telling a mentor that four of their eight items cannot be sent, and
           then making them walk back two screens to do anything about it, is
@@ -108,6 +130,8 @@ const AssignManifest = ({
   onRemove,
   onRemoveUnsendable,
   removable,
+  consentKeys,
+  onToggleConsent,
 }) => {
   const needsAttention = summary.noCopy > 0 || summary.unsupported > 0;
   const [expanded, setExpanded] = useState(false);
@@ -153,7 +177,15 @@ const AssignManifest = ({
 
   // Counted here rather than in `summary`, which is about the items alone:
   // this one depends on who is selected.
-  const unsendable = summary.noCopy + summary.unsupported;
+  const consentEntries = plan.filter(entry => entry.requiresConsent);
+  const consentRequired = consentEntries.length;
+  const pendingConsent = consentEntries.filter(
+    entry => !consentKeys?.has(entry.key),
+  ).length;
+  const permanentlyUnsendable = plan.filter(
+    entry => entry.status !== AssignStatus.READY && !entry.requiresConsent,
+  ).length;
+  const warningCount = permanentlyUnsendable + pendingConsent;
   const orderedPlan = [
     ...plan.filter(entry => entry.status !== AssignStatus.READY),
     ...plan.filter(entry => entry.status === AssignStatus.READY),
@@ -167,7 +199,7 @@ const AssignManifest = ({
         activeOpacity={0.7}>
         <View style={styles.headerText}>
           <View style={styles.headerTitleRow}>
-            {unsendable > 0 && (
+            {warningCount > 0 && (
               <Ionicons
                 name="warning-outline"
                 size={16}
@@ -176,15 +208,17 @@ const AssignManifest = ({
               />
             )}
             <Text style={styles.headerTitle}>
-              {unsendable > 0
-                ? `${unsendable} of ${summary.total} ${
+              {permanentlyUnsendable > 0
+                ? `${permanentlyUnsendable} of ${summary.total} ${
                     summary.total === 1 ? 'item' : 'items'
                   } can't be assigned`
-                : `${summary.ready} of ${summary.total} ${
+                : pendingConsent > 0
+                ? `${pendingConsent} ${pendingConsent === 1 ? 'item needs' : 'items need'} upload approval`
+                : `${summary.ready + consentRequired} of ${summary.total} ${
                     summary.total === 1 ? 'item' : 'items'
                   } can be assigned`}
             </Text>
-            {expanded && unsendable > 0 && (
+            {expanded && permanentlyUnsendable > 0 && (
               <TouchableOpacity
                 style={styles.bulkAction}
                 onPress={event => {
@@ -195,7 +229,7 @@ const AssignManifest = ({
                 activeOpacity={0.7}>
                 <Ionicons name="close-circle-outline" size={15} color="#b91c1c" />
                 <Text style={styles.bulkActionText} numberOfLines={1}>
-                  Remove {unsendable}
+                  Remove {permanentlyUnsendable}
                 </Text>
               </TouchableOpacity>
             )}
@@ -231,6 +265,8 @@ const AssignManifest = ({
                 entry={entry}
                 onRemove={onRemove}
                 removable={removable}
+                consentGranted={consentKeys?.has(entry.key)}
+                onToggleConsent={onToggleConsent}
               />
             ))}
           </ScrollView>
@@ -334,6 +370,23 @@ const styles = StyleSheet.create({
   remove: {
     paddingLeft: 8,
     paddingVertical: 2,
+  },
+  consentToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginLeft: 4,
+  },
+  consentToggleGranted: {
+    backgroundColor: '#ecfdf5',
+    borderRadius: 10,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+  },
+  consentText: {
+    color: '#047857',
+    fontSize: 10,
+    fontWeight: '600',
+    marginLeft: 2,
   },
 
 });

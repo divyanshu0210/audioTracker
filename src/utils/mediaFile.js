@@ -39,6 +39,29 @@ export const mediaExists = async path => {
 };
 
 /**
+ * Read a media file's byte length without copying it into app storage.
+ * Document-provider files use content:// and must be queried through FileMeta;
+ * RNFS.stat only works for ordinary filesystem paths.
+ */
+export const getMediaFileSize = async path => {
+  if (!path) return null;
+  try {
+    if (isContentUri(path)) {
+      const identity = await FileMeta.readIdentity(path);
+      const size = Number(identity?.size);
+      return size > 0 ? size : null;
+    }
+    if (await RNFS.exists(path)) {
+      const size = Number((await RNFS.stat(path)).size);
+      return size > 0 ? size : null;
+    }
+  } catch (error) {
+    return null;
+  }
+  return null;
+};
+
+/**
  * Tries to hold on to a uri for good. True when the app may still read it
  * after a restart, false when the grant only lasts this session.
  *

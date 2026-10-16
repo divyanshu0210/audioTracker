@@ -115,7 +115,7 @@ export const shareDeviceFile = async item => {
   });
 
   ToastAndroid.show(
-    'Uploading — see notification for progress',
+    'Creating reusable link — see notification for details',
     ToastAndroid.SHORT,
   );
   return true;

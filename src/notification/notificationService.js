@@ -1,4 +1,46 @@
-import notifee, {AndroidImportance} from '@notifee/react-native';
+import notifee, {AndroidImportance, EventType} from '@notifee/react-native';
+import Clipboard from '@react-native-clipboard/clipboard';
+import {Linking} from 'react-native';
+import {getDriveCopyId} from '../database/sharedDriveCopies';
+import {driveFileLink} from '../Linking/utils/shareLink';
+
+const uploadChannelId = 'device-upload';
+const uploadReadyChannelId = 'device-upload-ready';
+let uploadNotificationReady;
+let uploadReadyNotificationReady;
+
+const getUploadNotificationId = itemId => `device-upload-${itemId}`;
+const getUploadReadyNotificationId = itemId => `device-upload-ready-${itemId}`;
+
+const ensureUploadChannel = () => {
+  if (!uploadNotificationReady) {
+    uploadNotificationReady = notifee
+      .requestPermission()
+      .then(() =>
+        notifee.createChannel({
+          id: uploadChannelId,
+          name: 'Device file uploads',
+          importance: AndroidImportance.LOW,
+        }),
+      );
+  }
+  return uploadNotificationReady;
+};
+
+const ensureUploadReadyChannel = () => {
+  if (!uploadReadyNotificationReady) {
+    uploadReadyNotificationReady = notifee
+      .requestPermission()
+      .then(() =>
+        notifee.createChannel({
+          id: uploadReadyChannelId,
+          name: 'Completed uploads',
+          importance: AndroidImportance.DEFAULT,
+        }),
+      );
+  }
+  return uploadReadyNotificationReady;
+};
 
 export async function onDisplayNotification(title, body) {
   try {
@@ -74,4 +116,75 @@ export async function dismissNotification(id) {
   } catch (error) {
     console.error('Could not dismiss notification:', error);
   }
+}
+
+export async function showUploadReadyNotification({itemId, sourceId, title, driveFileId}) {
+  try {
+    // Completion must be a new notification. Reusing the ongoing progress ID
+    // makes Android silently replace it, and the LOW progress channel suppresses
+    // the alert even when the upload has just finished.
+    await dismissNotification(getUploadNotificationId(itemId));
+    const channelId = await ensureUploadReadyChannel();
+    await notifee.displayNotification({
+      id: getUploadReadyNotificationId(itemId),
+      title: 'Upload complete',
+      body: `${title || 'Device file'} is ready to share`,
+      data: {
+        kind: 'device-upload',
+        itemId: String(itemId),
+        sourceId: String(sourceId || ''),
+        driveFileId: String(driveFileId || ''),
+      },
+      android: {
+        channelId,
+        onlyAlertOnce: true,
+        ongoing: false,
+        actions: [
+          {title: 'Copy link', pressAction: {id: 'copy-device-link'}},
+          {title: 'Share link', pressAction: {id: 'share-device-link'}},
+        ],
+        pressAction: {id: 'open-notifications', launchActivity: 'default'},
+      },
+    });
+  } catch (error) {
+    console.warn('Could not show upload-ready notification:', error?.message);
+  }
+}
+
+export async function handleTransferNotificationAction({type, detail}) {
+  if (type !== EventType.ACTION_PRESS) return false;
+  const actionId = detail?.pressAction?.id;
+  const data = detail?.notification?.data || {};
+  if (actionId === 'cancel-transfers' && data.kind === 'transfer-service') {
+    const {cancelAllTransfers} = await import('../backgroundService/backgroundDownloadService');
+    await cancelAllTransfers();
+    return true;
+  }
+  if (data.kind !== 'device-upload' || !data.itemId) return false;
+
+  const itemId = Number(data.itemId);
+  const sourceId = data.sourceId || '';
+  if (actionId !== 'copy-device-link' && actionId !== 'share-device-link') {
+    return false;
+  }
+  let driveId = data.driveFileId;
+  if (!driveId) {
+    try {
+      driveId = await getDriveCopyId(itemId);
+    } catch (error) {
+      console.warn('Could not resolve uploaded Drive link:', error?.message);
+      return false;
+    }
+  }
+  if (!driveId) return false;
+  const link = driveFileLink(driveId);
+  if (actionId === 'copy-device-link') {
+    Clipboard.setString(link);
+    await onDisplayNotification('Link copied', 'The Drive link is on your clipboard.');
+  } else {
+    await Linking.openURL(
+      `audiotracker://share-device-link?url=${encodeURIComponent(link)}`,
+    );
+  }
+  return true;
 }

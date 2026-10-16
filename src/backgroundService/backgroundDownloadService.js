@@ -1,16 +1,26 @@
-import BackgroundService from 'react-native-background-actions';
+import notifee, {AndroidImportance} from '@notifee/react-native';
 import RNFS from 'react-native-fs';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {updateItemFields} from '../database/U';
 import useDownloadStore from '../stores/useDownloadStore';
 import {requestPermissions} from './newBackgroundService';
-import {onDisplayNotification} from '../notification/notificationService';
+import {
+  dismissNotification,
+  onDisplayNotification,
+  showUploadReadyNotification,
+} from '../notification/notificationService';
 import {getGoogleAccessToken} from '../auth/tokenManager';
 import {performUpload} from '../share/uploadTask';
 import useShareStore from '../stores/useShareStore';
 import {useMediaStore} from '../stores/useMediaStore';
 
 const QUEUE_KEY = '@download_queue';
+const TRANSFER_NOTIFICATION_ID = 'transfer-service';
+const TRANSFER_CHANNEL_ID = 'transfer-service';
+let transferServiceRunning = false;
+let transferRunnerResolve = null;
+let transferStartPromise = null;
+let foregroundServiceRegistered = false;
 
 // ── Queue (AsyncStorage) ──────────────────────────────────────────────────────
 
@@ -230,7 +240,7 @@ const downloadSingleFile = async file => {
       }
       completedCount = 0;
       completedBytes = 0;
-      await BackgroundService.stop();
+      await stopTransferService();
     } else {
       // Other downloads still running — update notification count/progress.
       updateServiceNotification();
@@ -258,7 +268,7 @@ const uploadSingleFile = async file => {
   fileProgress.set(file.sourceId, {total: 0, written: 0});
 
   try {
-    await performUpload({
+    const driveFileId = await performUpload({
       itemId: file.id,
       title: file.title,
       localPath: file.localPath,
@@ -282,10 +292,12 @@ const uploadSingleFile = async file => {
       },
     });
 
-    await onDisplayNotification(
-      'Link ready',
-      `${file.title} can now be shared. Use Copy Link on it.`,
-    );
+    await showUploadReadyNotification({
+      itemId: file.id,
+      sourceId: file.sourceId,
+      title: file.title,
+      driveFileId,
+    });
   } catch (error) {
     // A cancelled upload rejects here like any other failure. cancelUpload has
     // already cleared the store entry by then, and its absence is what tells
@@ -298,6 +310,7 @@ const uploadSingleFile = async file => {
         `${file.title} was not shared. ${error?.message || ''}`.trim(),
       );
     }
+    await dismissNotification(`device-upload-${file.id}`);
   } finally {
     activeUploadTasks.delete(file.sourceId);
     activeJobIds.delete(file.sourceId);
@@ -309,7 +322,7 @@ const uploadSingleFile = async file => {
     pendingCount--;
 
     if (pendingCount === 0) {
-      await BackgroundService.stop();
+      await stopTransferService();
     } else {
       updateServiceNotification();
     }
@@ -332,35 +345,69 @@ const runQueuedItem = file =>
 const downloadTask = async () => {
   const queue = await getQueue();
   if (!queue.length) {
-    await BackgroundService.stop();
+    await stopTransferService();
     return;
   }
 
   queue.forEach(runQueuedItem);
 
-  // Keep the service alive; stopped only via BackgroundService.stop() in downloadSingleFile.
-  await new Promise(() => {});
+  // The Notifee foreground runner keeps the service alive after this function
+  // returns and resolves when stopTransferService is called.
 };
 
 // Starts (or restarts, e.g. after the app/service was killed mid-transfer)
 // the foreground service that drives downloadTask. Shared by enqueueDownload,
 // enqueueUpload and restoreDownloadState.
-const startDownloadService = async taskTitle => {
-  pendingCount = 0; // reset in case of stale state
-  await requestPermissions().catch(() => {});
-  await BackgroundService.start(downloadTask, {
-    taskName: 'File Transfer',
-    taskTitle,
-    taskDesc: 'Starting…',
-    taskIcon: {name: 'ic_launcher', type: 'mipmap'},
-    color: '#2196F3',
-    progressBar: {max: 100, value: 0, indeterminate: true},
-    // ACTION_VIEW deep link that only this app registers (manifest: scheme
-    // "audiotracker") → opens the app directly, no app-chooser dialog.
-    // LinkHandler routes this one to the Downloads screen.
-    linkingURI: 'audiotracker://downloads',
-    parameters: {},
+export const registerTransferForegroundService = () => {
+  if (foregroundServiceRegistered) return;
+  foregroundServiceRegistered = true;
+  notifee.registerForegroundService(async () => {
+    await downloadTask();
+    return new Promise(resolve => {
+      transferRunnerResolve = resolve;
+    });
   });
+};
+
+const startDownloadService = async taskTitle => {
+  if (transferServiceRunning) return;
+  if (transferStartPromise) return transferStartPromise;
+  transferStartPromise = (async () => {
+    transferServiceRunning = true;
+    pendingCount = 0;
+    await requestPermissions().catch(() => {});
+    const channelId = await notifee.createChannel({
+      id: TRANSFER_CHANNEL_ID,
+      name: 'File transfers',
+      importance: AndroidImportance.LOW,
+    });
+    await notifee.displayNotification({
+      id: TRANSFER_NOTIFICATION_ID,
+      title: taskTitle,
+      body: 'Starting…',
+      data: {kind: 'transfer-service'},
+      android: {
+        channelId,
+        asForegroundService: true,
+        ongoing: true,
+        onlyAlertOnce: true,
+        progress: {max: 100, current: 0, indeterminate: true},
+        actions: [{title: 'Cancel', pressAction: {id: 'cancel-transfers'}}],
+        pressAction: {id: 'open-notifications', launchActivity: 'default'},
+      },
+    });
+  })().finally(() => {
+    transferStartPromise = null;
+  });
+  return transferStartPromise;
+};
+
+export const stopTransferService = async () => {
+  transferServiceRunning = false;
+  transferRunnerResolve?.();
+  transferRunnerResolve = null;
+  await notifee.stopForegroundService().catch(() => {});
+  await notifee.cancelNotification(TRANSFER_NOTIFICATION_ID).catch(() => {});
 };
 
 // ── Public API ────────────────────────────────────────────────────────────────
@@ -386,7 +433,7 @@ export const enqueueDownload = async ({
   // render an in-progress card (status updates merge over this).
   setDownload(sourceId, {status: 'queued', progress: 0, title, type, mimeType});
 
-  if (BackgroundService.isRunning()) {
+  if (transferServiceRunning) {
     // Service already alive — start this download alongside existing ones.
     downloadSingleFile(file);
   } else {
@@ -410,7 +457,7 @@ export const enqueueUpload = async ({id, sourceId, title, localPath, mimeType}) 
   await saveQueue([...queue, file]);
   useShareStore.getState().setUploading(id, 0);
 
-  if (BackgroundService.isRunning()) {
+  if (transferServiceRunning) {
     uploadSingleFile(file);
   } else {
     await startDownloadService(`Uploading ${title}`);
@@ -419,7 +466,6 @@ export const enqueueUpload = async ({id, sourceId, title, localPath, mimeType}) 
 
 export const cancelDownload = async sourceId => {
   const {removeDownload} = useDownloadStore.getState();
-
   // Remove from queue and UI immediately so the catch block in
   // downloadSingleFile sees the entry is gone and skips setting 'failed'.
   await removeFromQueue(sourceId);
@@ -439,6 +485,8 @@ export const cancelDownload = async sourceId => {
   // Update notification immediately to reflect the correct remaining count.
   if (pendingCount > 1) {
     updateServiceNotification();
+  } else {
+    await stopTransferService();
   }
   // If pendingCount === 1, the finally block will call BackgroundService.stop().
 };
@@ -472,7 +520,35 @@ export const cancelUpload = async ({sourceId, itemId}) => {
 
   if (pendingCount > 1) {
     updateServiceNotification();
+  } else {
+    await stopTransferService();
   }
+};
+
+export const cancelAllTransfers = async () => {
+  const queue = await getQueue();
+  await saveQueue([]);
+  const {removeDownload} = useDownloadStore.getState();
+  const {setUploading} = useShareStore.getState();
+  queue.forEach(file => {
+    if (file.kind === 'upload') setUploading(file.id, null);
+    else removeDownload(file.sourceId);
+  });
+  for (const [sourceId, jobId] of activeJobIds.entries()) {
+    if (jobId != null) {
+      try { RNFS.stopDownload(jobId); } catch {}
+    }
+    activeJobIds.delete(sourceId);
+  }
+  for (const [sourceId, task] of activeUploadTasks.entries()) {
+    try { task?.cancel?.(); } catch {}
+    activeUploadTasks.delete(sourceId);
+  }
+  fileProgress.clear();
+  lastReportedPct.clear();
+  kindsInFlight.clear();
+  pendingCount = 0;
+  await stopTransferService();
 };
 
 export const restoreDownloadState = async () => {
@@ -501,7 +577,7 @@ export const restoreDownloadState = async () => {
   // The queue survives an app kill (persisted in AsyncStorage) but the
   // foreground service driving it does not — without restarting it here,
   // these files would sit at "Queued…" forever with nothing downloading.
-  if (!BackgroundService.isRunning()) {
+  if (!transferServiceRunning) {
     const onlyUploads = queue.every(f => f.kind === 'upload');
     const verb = onlyUploads ? 'Uploading' : 'Downloading';
     const title =
@@ -512,8 +588,29 @@ export const restoreDownloadState = async () => {
   }
 };
 
-const safeUpdateNotification = async opts => {
+const safeUpdateNotification = async ({taskTitle, taskDesc, progressBar}) => {
   try {
-    await BackgroundService.updateNotification(opts);
+    if (!transferServiceRunning) return;
+    const channelId = await notifee.createChannel({
+      id: TRANSFER_CHANNEL_ID,
+      name: 'File transfers',
+      importance: AndroidImportance.LOW,
+    });
+    await notifee.displayNotification({
+      id: TRANSFER_NOTIFICATION_ID,
+      title: taskTitle,
+      body: taskDesc,
+      data: {kind: 'transfer-service'},
+      android: {
+        channelId,
+        asForegroundService: true,
+        ongoing: true,
+        onlyAlertOnce: true,
+        progress: progressBar.indeterminate
+          ? {indeterminate: true}
+          : {max: progressBar.max, current: progressBar.value},
+        actions: [{title: 'Cancel', pressAction: {id: 'cancel-transfers'}}],
+      },
+    });
   } catch {}
 };

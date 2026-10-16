@@ -14,13 +14,14 @@ import useInMenteeCategory from '../../appMentor/useInMenteeCategory';
 import { useSelectionStore } from '../../stores/useSelectionStore';
 import { useNotesStore } from '../../stores/useNotesStore';
 import { useShallow } from 'zustand/react/shallow';
-import {copyLink, getShareLink} from '../../Linking/utils/shareLink';
-import useShareStore from '../../stores/useShareStore';
-import {useMediaStore} from '../../stores/useMediaStore';
-import {confirmAndShareDeviceFile} from '../../share/shareDeviceFile';
+import {getShareLink, shareItem} from '../../Linking/utils/shareLink';
+import DeviceMenuActions from './DeviceMenuActions';
+import DeviceShareSheet from '../modals/DeviceShareSheet';
+import {shareDeviceFile} from '../../share/shareDeviceFile';
 
 const BaseMenu = ({item, type, screen}) => {
   const [visible, setVisible] = useState(false);
+  const [deviceShareVisible, setDeviceShareVisible] = useState(false);
 const {setActiveItem} = useSelectionStore(
   useShallow(state => ({
     setActiveItem: state.setActiveItem,
@@ -68,30 +69,17 @@ const {setSelectedNote} = useNotesStore(
   const driveCopyId = item?.drive_file_id ?? null;
   // A percentage while an upload runs, undefined otherwise. Compared against
   // null rather than tested for truth so that 0% is still "uploading".
-  const uploadPercent = useShareStore(s =>
-    item?.id != null ? s.uploading[item.id] : undefined,
-  );
-  const uploadingCopy = uploadPercent != null;
   const shareLink = getShareLink(item, driveCopyId);
 
   // file_path alone is not enough to know the bytes are there: a restored row
   // carries the path it had on whatever device made the backup. validDeviceIds
   // is the list setDeviceFiles built by actually asking the filesystem.
-  const isMissingDeviceFile = useMediaStore(
-    s =>
-      item?.type === 'device_file' &&
-      s.deviceFilesChecked &&
-      !s.validDeviceIds[item.source_id],
-  );
-
   // Offered instead of Copy Link, and only for a device file that has no copy
   // yet: it uploads the file rather than just reading an id, so it asks first.
   // Never for a file whose bytes are gone — there would be nothing to upload.
-  const canCreateLink =
-    item?.type === 'device_file' &&
-    !driveCopyId &&
-    !!item?.file_path &&
-    !isMissingDeviceFile;
+  const isDeviceItem = item?.type === 'device_file';
+  const hasDeviceShareAction =
+    isDeviceItem && (!!item?.file_path || !!driveCopyId);
 
   const hideMenu = () => setVisible(false);
   const showMenu = () => setVisible(true);
@@ -115,6 +103,14 @@ const {setSelectedNote} = useNotesStore(
       case ItemTypes.NOTEBOOK:
         return <NBMenuItems item={item} hideMenu={hideMenu} />;
       case ItemTypes.DEVICE:
+        return (
+          <DeviceMenuActions
+            item={item}
+            hideMenu={hideMenu}
+            screen={screen}
+            onOpenShare={() => setDeviceShareVisible(true)}
+          />
+        );
       case ItemTypes.DRIVE:
         return (
           <DriveMenuItems item={item} screen={screen} hideMenu={hideMenu} />
@@ -150,7 +146,7 @@ const {setSelectedNote} = useNotesStore(
   // In a mentee's category the menu is two entries at most, and a row can have
   // neither - a folder has no notes of its own and no link. An anchor that
   // opens an empty popup is worse than no anchor.
-  if (menteeView && !canShowNotes && !shareLink && !canCreateLink) return null;
+  if (menteeView && !canShowNotes && !shareLink && !hasDeviceShareAction) return null;
 
   return (
     <View style={styles.row}>
@@ -178,36 +174,40 @@ const {setSelectedNote} = useNotesStore(
           showAddToCategory={!menteeView}
           menteeView={menteeView}
         />
-        {shareLink && (
+        {!isDeviceItem && shareLink && (
           <MenuItem
             onPress={() => {
               hideMenu();
-              copyLink(shareLink);
+              shareItem(item, driveCopyId).catch(error =>
+                console.log('Share cancelled or failed:', error),
+              );
             }}>
-            <Text style={styles.menuItemText}>Copy Link</Text>
-          </MenuItem>
-        )}
-        {canCreateLink && (
-          <MenuItem
-            disabled={uploadingCopy}
-            onPress={() => {
-              hideMenu();
-              confirmAndShareDeviceFile(item);
-            }}>
-            {/* Just the word. The row carries the ring and the percentage,
-                and cancelling belongs there too — repeating it here would be a
-                second, smaller copy of something already on screen. */}
-            <Text
-              style={[
-                styles.menuItemText,
-                uploadingCopy && styles.menuItemTextDisabled,
-              ]}>
-              {uploadingCopy ? 'Uploading...' : 'Create shareable link'}
-            </Text>
+            <Text style={styles.menuItemText}>Share</Text>
           </MenuItem>
         )}
         {!menteeView && renderMenuItems()}
       </Menu>
+      <DeviceShareSheet
+        visible={deviceShareVisible}
+        hasDriveLink={!!shareLink}
+        onClose={() => setDeviceShareVisible(false)}
+        onShareFile={() => {
+          setDeviceShareVisible(false);
+          shareItem(item, driveCopyId).catch(error =>
+            console.log('Share cancelled or failed:', error),
+          );
+        }}
+        onShareLink={() => {
+          setDeviceShareVisible(false);
+          if (shareLink) {
+            shareItem(item, driveCopyId).catch(error =>
+              console.log('Share cancelled or failed:', error),
+            );
+          } else {
+            shareDeviceFile(item);
+          }
+        }}
+      />
     </View>
   );
 };

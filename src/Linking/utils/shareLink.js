@@ -23,8 +23,10 @@
 // lives in a table rather than on the item.
 
 import Clipboard from '@react-native-clipboard/clipboard';
-import {ToastAndroid} from 'react-native';
+import Share from 'react-native-share';
+import {Alert, ToastAndroid} from 'react-native';
 import {iskconUrlFromSourceId} from '../../iskcon/iskconAudioApi';
+import {mediaExists} from '../../utils/mediaFile';
 
 export const driveFileLink = fileId =>
   `https://drive.google.com/file/d/${fileId}/view`;
@@ -64,4 +66,40 @@ export const copyLink = link => {
   if (!link) return;
   Clipboard.setString(link);
   ToastAndroid.show('Link copied', ToastAndroid.SHORT);
+};
+
+const localShareUri = filePath => {
+  if (!filePath) return null;
+  if (/^(content|file|https?):\/\//i.test(filePath)) return filePath;
+  return `file://${filePath}`;
+};
+
+export const shareItem = async (item, driveCopyId) => {
+  const link = getShareLink(item, driveCopyId);
+  const isLocalDeviceFile = item?.type === 'device_file' && !link;
+
+  if (isLocalDeviceFile) {
+    const filePath = item?.file_path;
+    if (!filePath) {
+      Alert.alert('File unavailable', 'This device file is no longer on this phone.');
+      return false;
+    }
+    if (!(await mediaExists(filePath))) {
+      Alert.alert('File unavailable', 'This device file is no longer on this phone.');
+      return false;
+    }
+    await Share.open({
+      url: localShareUri(filePath),
+      type: item?.mimeType || item?.mime_type || 'application/octet-stream',
+      title: `Share ${item?.title || 'file'}`,
+    });
+    return true;
+  }
+
+  if (!link) return false;
+  await Share.open({
+    message: link,
+    title: `Share ${item?.title || 'link'}`,
+  });
+  return true;
 };

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from 'react';
 import { Linking } from 'react-native';
+import Share from 'react-native-share';
 import { handleLinkSubmit, LinkOrigin } from './utils/handleLinkSubmit';
 import { useAppState } from '../contexts/AppStateContext';
 import { useMediaStore } from '../stores/useMediaStore';
@@ -15,6 +16,17 @@ import {
 
 // The download foreground-service notification opens this URL.
 const DOWNLOADS_URL = 'audiotracker://downloads';
+const SHARE_LINK_PREFIX = 'audiotracker://share-device-link?url=';
+
+const decodeShareLink = url => {
+  if (!url?.startsWith(SHARE_LINK_PREFIX)) return null;
+  try {
+    return decodeURIComponent(url.slice(SHARE_LINK_PREFIX.length));
+  } catch {
+    return null;
+  }
+};
+
 
 // Cold start: the login → MainApp redirect hasn't happened yet, so record the
 // intent and let navigateToMain land with DownloadsView already on top (no
@@ -49,11 +61,28 @@ const useLinkHandler = () => {
 const {userInfo} = useAppState();
   const hasHandledInitialUrl = useRef(false); // <--- Add this
   const pendingUrlRef = useRef(null);
+  const pendingShareLinkRef = useRef(null);
+
+  const handleShareLink = url => {
+    const link = decodeShareLink(url);
+    if (!link) return true;
+    if (!userInfo) {
+      pendingShareLinkRef.current = link;
+      return true;
+    }
+    setTimeout(() => {
+      Share.open({message: link, title: 'Share device file link'}).catch(error =>
+        console.log('Share link cancelled or failed:', error),
+      );
+    }, 250);
+    return true;
+  };
 
   useEffect(() => {
     const checkInitialURL = async () => {
       const url = await Linking.getInitialURL();
       if (url === DOWNLOADS_URL) return routeToDownloads({cold: true});
+      if (handleShareLink(url)) return;
       if (!url || url.startsWith('audiotracker://')) return;
       // Said before any of the async work below, so that whatever is deciding
       // what to put on screen first already knows this launch has a target.
@@ -79,6 +108,7 @@ const {userInfo} = useAppState();
 
     const handleURL = async ({ url }) => {
       if (url === DOWNLOADS_URL) return routeToDownloads({cold: false});
+      if (handleShareLink(url)) return;
       if (url.startsWith('audiotracker://')) return;
       if (await resolvesToNoteFile(url)) return handleIncomingNoteFile(url);
       console.log('URL opened while running:', url, userInfo);
@@ -99,6 +129,17 @@ const {userInfo} = useAppState();
 
     return () => subscription.remove();
   }, [userInfo, setDriveLinksList, setItems,setDeviceFiles]);
+
+  useEffect(() => {
+    if (!userInfo || !pendingShareLinkRef.current) return;
+    const link = pendingShareLinkRef.current;
+    pendingShareLinkRef.current = null;
+    setTimeout(() => {
+      Share.open({message: link, title: 'Share device file link'}).catch(error =>
+        console.log('Share link cancelled or failed:', error),
+      );
+    }, 250);
+  }, [userInfo]);
 
   // useEffect(() => {
   //   if (userInfo && pendingUrlRef.current && !hasHandledInitialUrl.current) {

@@ -31,7 +31,7 @@ const DeviceMenuActions = ({item, hideMenu, onOpenShare, screen}) => {
         <MenuItem
           onPress={() => {
             hideMenu();
-            shareDeviceFile(item);
+            shareDeviceFile(item, {purpose: 'backup'});
           }}>
           <Text style={styles.menuItemText}>Backup</Text>
         </MenuItem>

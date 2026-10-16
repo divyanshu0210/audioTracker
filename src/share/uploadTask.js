@@ -41,21 +41,29 @@ const withStreamablePath = async (localPath, send) => {
 // failure means for the queue and the notification.
 export const performUpload = async ({
   itemId,
+  sourceId,
   title,
   localPath,
   mimeType,
   onProgress,
   onTask,
+  shouldPause,
 }) => {
-  const driveFileId = await withStreamablePath(localPath, path =>
-    uploadFileToDrive({
+  const driveFileId = await withStreamablePath(localPath, async path => {
+    try {
+      const size = Number((await RNFS.stat(path)).size) || 0;
+      if (size > 0) onProgress?.({written: 0, total: size, percent: 0});
+    } catch {}
+    return uploadFileToDrive({
+      sourceId: sourceId || itemId,
       localPath: path,
       name: title,
       mimeType,
       onProgress,
       onTask,
-    }),
-  );
+      shouldPause,
+    });
+  });
 
   // The copy stays private to the uploader. Nothing is granted here: who may
   // read it is decided later, per person — see grantReaderAccess, called when

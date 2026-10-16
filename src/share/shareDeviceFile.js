@@ -62,7 +62,7 @@ export const confirmAndShareDeviceFile = item =>
 // stall part-done with its notification frozen. The service is a foreground
 // service, so it survives both, and its queue is persisted so a job that was
 // running when the app was killed is picked up again on next launch.
-export const shareDeviceFile = async item => {
+export const shareDeviceFile = async (item, {purpose = 'share'} = {}) => {
   if (item?.id == null) {
     Alert.alert('Cannot share', 'This file has no database entry yet.');
     return false;
@@ -112,10 +112,14 @@ export const shareDeviceFile = async item => {
     title: item.title,
     localPath: item.file_path,
     mimeType: item.mimeType,
+    priority: purpose === 'share' ? 'share' : 'normal',
+    showReady: purpose === 'share',
   });
 
   ToastAndroid.show(
-    'Creating reusable link — see notification for details',
+    purpose === 'share'
+      ? 'Creating reusable link — see notification for details'
+      : 'Backing up — see notification for progress',
     ToastAndroid.SHORT,
   );
   return true;

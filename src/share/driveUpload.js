@@ -10,6 +10,7 @@
 import RNFetchBlob from 'react-native-blob-util';
 import {getGoogleAccessToken} from '../auth/tokenManager';
 import {getOrCreateDriveFolder} from '../backupRestore/restoreManager';
+import {uploadResumable} from '../backgroundService/resumableTransfer';
 
 export const getDriveStorageQuota = async () => {
   const accessToken = await getGoogleAccessToken();
@@ -56,15 +57,28 @@ const stripScheme = path =>
 // look up the way RNFS downloads have — so a caller that wants to cancel has
 // to be given the object itself while the upload is running.
 export const uploadFileToDrive = async ({
+  sourceId,
   localPath,
   name,
   mimeType,
   onProgress,
   onTask,
+  shouldPause,
 }) => {
   const accessToken = await getGoogleAccessToken();
   const folderId = await getOrCreateDriveFolder(SHARED_FOLDER_NAME);
-  const type = mimeType || 'application/octet-stream';
+  return uploadResumable({
+    sourceId,
+    localPath,
+    name,
+    mimeType,
+    accessToken,
+    folderId,
+    onTask,
+    onProgress,
+    shouldPause,
+  });
+/*
 
   const session = await RNFetchBlob.fetch(
     'POST',
@@ -129,7 +143,7 @@ export const uploadFileToDrive = async ({
     );
   }
 
-  return body.id;
+  return body.id; */
 };
 
 // Lets one named person read the copy, and nobody else.

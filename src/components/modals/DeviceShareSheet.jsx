@@ -23,7 +23,7 @@ const DeviceShareSheet = ({visible, hasDriveLink, onClose, onShareFile, onShareL
           <ShareOption
             icon="attach-file"
             label="Share file"
-            description="Attach the complete file from this phone to another app."
+            description="Share the original file to other apps."
             onPress={onShareFile}
           />
           <ShareOption
@@ -31,8 +31,8 @@ const DeviceShareSheet = ({visible, hasDriveLink, onClose, onShareFile, onShareL
             label="Share link"
             description={
               hasDriveLink
-                ? 'Share the reusable Google Drive link.'
-                : 'Create a reusable Drive link in the background. Progress will appear in notifications.'
+                ? 'Share link to other apps.'
+                : 'Create a reusable share link that avoids using mobile data each time.'
             }
             onPress={onShareLink}
           />

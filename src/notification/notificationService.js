@@ -127,7 +127,7 @@ export async function showUploadReadyNotification({itemId, sourceId, title, driv
     const channelId = await ensureUploadReadyChannel();
     await notifee.displayNotification({
       id: getUploadReadyNotificationId(itemId),
-      title: 'Upload complete',
+      title: 'Share link ready',
       body: `${title || 'Device file'} is ready to share`,
       data: {
         kind: 'device-upload',
@@ -158,6 +158,11 @@ export async function handleTransferNotificationAction({type, detail}) {
   if (actionId === 'cancel-transfers' && data.kind === 'transfer-service') {
     const {cancelAllTransfers} = await import('../backgroundService/backgroundDownloadService');
     await cancelAllTransfers();
+    return true;
+  }
+  if (actionId === 'cancel-share-transfer' && data.kind === 'share-transfer') {
+    const {cancelPriorityShareTransfer} = await import('../backgroundService/backgroundDownloadService');
+    await cancelPriorityShareTransfer();
     return true;
   }
   if (data.kind !== 'device-upload' || !data.itemId) return false;

@@ -1,4 +1,4 @@
-import notifee, {AndroidImportance} from '@notifee/react-native';
+import notifee, {AndroidImportance, AndroidStyle} from '@notifee/react-native';
 import RNFS from 'react-native-fs';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {updateItemFields} from '../database/U';
@@ -13,14 +13,32 @@ import {getGoogleAccessToken} from '../auth/tokenManager';
 import {performUpload} from '../share/uploadTask';
 import useShareStore from '../stores/useShareStore';
 import {useMediaStore} from '../stores/useMediaStore';
+import {
+  downloadResumable,
+  discardDownloadCheckpoint,
+  clearTransferCheckpoint,
+  TransferPausedError,
+} from './resumableTransfer';
 
 const QUEUE_KEY = '@download_queue';
 const TRANSFER_NOTIFICATION_ID = 'transfer-service';
 const TRANSFER_CHANNEL_ID = 'transfer-service';
+const SHARE_CHANNEL_ID = 'share-transfer';
 let transferServiceRunning = false;
 let transferRunnerResolve = null;
 let transferStartPromise = null;
 let foregroundServiceRegistered = false;
+let schedulerRunning = false;
+let activeTransferSource = null;
+const cancelledSources = new Set();
+
+const hasPriorityShare = async () => {
+  const queue = await getQueue();
+  return queue.some(file => file.kind === 'upload' && file.priority !== 'normal');
+};
+
+const pauseForPriorityShare = async file =>
+  file.kind !== 'upload' && file.priority !== 'share' && (await hasPriorityShare());
 
 // ── Queue (AsyncStorage) ──────────────────────────────────────────────────────
 
@@ -42,6 +60,15 @@ const removeFromQueue = async sourceId => {
   await saveQueue(queue.filter(f => f.sourceId !== sourceId));
 };
 
+const deferRetry = async sourceId => {
+  const queue = await getQueue();
+  await saveQueue(queue.map(file => {
+    if (file.sourceId !== sourceId) return file;
+    const retryCount = Math.min(6, Number(file.retryCount) || 0) + 1;
+    return {...file, retryCount, nextAttemptAt: Date.now() + Math.min(30000, 1000 * 2 ** (retryCount - 1))};
+  }));
+};
+
 // ── Active job / progress tracking ───────────────────────────────────────────
 
 const activeJobIds = new Map(); // sourceId → RNFS jobId
@@ -53,6 +80,8 @@ const activeUploadTasks = new Map();
 const kindsInFlight = new Map(); // sourceId → 'download' | 'upload'
 const fileProgress = new Map(); // sourceId → { total, written }
 const lastReportedPct = new Map(); // sourceId → last progress % pushed to the store
+const queueSizeCache = new Map();
+const queueSizeRequests = new Map();
 let pendingCount = 0; // files currently in-flight (including queued but not yet begun)
 let completedCount = 0; // files finished successfully in the current batch
 let completedBytes = 0; // bytes downloaded successfully in the current batch
@@ -64,9 +93,41 @@ const formatBytes = bytes => {
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 };
 
+const notificationName = value => {
+  const name = String(value || 'Untitled').replace(/\s+/g, ' ').trim();
+  return name.length > 28 ? `${name.slice(0, 27)}…` : name;
+};
+
+const resolveQueueSize = async file => {
+  const known = fileProgress.get(file.sourceId)?.total || Number(file.size) || 0;
+  if (known > 0) return known;
+  if (queueSizeCache.has(file.sourceId)) return queueSizeCache.get(file.sourceId);
+  if (queueSizeRequests.has(file.sourceId)) return queueSizeRequests.get(file.sourceId);
+  const request = (async () => {
+    try {
+      if (file.kind === 'upload' && file.localPath && await RNFS.exists(file.localPath)) {
+        return Number((await RNFS.stat(file.localPath)).size) || null;
+      }
+      if (!file.url) return null;
+      const headers = file.googleAuth
+        ? {Authorization: `Bearer ${await getGoogleAccessToken()}`}
+        : {};
+      const response = await fetch(file.url, {method: 'HEAD', headers});
+      return Number(response.headers.get('content-length')) || null;
+    } catch {
+      return null;
+    }
+  })();
+  queueSizeRequests.set(file.sourceId, request);
+  const value = await request;
+  queueSizeRequests.delete(file.sourceId);
+  queueSizeCache.set(file.sourceId, value);
+  return value;
+};
+
 const updateServiceNotification = async () => {
-  const count = activeJobIds.size;
-  const activeKinds = new Set(kindsInFlight.values());
+  const queue = await getQueue();
+  const count = Math.max(activeJobIds.size, queue.length);
   if (count === 0) return;
 
   let totalBytes = 0;
@@ -83,12 +144,12 @@ const updateServiceNotification = async () => {
 
   // The queue carries both directions now, so the wording follows what is
   // actually running rather than assuming downloads.
-  let verb = activeKinds.has('upload') ? 'Uploading' : 'Downloading';
-  if (activeKinds.has('upload') && activeKinds.has('download')) {
-    verb = 'Transferring';
-  }
-  const title =
-    count === 1 ? `${verb} 1 file` : `${verb} ${count} files`;
+  const activeSource = activeTransferSource || activeJobIds.keys().next().value;
+  const activeFile = queue.find(file => file.sourceId === activeSource) || queue[0];
+  const activeKind = kindsInFlight.get(activeSource) || activeFile?.kind || 'download';
+  const shareActive = activeKind === 'upload' && activeFile?.showReady !== false;
+  const verb = shareActive ? 'Sharing' : activeKind === 'upload' ? 'Uploading' : 'Downloading';
+  const title = verb;
 
   let taskDesc;
   let progressBar;
@@ -101,11 +162,30 @@ const updateServiceNotification = async () => {
     taskDesc =
       writtenBytes > 0
         ? `${formatBytes(writtenBytes)} transferred`
-        : 'Starting…';
+        : queue.length > 1
+          ? `${queue.length} files queued`
+          : 'Starting…';
     progressBar = {max: 100, value: 0, indeterminate: true};
   }
 
-  await safeUpdateNotification({taskTitle: title, taskDesc, progressBar});
+  const waiting = queue.filter(file => file.sourceId !== activeSource);
+  const rows = await Promise.all(waiting.slice(0, 8).map(async file => {
+    const size = fileProgress.get(file.sourceId)?.total || await resolveQueueSize(file);
+    const sizeText = size > 0 ? formatBytes(size) : 'unknown';
+    return `${notificationName(file.title).padEnd(30, ' ')}${sizeText}`;
+  }));
+  if (waiting.length > rows.length) rows.push(`…and ${waiting.length - rows.length} more`);
+  const activeLabel = activeFile?.title ? notificationName(activeFile.title) : 'Active transfer';
+  const displayDesc = `${activeLabel}  ${taskDesc}`;
+  const notificationLines = [displayDesc, ...rows];
+
+  await safeUpdateNotification({
+    taskTitle: title,
+    taskDesc: displayDesc,
+    progressBar,
+    notificationLines,
+    shareActive,
+  });
 };
 
 // ── Single-file download ──────────────────────────────────────────────────────
@@ -259,6 +339,8 @@ const downloadSingleFile = async file => {
 // a download and must not appear in the Downloads list, which reads that store.
 const uploadSingleFile = async file => {
   const {setUploading} = useShareStore.getState();
+  let paused = false;
+  let keepQueued = false;
   pendingCount++;
   setUploading(file.id, 0);
   // A placeholder jobId: uploads have no RNFS job to cancel, but the shared
@@ -270,11 +352,14 @@ const uploadSingleFile = async file => {
   try {
     const driveFileId = await performUpload({
       itemId: file.id,
+      sourceId: file.sourceId,
       title: file.title,
       localPath: file.localPath,
       mimeType: file.mimeType,
       onTask: task => activeUploadTasks.set(file.sourceId, task),
+      shouldPause: () => cancelledSources.has(file.sourceId) || pauseForPriorityShare(file),
       onProgress: ({percent, written, total}) => {
+        if (cancelledSources.has(file.sourceId)) return;
         // Real byte counts, so an upload contributes to the shared
         // "x MB / y MB" line on the same terms as a download. Recorded every
         // tick, since it costs a Map write; only the notification redraw is
@@ -292,40 +377,107 @@ const uploadSingleFile = async file => {
       },
     });
 
-    await showUploadReadyNotification({
-      itemId: file.id,
-      sourceId: file.sourceId,
-      title: file.title,
-      driveFileId,
-    });
+    if (file.showReady !== false) {
+      await showUploadReadyNotification({
+        itemId: file.id,
+        sourceId: file.sourceId,
+        title: file.title,
+        driveFileId,
+      });
+    }
   } catch (error) {
+    paused = cancelledSources.has(file.sourceId) || error instanceof TransferPausedError;
     // A cancelled upload rejects here like any other failure. cancelUpload has
     // already cleared the store entry by then, and its absence is what tells
     // the two apart — the same test downloadSingleFile uses. Without it,
     // stopping an upload on purpose ended in "Could not create link".
-    if (useShareStore.getState().uploading[file.id] != null) {
+    if (!paused && useShareStore.getState().uploading[file.id] != null) {
+      keepQueued = true;
+      await deferRetry(file.sourceId);
       console.error('Upload failed:', error);
       await onDisplayNotification(
-        'Could not create link',
-        `${file.title} was not shared. ${error?.message || ''}`.trim(),
+        'Upload interrupted',
+        `${file.title} will resume automatically when the connection is available.`,
       );
     }
-    await dismissNotification(`device-upload-${file.id}`);
+    if (!paused) await dismissNotification(`device-upload-${file.id}`);
   } finally {
     activeUploadTasks.delete(file.sourceId);
     activeJobIds.delete(file.sourceId);
+    cancelledSources.delete(file.sourceId);
     kindsInFlight.delete(file.sourceId);
     fileProgress.delete(file.sourceId);
     lastReportedPct.delete(file.sourceId);
     setUploading(file.id, null);
-    await removeFromQueue(file.sourceId);
+    if (!paused && !keepQueued) await removeFromQueue(file.sourceId);
     pendingCount--;
 
-    if (pendingCount === 0) {
-      await stopTransferService();
-    } else {
-      updateServiceNotification();
+    updateServiceNotification();
+  }
+};
+
+// Chunked download worker. A .part file and checkpoint survive process death;
+// normal work yields between chunks when a priority Share upload is queued.
+const resumableDownloadSingleFile = async file => {
+  const {setDownload} = useDownloadStore.getState();
+  let paused = false;
+  let keepQueued = false;
+  pendingCount++;
+  activeJobIds.set(file.sourceId, null);
+  kindsInFlight.set(file.sourceId, 'download');
+  setDownload(file.sourceId, {status: 'downloading', progress: 0});
+  try {
+    const headers = {
+      'Accept-Encoding': 'identity',
+      ...(file.googleAuth ? {Authorization: `Bearer ${await getGoogleAccessToken()}`} : {}),
+    };
+    const result = await downloadResumable({
+      sourceId: file.sourceId,
+      url: file.url,
+      localPath: file.localPath,
+      headers,
+      shouldPause: () => cancelledSources.has(file.sourceId) || pauseForPriorityShare(file),
+      onProgress: ({written, total}) => {
+        if (cancelledSources.has(file.sourceId)) return;
+        fileProgress.set(file.sourceId, {written, total});
+        const progress = total > 0 ? Math.min(100, Math.round((written / total) * 100)) : 0;
+        if (lastReportedPct.get(file.sourceId) === progress) return;
+        lastReportedPct.set(file.sourceId, progress);
+        setDownload(file.sourceId, {status: 'downloading', progress});
+        updateServiceNotification();
+      },
+    });
+    await updateItemFields(file.id, {file_path: file.localPath});
+    useDownloadStore.getState().notifyDownloadsChanged();
+    if (file.type === 'device_file') {
+      useMediaStore.getState().setDeviceFiles(prev =>
+        prev.map(f => f.id === file.id ? {...f, file_path: file.localPath} : f),
+      );
     }
+    setDownload(file.sourceId, {status: 'done', progress: 100, localPath: file.localPath});
+    completedCount++;
+    completedBytes += Number(result.written) || 0;
+  } catch (error) {
+    if (cancelledSources.has(file.sourceId)) {
+      paused = true;
+      await discardDownloadCheckpoint(file.sourceId, file.localPath);
+    } else if (error instanceof TransferPausedError) {
+      paused = true;
+      setDownload(file.sourceId, {status: 'queued'});
+    } else if (useDownloadStore.getState().downloads[file.sourceId]) {
+      keepQueued = true;
+      await deferRetry(file.sourceId);
+      setDownload(file.sourceId, {status: 'queued'});
+    }
+  } finally {
+    if (!paused && !keepQueued) await removeFromQueue(file.sourceId);
+    fileProgress.delete(file.sourceId);
+    lastReportedPct.delete(file.sourceId);
+    kindsInFlight.delete(file.sourceId);
+    activeJobIds.delete(file.sourceId);
+    cancelledSources.delete(file.sourceId);
+    pendingCount--;
+    updateServiceNotification();
   }
 };
 
@@ -333,26 +485,55 @@ const uploadSingleFile = async file => {
 // when the app died is picked up the same way whichever way it was going.
 // Entries written before uploads existed have no kind and are downloads.
 const runQueuedItem = file =>
-  file.kind === 'upload' ? uploadSingleFile(file) : downloadSingleFile(file);
+  file.kind === 'upload' ? uploadSingleFile(file) : resumableDownloadSingleFile(file);
 
 // ── Background task entry point ───────────────────────────────────────────────
 //
-// Never returns on its own. downloadSingleFile's finally block calls
-// BackgroundService.stop() when pendingCount reaches zero, which is the only
-// way this promise gets torn down. This keeps the service alive even when
-// files added after start() run outside this Promise.all.
+// The Notifee foreground runner stays alive while the scheduler drains the
+// persisted queue. New entries call pumpTransferQueue directly if the runner
+// is already active.
+
+const pumpTransferQueue = async () => {
+  if (schedulerRunning) return;
+  schedulerRunning = true;
+  try {
+    while (transferServiceRunning) {
+      const queue = await getQueue();
+      if (!queue.length) break;
+      // Share-link uploads always win. Transfers are processed one at a time,
+      // so the queue order is deterministic and a Share upload cannot be
+      // starved by a large download.
+      const priority = queue.find(item =>
+        (item.kind === 'upload' && item.priority !== 'normal') || item.priority === 'share',
+      );
+      if (priority) {
+        const waitMs = Math.max(0, Number(priority.nextAttemptAt) - Date.now());
+        if (waitMs) await new Promise(resolve => setTimeout(resolve, waitMs));
+        activeTransferSource = priority.sourceId;
+        await runQueuedItem(priority);
+        activeTransferSource = null;
+      } else {
+        const file = queue[0];
+        const waitMs = Math.max(0, Number(file.nextAttemptAt) - Date.now());
+        if (waitMs) await new Promise(resolve => setTimeout(resolve, waitMs));
+        activeTransferSource = file.sourceId;
+        await runQueuedItem(file);
+        activeTransferSource = null;
+      }
+    }
+  } finally {
+    activeTransferSource = null;
+    schedulerRunning = false;
+    if (transferServiceRunning && !(await getQueue()).length) await stopTransferService();
+  }
+};
 
 const downloadTask = async () => {
-  const queue = await getQueue();
-  if (!queue.length) {
+  if (!(await getQueue()).length) {
     await stopTransferService();
     return;
   }
-
-  queue.forEach(runQueuedItem);
-
-  // The Notifee foreground runner keeps the service alive after this function
-  // returns and resolves when stopTransferService is called.
+  pumpTransferQueue();
 };
 
 // Starts (or restarts, e.g. after the app/service was killed mid-transfer)
@@ -427,15 +608,16 @@ export const enqueueDownload = async ({
   const queue = await getQueue();
   if (queue.some(f => f.sourceId === sourceId)) return;
 
-  const file = {kind: 'download', id, sourceId, title, url, localPath, type, mimeType, googleAuth};
+  const file = {kind: 'download', priority: 'normal', id, sourceId, title, url, localPath, type, mimeType, googleAuth};
   await saveQueue([...queue, file]);
   // Stash title/type/mimeType in the store too so the Downloads screen can
   // render an in-progress card (status updates merge over this).
   setDownload(sourceId, {status: 'queued', progress: 0, title, type, mimeType});
 
   if (transferServiceRunning) {
-    // Service already alive — start this download alongside existing ones.
-    downloadSingleFile(file);
+    // Service already alive — the scheduler will pick it after the active file.
+    pumpTransferQueue();
+    updateServiceNotification();
   } else {
     await startDownloadService(`Downloading ${title}`);
   }
@@ -449,16 +631,25 @@ export const enqueueDownload = async ({
 // sourceId keys the queue and the in-flight maps; id is the db row the Drive
 // copy gets recorded against. They are different values for a device file, and
 // both are needed.
-export const enqueueUpload = async ({id, sourceId, title, localPath, mimeType}) => {
+export const enqueueUpload = async ({
+  id,
+  sourceId,
+  title,
+  localPath,
+  mimeType,
+  priority = 'share',
+  showReady = priority === 'share',
+}) => {
   const queue = await getQueue();
   if (queue.some(f => f.sourceId === sourceId)) return;
 
-  const file = {kind: 'upload', id, sourceId, title, localPath, mimeType};
+  const file = {kind: 'upload', priority, showReady, id, sourceId, title, localPath, mimeType};
   await saveQueue([...queue, file]);
   useShareStore.getState().setUploading(id, 0);
 
   if (transferServiceRunning) {
-    uploadSingleFile(file);
+    pumpTransferQueue();
+    updateServiceNotification();
   } else {
     await startDownloadService(`Uploading ${title}`);
   }
@@ -466,6 +657,11 @@ export const enqueueUpload = async ({id, sourceId, title, localPath, mimeType}) 
 
 export const cancelDownload = async sourceId => {
   const {removeDownload} = useDownloadStore.getState();
+  cancelledSources.add(sourceId);
+  const queuedFile = (await getQueue()).find(file => file.sourceId === sourceId);
+  if (queuedFile?.localPath) {
+    await discardDownloadCheckpoint(sourceId, queuedFile.localPath);
+  }
   // Remove from queue and UI immediately so the catch block in
   // downloadSingleFile sees the entry is gone and skips setting 'failed'.
   await removeFromQueue(sourceId);
@@ -477,18 +673,22 @@ export const cancelDownload = async sourceId => {
   // reject/resolve, which runs its catch + finally (decrements pendingCount,
   // updates notification or stops service).
   const jobId = activeJobIds.get(sourceId);
-  if (jobId !== undefined) {
+  if (jobId != null) {
     RNFS.stopDownload(jobId);
     activeJobIds.delete(sourceId);
   }
 
-  // Update notification immediately to reflect the correct remaining count.
-  if (pendingCount > 1) {
+  // pendingCount only counts active workers. There may still be queued
+  // downloads, so never stop the foreground service merely because the
+  // cancelled item was the only active one.
+  if ((await getQueue()).length) {
+    pumpTransferQueue();
     updateServiceNotification();
-  } else {
+  } else if (pendingCount <= 1) {
     await stopTransferService();
+  } else {
+    updateServiceNotification();
   }
-  // If pendingCount === 1, the finally block will call BackgroundService.stop().
 };
 
 // Stops an upload in flight. Takes both ids because the two halves of an
@@ -503,6 +703,9 @@ export const cancelDownload = async sourceId => {
 // rather than to a file, and an abandoned session expires on Google's side
 // without ever becoming one.
 export const cancelUpload = async ({sourceId, itemId}) => {
+  cancelledSources.add(sourceId);
+  await clearTransferCheckpoint(`@transfer_upload:${sourceId}`);
+  await clearTransferCheckpoint(`@transfer_upload:${itemId}`);
   useShareStore.getState().setUploading(itemId, null);
   await removeFromQueue(sourceId);
   fileProgress.delete(sourceId);
@@ -518,11 +721,22 @@ export const cancelUpload = async ({sourceId, itemId}) => {
     activeUploadTasks.delete(sourceId);
   }
 
-  if (pendingCount > 1) {
+  if ((await getQueue()).length) {
+    pumpTransferQueue();
     updateServiceNotification();
-  } else {
+  } else if (pendingCount <= 1) {
     await stopTransferService();
+  } else {
+    updateServiceNotification();
   }
+};
+
+export const cancelPriorityShareTransfer = async () => {
+  const queue = await getQueue();
+  const share = queue.find(file => file.kind === 'upload' && file.priority !== 'normal');
+  if (!share) return false;
+  await cancelUpload({sourceId: share.sourceId, itemId: share.id});
+  return true;
 };
 
 export const cancelAllTransfers = async () => {
@@ -530,10 +744,16 @@ export const cancelAllTransfers = async () => {
   await saveQueue([]);
   const {removeDownload} = useDownloadStore.getState();
   const {setUploading} = useShareStore.getState();
-  queue.forEach(file => {
-    if (file.kind === 'upload') setUploading(file.id, null);
-    else removeDownload(file.sourceId);
-  });
+  for (const file of queue) {
+    cancelledSources.add(file.sourceId);
+    if (file.kind === 'upload') {
+      setUploading(file.id, null);
+      await clearTransferCheckpoint(`@transfer_upload:${file.sourceId}`);
+    } else {
+      removeDownload(file.sourceId);
+      if (file.localPath) await discardDownloadCheckpoint(file.sourceId, file.localPath);
+    }
+  }
   for (const [sourceId, jobId] of activeJobIds.entries()) {
     if (jobId != null) {
       try { RNFS.stopDownload(jobId); } catch {}
@@ -547,7 +767,9 @@ export const cancelAllTransfers = async () => {
   fileProgress.clear();
   lastReportedPct.clear();
   kindsInFlight.clear();
-  pendingCount = 0;
+  // Active workers will unwind their own finally blocks. Do not reset this
+  // counter here or their completions can drive it negative and corrupt the
+  // next notification batch.
   await stopTransferService();
 };
 
@@ -588,28 +810,45 @@ export const restoreDownloadState = async () => {
   }
 };
 
-const safeUpdateNotification = async ({taskTitle, taskDesc, progressBar}) => {
+const safeUpdateNotification = async ({
+  taskTitle,
+  taskDesc,
+  progressBar,
+  notificationLines = [taskDesc],
+  shareActive = false,
+}) => {
   try {
     if (!transferServiceRunning) return;
-    const channelId = await notifee.createChannel({
+    const transferChannelId = await notifee.createChannel({
       id: TRANSFER_CHANNEL_ID,
       name: 'File transfers',
       importance: AndroidImportance.LOW,
     });
+    const shareChannelId = await notifee.createChannel({
+      id: SHARE_CHANNEL_ID,
+      name: 'Share uploads',
+      importance: AndroidImportance.LOW,
+    });
+    const progress = progressBar.indeterminate
+      ? {indeterminate: true}
+      : {max: progressBar.max, current: progressBar.value};
+    const actions = [{
+      title: 'Cancel',
+      pressAction: {id: shareActive ? 'cancel-share-transfer' : 'cancel-transfers'},
+    }];
     await notifee.displayNotification({
       id: TRANSFER_NOTIFICATION_ID,
       title: taskTitle,
       body: taskDesc,
-      data: {kind: 'transfer-service'},
+      data: {kind: shareActive ? 'share-transfer' : 'transfer-service'},
       android: {
-        channelId,
+        channelId: shareActive ? shareChannelId : transferChannelId,
         asForegroundService: true,
         ongoing: true,
         onlyAlertOnce: true,
-        progress: progressBar.indeterminate
-          ? {indeterminate: true}
-          : {max: progressBar.max, current: progressBar.value},
-        actions: [{title: 'Cancel', pressAction: {id: 'cancel-transfers'}}],
+        style: {type: AndroidStyle.INBOX, lines: notificationLines},
+        progress,
+        actions,
       },
     });
   } catch {}

@@ -155,9 +155,21 @@ export async function handleTransferNotificationAction({type, detail}) {
   if (type !== EventType.ACTION_PRESS) return false;
   const actionId = detail?.pressAction?.id;
   const data = detail?.notification?.data || {};
-  if (actionId === 'cancel-transfers' && data.kind === 'transfer-service') {
+  if (
+    (actionId === 'cancel-all-transfers' || actionId === 'cancel-transfers') &&
+    (data.kind === 'transfer-service' || data.kind === 'share-transfer')
+  ) {
     const {cancelAllTransfers} = await import('../backgroundService/backgroundDownloadService');
     await cancelAllTransfers();
+    return true;
+  }
+  if (
+    actionId === 'cancel-transfer-item' &&
+    (data.kind === 'transfer-service' || data.kind === 'share-transfer') &&
+    data.sourceId
+  ) {
+    const {cancelTransferItem} = await import('../backgroundService/backgroundDownloadService');
+    await cancelTransferItem(data.sourceId);
     return true;
   }
   if (actionId === 'cancel-share-transfer' && data.kind === 'share-transfer') {

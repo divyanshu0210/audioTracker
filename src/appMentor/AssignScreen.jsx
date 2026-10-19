@@ -23,7 +23,6 @@ import {useShallow} from 'zustand/react/shallow';
 import {navigationRef} from '../handlers/navigationRef';
 import {startAssignmentService} from '../backgroundService/backgroundDownloadService';
 import {
-  resumePendingAssignments,
   savePendingAssignment,
 } from './assignmentQueue';
 import UserAvatar from './UserAvatar';
@@ -228,6 +227,16 @@ const AssignScreen = () => {
       return next;
     });
   }, []);
+
+  const approveAllConsent = useCallback(() => {
+    setConsentKeys(previous => {
+      const next = new Set(previous);
+      plan.forEach(entry => {
+        if (entry.requiresConsent) next.add(entry.key);
+      });
+      return next;
+    });
+  }, [plan]);
 
   // ── What each mentee already has ──────────────────────────────────────
   //
@@ -573,7 +582,9 @@ const AssignScreen = () => {
           : 'Assignment progress is shown in the notification.'),
       ToastAndroid.LONG,
     );
-    void resumePendingAssignments();
+    // The foreground service owns the durable runner. Starting it here rather
+    // than awaiting the assignment in the screen keeps uploads and API calls
+    // alive when the mentor immediately leaves or closes the app.
     void startAssignmentService();
     setSelectionMode(false);
     setUserSelectionMode(false);
@@ -982,6 +993,7 @@ const AssignScreen = () => {
         removable={!assigning}
         consentKeys={consentKeys}
         onToggleConsent={toggleConsent}
+        onApproveAllConsent={approveAllConsent}
       />
 
       <MenteeList renderTrailing={renderMenteeBadge} showSelectionHeader={false} />

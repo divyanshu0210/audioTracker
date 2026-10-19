@@ -151,7 +151,11 @@ const updateServiceNotification = async () => {
   const activeSource = activeTransferSource || activeJobIds.keys().next().value;
   const activeFile = queue.find(file => file.sourceId === activeSource) || queue[0];
   const activeKind = kindsInFlight.get(activeSource) || activeFile?.kind || 'download';
-  const shareActive = activeKind === 'upload' && activeFile?.showReady !== false;
+  // Assignment uploads are share-priority uploads too. They deliberately do
+  // not show the reusable-link completion notification (`showReady: false`),
+  // but the active transfer must still be presented as Sharing so the mentor
+  // knows why this upload is running and why it has priority.
+  const shareActive = activeKind === 'upload' && activeFile?.priority === 'share';
   const verb = shareActive ? 'Sharing' : activeKind === 'upload' ? 'Uploading' : 'Downloading';
   const title = verb;
 
@@ -200,6 +204,9 @@ const updateServiceNotification = async () => {
     progressBar,
     notificationLines,
     shareActive,
+    activeSource,
+    activeItemId: activeFile?.id,
+    activeKind,
   });
 };
 
@@ -545,12 +552,17 @@ const pumpTransferQueue = async () => {
 const downloadTask = async () => {
   const assignmentQueue = await import('../appMentor/assignmentQueue');
   while (transferServiceRunning) {
+    // Rehydrate assignment uploads before draining ordinary transfers. This
+    // lets the scheduler see their share priority and pause a normal download
+    // at its next resumable chunk instead of making the assignment wait for a
+    // potentially very large queue to finish.
+    await assignmentQueue.resumePendingAssignments();
+
     if ((await getQueue()).length) await pumpTransferQueue();
 
     // A persisted assignment may still be waiting for its post-upload API
     // work. Keep the foreground service alive and retry after a network
     // interruption instead of waiting for the next app launch.
-    await assignmentQueue.resumePendingAssignments();
     if ((await getQueue()).length) continue;
     if (await assignmentQueue.hasPendingAssignment()) {
       await new Promise(resolve => setTimeout(resolve, 30000));
@@ -599,7 +611,7 @@ const startDownloadService = async taskTitle => {
         ongoing: true,
         onlyAlertOnce: true,
         progress: {max: 100, current: 0, indeterminate: true},
-        actions: [{title: 'Cancel', pressAction: {id: 'cancel-transfers'}}],
+        actions: [{title: 'Cancel all', pressAction: {id: 'cancel-all-transfers'}}],
         pressAction: {id: 'open-notifications', launchActivity: 'default'},
       },
     });
@@ -638,7 +650,11 @@ export const enqueueDownload = async ({
   const {setDownload} = useDownloadStore.getState();
 
   const queue = await getQueue();
-  if (queue.some(f => f.sourceId === sourceId)) return;
+  if (queue.some(f => f.sourceId === sourceId)) {
+    // The service may already be draining this item.
+    if (transferServiceRunning) pumpTransferQueue();
+    return;
+  }
 
   const file = {kind: 'download', priority: 'normal', id, sourceId, title, url, localPath, type, mimeType, googleAuth};
   await saveQueue([...queue, file]);
@@ -673,7 +689,14 @@ export const enqueueUpload = async ({
   showReady = priority === 'share',
 }) => {
   const queue = await getQueue();
-  if (queue.some(f => f.sourceId === sourceId)) return;
+  if (queue.some(f => f.sourceId === sourceId)) {
+    // A persisted assignment may discover its upload already in the queue
+    // while the foreground runner is starting. Kick the scheduler here so a
+    // caller waiting for the Drive-copy row cannot wait before the queue has
+    // had a chance to run.
+    if (transferServiceRunning) pumpTransferQueue();
+    return;
+  }
 
   const size = await getMediaFileSize(localPath);
   const file = {
@@ -724,9 +747,13 @@ export const cancelDownload = async sourceId => {
   // pendingCount only counts active workers. There may still be queued
   // downloads, so never stop the foreground service merely because the
   // cancelled item was the only active one.
+  const assignmentQueue = await import('../appMentor/assignmentQueue').catch(() => null);
+  const hasPendingAssignment = await assignmentQueue?.hasPendingAssignment?.();
   if ((await getQueue()).length) {
     pumpTransferQueue();
     updateServiceNotification();
+  } else if (hasPendingAssignment) {
+    await startDownloadService('Assigning items');
   } else if (pendingCount <= 1) {
     await stopTransferService();
   } else {
@@ -747,6 +774,16 @@ export const cancelDownload = async sourceId => {
 // without ever becoming one.
 export const cancelUpload = async ({sourceId, itemId}) => {
   cancelledSources.add(sourceId);
+  // If this upload belongs to an assignment, persist the cancellation before
+  // stopping the transfer. The assignment runner will then skip only this
+  // item and continue with the remaining groups.
+  let assignmentQueue = null;
+  try {
+    assignmentQueue = await import('../appMentor/assignmentQueue');
+    await assignmentQueue.markAssignmentUploadCancelled(sourceId);
+  } catch (error) {
+    console.warn('Could not record assignment upload cancellation:', error?.message);
+  }
   await clearTransferCheckpoint(`@transfer_upload:${sourceId}`);
   await clearTransferCheckpoint(`@transfer_upload:${itemId}`);
   useShareStore.getState().setUploading(itemId, null);
@@ -764,14 +801,36 @@ export const cancelUpload = async ({sourceId, itemId}) => {
     activeUploadTasks.delete(sourceId);
   }
 
+  const hasPendingAssignment = await assignmentQueue?.hasPendingAssignment?.();
   if ((await getQueue()).length) {
     pumpTransferQueue();
     updateServiceNotification();
+  } else if (hasPendingAssignment) {
+    // The cancelled upload may have been the only transfer keeping the
+    // foreground service alive. Keep/restart it so the runner can deliver the
+    // remaining non-cancelled assignment items.
+    await startDownloadService('Assigning items');
   } else if (pendingCount <= 1) {
     await stopTransferService();
   } else {
     updateServiceNotification();
   }
+};
+
+// Cancels only the active item represented by the notification. The remaining
+// queue stays intact and the scheduler moves on to the next transfer.
+export const cancelTransferItem = async sourceId => {
+  if (!sourceId) return false;
+  const queue = await getQueue();
+  const file = queue.find(item => String(item.sourceId) === String(sourceId));
+  if (!file) return false;
+
+  if (file.kind === 'upload') {
+    await cancelUpload({sourceId: file.sourceId, itemId: file.id});
+  } else {
+    await cancelDownload(file.sourceId);
+  }
+  return true;
 };
 
 export const cancelPriorityShareTransfer = async () => {
@@ -785,11 +844,13 @@ export const cancelPriorityShareTransfer = async () => {
 export const cancelAllTransfers = async () => {
   const queue = await getQueue();
   await saveQueue([]);
+  const assignmentQueue = await import('../appMentor/assignmentQueue').catch(() => null);
   const {removeDownload} = useDownloadStore.getState();
   const {setUploading} = useShareStore.getState();
   for (const file of queue) {
     cancelledSources.add(file.sourceId);
     if (file.kind === 'upload') {
+      await assignmentQueue?.markAssignmentUploadCancelled(file.sourceId);
       setUploading(file.id, null);
       await clearTransferCheckpoint(`@transfer_upload:${file.sourceId}`);
     } else {
@@ -814,6 +875,9 @@ export const cancelAllTransfers = async () => {
   // counter here or their completions can drive it negative and corrupt the
   // next notification batch.
   await stopTransferService();
+  if (await assignmentQueue?.hasPendingAssignment?.()) {
+    await startDownloadService('Assigning items');
+  }
 };
 
 export const restoreDownloadState = async () => {
@@ -859,6 +923,9 @@ const safeUpdateNotification = async ({
   progressBar,
   notificationLines = [taskDesc],
   shareActive = false,
+  activeSource,
+  activeItemId,
+  activeKind,
 }) => {
   try {
     if (!transferServiceRunning) return;
@@ -875,15 +942,22 @@ const safeUpdateNotification = async ({
     const progress = progressBar.indeterminate
       ? {indeterminate: true}
       : {max: progressBar.max, current: progressBar.value};
-    const actions = [{
-      title: 'Cancel',
-      pressAction: {id: shareActive ? 'cancel-share-transfer' : 'cancel-transfers'},
-    }];
+    const actions = [
+      ...(activeSource
+        ? [{title: 'Cancel', pressAction: {id: 'cancel-transfer-item'}}]
+        : []),
+      {title: 'Cancel all', pressAction: {id: 'cancel-all-transfers'}},
+    ];
     await notifee.displayNotification({
       id: TRANSFER_NOTIFICATION_ID,
       title: taskTitle,
       body: taskDesc,
-      data: {kind: shareActive ? 'share-transfer' : 'transfer-service'},
+      data: {
+        kind: shareActive ? 'share-transfer' : 'transfer-service',
+        sourceId: String(activeSource || ''),
+        itemId: String(activeItemId || ''),
+        transferKind: activeKind || '',
+      },
       android: {
         channelId: shareActive ? shareChannelId : transferChannelId,
         asForegroundService: true,

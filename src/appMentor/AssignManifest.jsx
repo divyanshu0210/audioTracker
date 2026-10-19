@@ -34,10 +34,13 @@ if (
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
 
-const STATUS_STYLE = {
-  [AssignStatus.READY]: {color: '#047857', bg: '#ecfdf5', icon: 'checkmark-circle'},
-  [AssignStatus.NO_COPY]: {color: '#b45309', bg: '#fffbeb', icon: 'alert-circle'},
-  [AssignStatus.UNSUPPORTED]: {color: '#b45309', bg: '#fffbeb', icon: 'alert-circle'},
+const formatBytes = bytes => {
+  const value = Number(bytes) || 0;
+  if (value < 1024 * 1024) return `${Math.max(1, Math.round(value / 1024))} KB`;
+  if (value < 1024 * 1024 * 1024) {
+    return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+  }
+  return `${(value / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 };
 
 // Already-assigned is not a property of the item — the same file is sendable
@@ -52,8 +55,13 @@ const STATUS_STYLE = {
 // so recognising them costs nothing.
 const Row = ({entry, onRemove, removable, consentGranted, onToggleConsent}) => {
   const approved = entry.status === AssignStatus.READY || consentGranted;
-  const style = approved ? STATUS_STYLE[AssignStatus.READY] : STATUS_STYLE[entry.status];
   const skipped = !approved;
+  const showDeviceType =
+    !(entry.status !== AssignStatus.READY && entry.typeLabel === 'On this phone');
+  const displayTitle =
+    entry.requiresConsent && entry.size
+      ? `${entry.title} - ${formatBytes(entry.size)}`
+      : entry.title;
 
   return (
     <View style={styles.row}>
@@ -67,61 +75,70 @@ const Row = ({entry, onRemove, removable, consentGranted, onToggleConsent}) => {
         <Text
           numberOfLines={1}
           style={[styles.rowTitle, skipped && styles.rowTitleMuted]}>
-          {entry.title}
+          {displayTitle}
         </Text>
         {/* The type is named on every row, not only the broken ones: a mentor
             looking at "Bhagavatam 1.2.6" cannot otherwise tell whether they
             picked the YouTube lecture or the file on their phone, and those
             two reach the mentee by completely different routes. */}
         <Text numberOfLines={2} style={styles.rowSub}>
-          {entry.typeLabel}
-          {entry.reason ? ` · ${entry.reason}` : ''}
+          {[showDeviceType ? entry.typeLabel : null, entry.reason]
+            .filter(Boolean)
+            .join(' · ')}
         </Text>
       </View>
-      {entry.requiresConsent && (
-        <TouchableOpacity
-          onPress={() => onToggleConsent(entry.key)}
-          disabled={!removable}
-          style={[
-            styles.consentToggle,
-            consentGranted && styles.consentToggleGranted,
-          ]}
-          accessibilityRole="checkbox"
-          accessibilityState={{checked: consentGranted}}>
-          {!consentGranted && <Text style={styles.consentText}>Allow</Text>}
+      <View style={styles.rowActions}>
+        {entry.requiresConsent && (
+          <TouchableOpacity
+            onPress={() => onToggleConsent(entry.key)}
+            disabled={!removable}
+            style={[
+              styles.consentToggle,
+              consentGranted && styles.consentToggleGranted,
+            ]}
+            accessibilityRole="checkbox"
+            accessibilityState={{checked: consentGranted}}>
+            {!consentGranted && <Text style={styles.consentText}>Allow</Text>}
 
+            <Ionicons
+              name={consentGranted ? 'checkmark-circle' : 'ellipse-outline'}
+              size={13}
+              color={consentGranted ? '#047857' : '#9ca3af'}
+            />
+          </TouchableOpacity>
+        )}
+        {/* Telling a mentor that four of their eight items cannot be sent, and
+            then making them walk back two screens to do anything about it, is
+            half an answer. hitSlop rather than a bigger box: the row is 30-odd
+            points tall and the touch target has to be thumb-sized without the
+            cross itself shouting louder than the status beside it. */}
+        <TouchableOpacity
+          onPress={() => onRemove(entry)}
+          disabled={!removable}
+          hitSlop={{top: 10, bottom: 10, left: 4, right: 4}}
+          style={styles.remove}>
           <Ionicons
-            name={consentGranted ? 'checkmark-circle' : 'ellipse-outline'}
-            size={13}
-            color={consentGranted ? '#047857' : '#9ca3af'}
+            name="close"
+            size={16}
+            color={removable ? '#9ca3af' : '#e5e7eb'}
           />
         </TouchableOpacity>
-      )}
-      {!consentGranted && (
-        <View style={[styles.chip, {backgroundColor: style.bg}]}>
-          <Ionicons name={style.icon} size={13} color={style.color} />
-        </View>
-      )}
-
-      {/* Telling a mentor that four of their eight items cannot be sent, and
-          then making them walk back two screens to do anything about it, is
-          half an answer. hitSlop rather than a bigger box: the row is 30-odd
-          points tall and the touch target has to be thumb-sized without the
-          cross itself shouting louder than the status beside it. */}
-      <TouchableOpacity
-        onPress={() => onRemove(entry)}
-        disabled={!removable}
-        hitSlop={{top: 10, bottom: 10, left: 10, right: 10}}
-        style={styles.remove}>
-        <Ionicons
-          name="close"
-          size={16}
-          color={removable ? '#9ca3af' : '#e5e7eb'}
-        />
-      </TouchableOpacity>
+      </View>
     </View>
   );
 };
+
+const SectionHeading = ({icon, color, title, action}) => (
+  <View style={styles.sectionHeading}>
+    <View style={styles.sectionHeadingLabel}>
+      <Ionicons name={icon} size={14} color={color} />
+      <Text style={[styles.sectionHeadingText, {color}]} numberOfLines={1}>
+        {title}
+      </Text>
+    </View>
+    {action}
+  </View>
+);
 
 const AssignManifest = ({
   plan,
@@ -132,6 +149,7 @@ const AssignManifest = ({
   removable,
   consentKeys,
   onToggleConsent,
+  onApproveAllConsent,
 }) => {
   const needsAttention = summary.noCopy > 0 || summary.unsupported > 0;
   const [expanded, setExpanded] = useState(false);
@@ -178,18 +196,22 @@ const AssignManifest = ({
   // Counted here rather than in `summary`, which is about the items alone:
   // this one depends on who is selected.
   const consentEntries = plan.filter(entry => entry.requiresConsent);
-  const consentRequired = consentEntries.length;
-  const pendingConsent = consentEntries.filter(
+  const pendingConsentEntries = consentEntries.filter(
     entry => !consentKeys?.has(entry.key),
-  ).length;
-  const permanentlyUnsendable = plan.filter(
+  );
+  const permanentlyUnsendableEntries = plan.filter(
     entry => entry.status !== AssignStatus.READY && !entry.requiresConsent,
-  ).length;
+  );
+  const approvedConsentEntries = consentEntries.filter(entry =>
+    consentKeys?.has(entry.key),
+  );
+  const readyEntries = plan.filter(
+    entry => entry.status === AssignStatus.READY && !entry.requiresConsent,
+  );
+  const pendingConsent = pendingConsentEntries.length;
+  const permanentlyUnsendable = permanentlyUnsendableEntries.length;
+  const assignableCount = approvedConsentEntries.length + readyEntries.length;
   const warningCount = permanentlyUnsendable + pendingConsent;
-  const orderedPlan = [
-    ...plan.filter(entry => entry.status !== AssignStatus.READY),
-    ...plan.filter(entry => entry.status === AssignStatus.READY),
-  ];
 
   return (
     <View style={styles.card}>
@@ -208,31 +230,18 @@ const AssignManifest = ({
               />
             )}
             <Text style={styles.headerTitle}>
-              {permanentlyUnsendable > 0
+              {pendingConsent > 0 && permanentlyUnsendable > 0
+                ? `${pendingConsent} need approval · ${permanentlyUnsendable} can't be assigned`
+                : pendingConsent > 0
+                ? `${pendingConsent} ${pendingConsent === 1 ? 'item needs' : 'items need'} upload approval`
+                : permanentlyUnsendable > 0
                 ? `${permanentlyUnsendable} of ${summary.total} ${
                     summary.total === 1 ? 'item' : 'items'
                   } can't be assigned`
-                : pendingConsent > 0
-                ? `${pendingConsent} ${pendingConsent === 1 ? 'item needs' : 'items need'} upload approval`
-                : `${summary.ready + consentRequired} of ${summary.total} ${
+                : `${assignableCount} of ${summary.total} ${
                     summary.total === 1 ? 'item' : 'items'
                   } can be assigned`}
             </Text>
-            {expanded && permanentlyUnsendable > 0 && (
-              <TouchableOpacity
-                style={styles.bulkAction}
-                onPress={event => {
-                  event?.stopPropagation?.();
-                  onRemoveUnsendable();
-                }}
-                disabled={!removable}
-                activeOpacity={0.7}>
-                <Ionicons name="close-circle-outline" size={15} color="#b91c1c" />
-                <Text style={styles.bulkActionText} numberOfLines={1}>
-                  Remove {permanentlyUnsendable}
-                </Text>
-              </TouchableOpacity>
-            )}
             </View>
           </View>
           <View style={styles.detailsToggle}>
@@ -259,13 +268,86 @@ const AssignManifest = ({
             showsVerticalScrollIndicator
             persistentScrollbar
             keyboardShouldPersistTaps="handled">
-            {orderedPlan.map(entry => (
+            {consentEntries.length > 0 && (
+              <SectionHeading
+                icon="share-outline"
+                color="#b45309"
+                title={
+                  pendingConsent > 0
+                    ? `${pendingConsent} ${pendingConsent === 1 ? 'item needs' : 'items need'} approval${
+                        approvedConsentEntries.length > 0
+                          ? ` - ${approvedConsentEntries.length} approved`
+                          : ''
+                      }`
+                    : `${approvedConsentEntries.length} approved for upload`
+                }
+                action={
+                  pendingConsent > 0 ? (
+                    <TouchableOpacity
+                      style={[styles.sectionAction, styles.allowAllAction]}
+                      onPress={onApproveAllConsent}
+                      disabled={!removable}
+                      activeOpacity={0.7}>
+                      <Ionicons name="checkmark-done-outline" size={14} color="#047857" />
+                      <Text style={styles.allowAllText}>Allow all</Text>
+                    </TouchableOpacity>
+                  ) : null
+                }
+              />
+            )}
+            {consentEntries.map(entry => (
               <Row
                 key={entry.key}
                 entry={entry}
                 onRemove={onRemove}
                 removable={removable}
                 consentGranted={consentKeys?.has(entry.key)}
+                onToggleConsent={onToggleConsent}
+              />
+            ))}
+            {permanentlyUnsendableEntries.length > 0 && (
+              <SectionHeading
+                icon="alert-circle-outline"
+                color="#b91c1c"
+                title={`${permanentlyUnsendable} ${permanentlyUnsendable === 1 ? 'item cannot be assigned' : 'items cannot be assigned'}`}
+                action={(
+                  <TouchableOpacity
+                    style={[styles.sectionAction, styles.removeAllAction]}
+                    onPress={onRemoveUnsendable}
+                    disabled={!removable}
+                    activeOpacity={0.7}>
+                    <Ionicons name="close-circle-outline" size={14} color="#b91c1c" />
+                    <Text style={styles.removeAllText}>Remove all</Text>
+                  </TouchableOpacity>
+                )}
+              />
+            )}
+            {permanentlyUnsendableEntries.map(entry => (
+              <Row
+                key={entry.key}
+                entry={entry}
+                onRemove={onRemove}
+                removable={removable}
+                consentGranted={false}
+                onToggleConsent={onToggleConsent}
+              />
+            ))}
+            {readyEntries.length > 0 && (
+              <SectionHeading
+                icon="checkmark-circle-outline"
+                color="#047857"
+                title={`${readyEntries.length} ${
+                  readyEntries.length === 1 ? 'item can' : 'items can'
+                } be assigned`}
+              />
+            )}
+            {readyEntries.map(entry => (
+              <Row
+                key={entry.key}
+                entry={entry}
+                onRemove={onRemove}
+                removable={removable}
+                consentGranted={false}
                 onToggleConsent={onToggleConsent}
               />
             ))}
@@ -320,6 +402,49 @@ const styles = StyleSheet.create({
   warningHeadingIcon: {
     marginRight: 5,
   },
+  sectionHeading: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingTop: 8,
+    paddingBottom: 4,
+    paddingHorizontal: 2,
+  },
+  sectionHeadingLabel: {
+    flexShrink: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  sectionHeadingText: {
+    marginLeft: 5,
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  sectionAction: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginLeft: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  allowAllAction: {
+    backgroundColor: '#ecfdf5',
+  },
+  removeAllAction: {
+    backgroundColor: '#fef2f2',
+  },
+  allowAllText: {
+    marginLeft: 3,
+    color: '#047857',
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  removeAllText: {
+    marginLeft: 3,
+    color: '#b91c1c',
+    fontSize: 10,
+    fontWeight: '700',
+  },
   list: {
     marginTop: 8,
     maxHeight: 220,
@@ -334,38 +459,20 @@ const styles = StyleSheet.create({
   },
   rowIcon: {width: 22},
   rowText: {flex: 1, marginRight: 8},
+  rowActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexShrink: 0,
+    marginLeft: 4,
+  },
   rowTitle: {fontSize: 13, fontWeight: '600', color: '#111827'},
   rowTitleMuted: {color: '#6b7280'},
   rowSub: {fontSize: 11, color: '#6b7280', marginTop: 1},
-  chip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderRadius: 10,
-    paddingHorizontal: 7,
-    paddingVertical: 3,
-  },
   emptyText: {
     fontSize: 13,
     color: '#6b7280',
     textAlign: 'center',
     paddingVertical: 6,
-  },
-  bulkAction: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    alignSelf: 'flex-start',
-    marginTop: 0,
-    marginRight: 4,
-    paddingVertical: 4,
-    paddingHorizontal: 8,
-    borderRadius: 12,
-    backgroundColor: '#fef2f2',
-  },
-  bulkActionText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#b91c1c',
-    marginLeft: 5,
   },
   remove: {
     paddingLeft: 8,

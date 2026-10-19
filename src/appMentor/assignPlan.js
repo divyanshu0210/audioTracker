@@ -19,6 +19,9 @@ import {getDriveCopyId} from '../database/sharedDriveCopies';
 import {getDeviceFileMeta} from '../database/deviceFileMeta';
 import {getMediaFileSize} from '../utils/mediaFile';
 
+// Direct assignment of a local device file is allowed up to 50 MB. Larger
+// files can still be assigned after the mentor explicitly approves the upload
+// and its mobile-data/storage cost in the Assign screen.
 export const MAX_ASSIGNABLE_DEVICE_BYTES = 5 * 1024 * 1024;
 
 export const AssignStatus = Object.freeze({
@@ -129,7 +132,7 @@ const buildEntry = async item => {
         status: AssignStatus.NO_COPY,
         ...(size > MAX_ASSIGNABLE_DEVICE_BYTES
           ? {
-              reason: 'File size more than 50 MB. Mobile data usage warning!.',
+              reason: 'Larger than 50 MB — upload approval required',
               requiresConsent: true,
               requiresUpload: true,
               size,

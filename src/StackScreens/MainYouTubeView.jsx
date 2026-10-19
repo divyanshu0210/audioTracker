@@ -19,7 +19,7 @@ const MainScreen = ({onRefresh}) => {
       loading={loading}
       type={ItemTypes.YOUTUBE}
       screen={ScreenTypes.MAIN}
-      listHeaderComponent={<YouTubeSearchBar />}
+      // listHeaderComponent={<YouTubeSearchBar />}
     />
   );
 }

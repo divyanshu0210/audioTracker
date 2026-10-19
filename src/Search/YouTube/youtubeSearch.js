@@ -32,6 +32,7 @@ export async function getYouTubeClient() {
       ensureRandomUUID();
       return Innertube.create({
         retrieve_player: false,
+        enable_safety_mode: true,
         lang: 'en',
         location: 'US',
       });
@@ -75,8 +76,23 @@ const nodeThumbnail = node =>
   bestThumbnail(node?.content_image?.primary_thumbnail?.image) ||
   bestThumbnail(node?.content_image?.image);
 
+const isYouTubeShort = node => {
+  const nodeType = String(node?.type || '').toLowerCase();
+  const contentType = String(node?.content_type || node?.contentType || '')
+    .toLowerCase();
+
+  return (
+    nodeType.includes('shortslockup') ||
+    nodeType === 'reelitem' ||
+    nodeType === 'shorts' ||
+    ['short', 'shorts', 'reel'].includes(contentType) ||
+    node?.is_short === true ||
+    node?.isShort === true
+  );
+};
+
 export function normalizeYouTubeNode(node, forcedType) {
-  if (!node) return null;
+  if (!node || isYouTubeShort(node)) return null;
   const nodeType = String(node.type || '').toLowerCase();
   const type = forcedType ||
     (nodeType.includes('channel') ? 'channel' :
@@ -147,6 +163,7 @@ export function normalizeSearchFeed(feed, requestedType = 'all') {
   const searchResults = Array.from(feed?.results || []);
   if (searchResults.length) {
     const normalized = searchResults.flatMap(node => {
+      if (isYouTubeShort(node)) return [];
       const nodeType = String(node?.type || '').toLowerCase();
       const contentType = String(node?.content_type || '').toLowerCase();
       const type = nodeType.includes('channel')

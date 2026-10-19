@@ -36,3 +36,13 @@ export async function addYouTubeSearchHistory(query) {
 
   return nextHistory;
 }
+
+export async function clearYouTubeSearchHistory() {
+  try {
+    await AsyncStorage.removeItem(HISTORY_KEY);
+    return true;
+  } catch (error) {
+    console.warn('Could not clear YouTube search history:', error?.message || error);
+    return false;
+  }
+}

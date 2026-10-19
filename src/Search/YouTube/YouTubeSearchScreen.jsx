@@ -15,6 +15,7 @@ import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
 import PlaylistThumbnail from '../../components/PlaylistThumbnail';
 import {
   addYouTubeSearchHistory,
+  clearYouTubeSearchHistory,
   getYouTubeSearchHistory,
 } from './youtubeSearchHistory';
 import {
@@ -136,6 +137,11 @@ export default function YouTubeSearchScreen() {
   const changeFilter = filter => {
     setActiveFilter(filter);
     if (submittedQuery) runSearch(submittedQuery, filter);
+  };
+
+  const clearSearchHistory = async () => {
+    const cleared = await clearYouTubeSearchHistory();
+    if (cleared) setSearchHistory([]);
   };
 
   const loadMore = async () => {
@@ -264,7 +270,18 @@ export default function YouTubeSearchScreen() {
             </TouchableOpacity>
           )}
           ListHeaderComponent={searchHistory.length ? (
-            <Text style={styles.historyHeading}>Recent searches</Text>
+            <View style={styles.historyHeader}>
+              <Text style={styles.historyHeading}>Recent searches</Text>
+              {__DEV__ && (
+                <TouchableOpacity
+                  accessibilityRole="button"
+                  accessibilityLabel="Clear YouTube search history"
+                  onPress={clearSearchHistory}
+                  style={styles.clearHistoryButton}>
+                  <Text style={styles.clearHistoryText}>Clear</Text>
+                </TouchableOpacity>
+              )}
+            </View>
           ) : null}
           ListEmptyComponent={
             <View style={styles.centerState}>
@@ -341,7 +358,10 @@ const styles = StyleSheet.create({
   activeFilterText: {color: '#fff'},
   queryCaption: {paddingHorizontal: 14, paddingVertical: 8, color: '#606060', fontSize: 13},
   historyContent: {flexGrow: 1, paddingBottom: 24},
-  historyHeading: {paddingHorizontal: 16, paddingTop: 18, paddingBottom: 8, color: '#606060', fontSize: 14, fontWeight: '600'},
+  historyHeader: {flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 18, paddingBottom: 8},
+  historyHeading: {color: '#606060', fontSize: 14, fontWeight: '600'},
+  clearHistoryButton: {paddingHorizontal: 8, paddingVertical: 5},
+  clearHistoryText: {fontSize: 13, fontWeight: '600', color: '#606060'},
   historyRow: {minHeight: 48, flexDirection: 'row', alignItems: 'center', gap: 14, paddingHorizontal: 16},
   historyText: {flex: 1, color: '#202124', fontSize: 14},
   resultsContent: {paddingBottom: 24},

@@ -22,6 +22,7 @@ import { useShallow } from 'zustand/react/shallow';
 import SaveToListBar from '../components/SaveToListBar';
 import useMentorMenteeStore from '../appMentor/useMentorMenteeStore';
 import {loadChildProgress} from '../appMentorBackend/assignmentsMgt';
+import SortNameButton, {useNameSort} from '../components/buttons/SortNameButton';
 
 export default function PlaylistView() {
   const route = useRoute();
@@ -34,6 +35,8 @@ const {videos, setVideos} = useMediaStore(
 );
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false); // NEW state for refresh button
+  const {sortDirection, sortedItems: sortedVideos, toggleSort} =
+    useNameSort(videos);
 
   const {userInfo} = useAppState();
   const activeMentee = useMentorMenteeStore(state => state.activeMentee);
@@ -240,16 +243,19 @@ const {videos, setVideos} = useMediaStore(
           initialActiveFilters:['youtube_video','youtube_playlist']
         }}
         rightComponent={
-          refreshing ? (
-            <ActivityIndicator size="small" />
-          ) : (
-            <TouchableOpacity
-              onPress={refreshVideos}
-              disabled={loading || refreshing}
-              style={{padding: 8}}>
-              <MaterialIcons name="refresh" size={24} color="#000" />
-            </TouchableOpacity>
-          )
+          <>
+            <SortNameButton direction={sortDirection} onPress={toggleSort} />
+            {refreshing ? (
+              <ActivityIndicator size="small" />
+            ) : (
+              <TouchableOpacity
+                onPress={refreshVideos}
+                disabled={loading || refreshing}
+                style={{padding: 8}}>
+                <MaterialIcons name="refresh" size={24} color="#000" />
+              </TouchableOpacity>
+            )}
+          </>
         }
       />
 
@@ -259,7 +265,7 @@ const {videos, setVideos} = useMediaStore(
         </View>
       ) : (
         <BaseMediaListComponent
-          mediaList={videos}
+          mediaList={sortedVideos}
           emptyText={'No videos in this playlist.'}
           onRefresh={fetchVideos}
           loading={loading}

@@ -1,5 +1,6 @@
 import {StyleSheet, View, Pressable, Alert, ToastAndroid} from 'react-native';
 import React, {useCallback, useMemo, useRef} from 'react';
+import Ionicons from 'react-native-vector-icons/Ionicons';
 import {isAudioOrVideo} from '../Linking/utils/handleLinkSubmit';
 import {enqueueDriveDownload} from '../components/buttons/Download';
 import AssignmentStatusStrip from '../appMentor/AssignmentStatusStrip';
@@ -49,10 +50,11 @@ const BaseItem = ({
     })),
   );
 
-  const {setSelectedItems, setSelectionMode} = useSelectionStore(
+  const {setSelectedItems, setSelectionMode, selectionMode} = useSelectionStore(
     useShallow(state => ({
       setSelectedItems: state.setSelectedItems,
       setSelectionMode: state.setSelectionMode,
+      selectionMode: state.selectionMode,
     })),
   );
 
@@ -64,6 +66,27 @@ const BaseItem = ({
   );
 
   const sourceId = item?.rowid || item?.source_id || item?.id?.toString();
+
+  // Pinned ISKCON rows are rebuilt from the pins store and can omit the
+  // current file_path. Merge the live media-store row before handing an item
+  // to the shared menu so Download/Remove Download reflects the real file.
+  const currentIskconItem = useMediaStore(
+    useCallback(
+      state => {
+        if (type !== ItemTypes.ISKCON || !sourceId) return null;
+        return (
+          state.iskconFiles.find(file => file.source_id === sourceId) ||
+          state.iskconFolderEntries.find(file => file.source_id === sourceId) ||
+          null
+        );
+      },
+      [sourceId, type],
+    ),
+  );
+  const menuItem =
+    type === ItemTypes.ISKCON && currentIskconItem
+      ? {...item, ...currentIskconItem}
+      : item;
 
   // A row out of the Iskcon browser's scraped listing rather than our DB:
   // folders exist only on audio.iskcondesiretree.com, so there is nothing to
@@ -120,6 +143,21 @@ const BaseItem = ({
         : [...prev, selectionEntry],
     );
   }, [setSelectedItems, sourceId, type, selectionEntry]);
+
+  // Selection is an explicit control now. Tapping the row itself must remain
+  // free to open a folder, playlist, player or note even while the global
+  // selection header is visible. The radio starts selection mode when needed
+  // and keeps the existing cross-screen selection semantics.
+  const handleRadioPress = useCallback(
+    event => {
+      event?.stopPropagation?.();
+      const {selectionMode} = useSelectionStore.getState();
+
+      if (!selectionMode) setSelectionMode(true);
+      toggleSelection();
+    },
+    [setSelectionMode, sourceId, type, toggleSelection],
+  );
 
   const handleItemLongPress = useCallback(() => {
     if (isIskconFolder) return;
@@ -394,12 +432,23 @@ const BaseItem = ({
   );
 
   const handlePress = useCallback(() => {
-    const {selectionMode} = useSelectionStore.getState();
-    if (selectionMode) {
-      // Tapping a scraped folder mid-selection would navigate away from the
-      // selection the user is still building, and it can't be selected either
-      // — so it does nothing until selection mode is closed.
-      if (!isIskconFolder) toggleSelection();
+    const {selectionMode: activeSelectionMode} = useSelectionStore.getState();
+    const isPlayableSelectionRow =
+      (type === ItemTypes.YOUTUBE && item?.type !== 'youtube_playlist') ||
+      (type === ItemTypes.DRIVE &&
+        item?.mimeType !== 'application/vnd.google-apps.folder' &&
+        isAudioOrVideo(item?.mimeType)) ||
+      (type === ItemTypes.DEVICE && isAudioOrVideo(item?.mimeType)) ||
+      (type === ItemTypes.ISKCON && !isIskconFolder);
+
+    if (
+      activeSelectionMode &&
+      (type === ItemTypes.NOTE || isPlayableSelectionRow)
+    ) {
+      ToastAndroid.show(
+        'Press the radio button to select files',
+        ToastAndroid.SHORT,
+      );
       return;
     }
 
@@ -413,7 +462,7 @@ const BaseItem = ({
       sourceType: item?.type || type,
       item: item,
     });
-  }, [item, toggleSelection, isIskconFolder]);
+  }, [item, type, isIskconFolder, setActiveItem, sourceId]);
 
   // Only ever populated while a mentor has a mentee selected, and keyed on the
   // same id the assignment was created with — so for every other list, and for
@@ -434,7 +483,9 @@ const BaseItem = ({
     // of this component (press dispatch, selection, menu) is unchanged, so
     // such a row behaves exactly like every other item in the app.
     const Component = itemComponent ?? typeConfigMap[type]?.Component;
-    return Component ? <Component item={item} screen={screen} /> : null;
+    return Component ? (
+      <Component item={item} screen={screen} selectionMode={selectionMode} />
+    ) : null;
   };
 
   const renderBaseMenu = () => {
@@ -477,12 +528,12 @@ const BaseItem = ({
     [ItemTypes.ISKCON]: {
       Component: IskconItem,
       onPress: handleIskconPress,
-      showMenu: () => false,
+      showMenu: () => true,
     },
     [ItemTypes.DRIVE]: {
       Component: DriveItem,
       onPress: handleDrivePress,
-      showMenu: () => false,
+      showMenu: () => true,
     },
     [ItemTypes.NOTEBOOK]: {
       Component: NotebookItem,
@@ -520,14 +571,30 @@ const BaseItem = ({
         // Only when the bar is actually there, so no other list gains height.
         assignment && !isContainer && styles.rowWithStatusBar,
       ]}>
+      {selectionMode && !isIskconFolder && (
+        <Pressable
+          onPressIn={event => event.stopPropagation?.()}
+          onPress={handleRadioPress}
+          hitSlop={8}
+          accessibilityRole="radio"
+          accessibilityState={{selected}}
+          accessibilityLabel={selected ? 'Deselect item' : 'Select item'}
+          style={styles.selectionControl}>
+          <Ionicons
+            name={selected ? 'radio-button-on' : 'radio-button-off'}
+            size={22}
+            color={selected ? '#2563eb' : '#9ca3af'}
+          />
+        </Pressable>
+      )}
       {/* Wrapped in a column only when there is something to add underneath.
           The wrapper is a row, and every row visual is built for being its
           direct child — leaving that untouched in the ordinary case keeps this
           out of the layout of every list in the app. */}
       {renderItem()}
       <View style={styles.menuWrapper}>
-        {renderBaseMenu() && (
-          <BaseMenu item={item} type={type} screen={screen} />
+        {!selectionMode && renderBaseMenu() && (
+          <BaseMenu item={menuItem} type={type} screen={screen} />
         )}
       </View>
       {/* Absolutely positioned along the row's foot, so it adds no height and
@@ -548,6 +615,12 @@ const styles = StyleSheet.create({
     borderBottomWidth: 0.5,
     borderBottomColor: '#ccc',
     backgroundColor: '#fff',
+  },
+  selectionControl: {
+    width: 34,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 4,
   },
   menuWrapper: {
     justifyContent: 'center',

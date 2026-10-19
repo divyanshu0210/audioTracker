@@ -15,6 +15,7 @@ import IskconList from './IskconList';
 import AppHeader from '../components/headers/AppHeader';
 import SearchBarToggle from '../appMentor/SearchBarToggle';
 import {useMediaStore} from '../stores/useMediaStore';
+import SortNameButton, {useNameSort} from '../components/buttons/SortNameButton';
 
 const IskconFolderViewer = () => {
   const route = useRoute();
@@ -71,13 +72,20 @@ const IskconFolderViewer = () => {
 
   // One unlabelled group: a folder's contents are its contents, and the base
   // list's date grouping means nothing for entries scraped off a web page.
-  const sections = useMemo(() => {
+  const filteredEntries = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
-    const displayEntries = q
+    return q
       ? entries.filter(e => e.title?.toLowerCase().includes(q))
       : entries;
-    return displayEntries.length ? [{title: '', data: displayEntries}] : [];
   }, [entries, searchQuery]);
+
+  const {sortDirection, sortedItems: sortedEntries, toggleSort} =
+    useNameSort(filteredEntries);
+
+  const sections = useMemo(() => {
+    const displayEntries = sortedEntries;
+    return displayEntries.length ? [{title: '', data: displayEntries}] : [];
+  }, [sortedEntries]);
 
   const onFolderPress = useCallback(f => {
     setFolderStack(prev => [
@@ -127,21 +135,24 @@ const IskconFolderViewer = () => {
         }
         onBreadcrumbPress={jumpTo}
         rightComponent={
-          <SearchBarToggle
-            ref={searchBarRef}
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-            placeholder="Search in folder..."
-            autoFocus
-            onToggle={setSearchActive}
-            icon={
-              <MaterialIcons
-                name={searchActive ? 'close' : 'search'}
-                size={22}
-                color="#222"
-              />
-            }
-          />
+          <>
+            <SortNameButton direction={sortDirection} onPress={toggleSort} />
+            <SearchBarToggle
+              ref={searchBarRef}
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              placeholder="Search in folder..."
+              autoFocus
+              onToggle={setSearchActive}
+              icon={
+                <MaterialIcons
+                  name={searchActive ? 'close' : 'search'}
+                  size={22}
+                  color="#222"
+                />
+              }
+            />
+          </>
         }
       />
       <IskconList

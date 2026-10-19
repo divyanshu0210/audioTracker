@@ -9,7 +9,15 @@ import {useAppState} from '../contexts/AppStateContext';
 import useMentorMenteeStore from '../appMentor/useMentorMenteeStore';
 import {loadChildProgress} from '../appMentorBackend/assignmentsMgt';
 import {logRender} from '../contexts/renderLog';
-import {Alert, Animated, SafeAreaView, StyleSheet} from 'react-native';
+import {
+  ActivityIndicator,
+  Alert,
+  Animated,
+  SafeAreaView,
+  StyleSheet,
+  TouchableOpacity,
+} from 'react-native';
+import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
 import {useMediaStore} from '../stores/useMediaStore';
 import {getItemBySourceId, upsertItem} from '../database/C';
 import {getChildrenByParent} from '../database/R';
@@ -19,6 +27,7 @@ import {ItemTypes, ScreenTypes} from '../contexts/constants';
 import AppHeader from '../components/headers/AppHeader';
 import useLoadingStore from '../stores/useLoadingStore';
 import {getGoogleAccessToken} from '../auth/tokenManager';
+import SortNameButton, {useNameSort} from '../components/buttons/SortNameButton';
 
 export const fetchDriveItems = async (
   source_id,
@@ -26,6 +35,7 @@ export const fetchDriveItems = async (
   setFolderCache,
   setCurrentItems,
   setLoading,
+  forceRefresh = false,
 ) => {
   if (!source_id) {
     console.error('Error', 'Invalid Drive ID');
@@ -33,7 +43,7 @@ export const fetchDriveItems = async (
   }
 
   // ── 1. Check local in-memory cache first (instant, no DB round-trip) ──────
-  if (folderCache[source_id]) {
+  if (!forceRefresh && folderCache[source_id]) {
     console.log('Cache hit:', source_id);
     setCurrentItems(folderCache[source_id]);
     return;
@@ -54,7 +64,7 @@ export const fetchDriveItems = async (
       'drive_file',
       'drive_folder',
     ]);
-    if (storedFiles.length > 0) {
+    if (storedFiles.length > 0 && !forceRefresh) {
       setCurrentItems(storedFiles);
       setFolderCache(source_id, storedFiles);
       console.log('Got files from database');
@@ -81,6 +91,7 @@ export const fetchDriveItems = async (
     const driveFiles = response.data.files;
     if (!driveFiles?.length) {
       setCurrentItems([]);
+      if (forceRefresh) setFolderCache(source_id, []);
       console.log('Google Drive returned no files');
       return;
     }
@@ -166,6 +177,9 @@ const GoogleDriveViewer = () => {
   const activeMentee = useMentorMenteeStore(state => state.activeMentee);
   const setLoading = useLoadingStore(state => state.setLoading);
   const loading = useLoadingStore(state => state.loading);
+  const [refreshing, setRefreshing] = useState(false);
+  const {sortDirection, sortedItems: sortedCurrentItems, toggleSort} =
+    useNameSort(currentItems);
 
   // Clear store data when viewer unmounts so stale folder items don't linger.
   useEffect(() => () => useMediaStore.getState().setData([]), []);
@@ -199,6 +213,29 @@ const GoogleDriveViewer = () => {
 
   // ── Fetch items whenever the top of the folder stack changes ─────────────
   const currentFolder = folderStack[folderStack.length - 1];
+
+  const refreshCurrentFolder = useCallback(async () => {
+    if (!currentFolder?.source_id || refreshing) return;
+    setRefreshing(true);
+    try {
+      await fetchDriveItems(
+        currentFolder.source_id,
+        folderCacheRef.current,
+        setFolderCache,
+        setCurrentItems,
+        setLoading,
+        true,
+      );
+    } finally {
+      setRefreshing(false);
+    }
+  }, [
+    currentFolder?.source_id,
+    refreshing,
+    setFolderCache,
+    setCurrentItems,
+    setLoading,
+  ]);
 
   useEffect(() => {
     if (!currentFolder?.source_id) {
@@ -318,17 +355,32 @@ const GoogleDriveViewer = () => {
           sourceId: driveInfo.id,
           initialActiveFilters: ['drive_file', 'drive_folder'],
         }}
+        rightComponent={
+          <>
+            <SortNameButton direction={sortDirection} onPress={toggleSort} />
+            {refreshing ? (
+              <ActivityIndicator size="small" />
+            ) : (
+              <TouchableOpacity
+                onPress={refreshCurrentFolder}
+                disabled={loading || refreshing}
+                style={{padding: 8}}>
+                <MaterialIcons name="refresh" size={24} color="#000" />
+              </TouchableOpacity>
+            )}
+          </>
+        }
       />
 
       {/* ── Animated list container ── */}
       <Animated.View style={[styles.listWrapper, {transform: [{translateX}]}]}>
         <BaseMediaListComponent
-          mediaList={currentItems}
+          mediaList={sortedCurrentItems}
           emptyText={'No items in this folder.'}
           onRefresh={() =>
             fetchDriveItems(
               currentFolder.source_id,
-              {}, // pass empty cache to force refresh
+              {}, // preserve the existing pull-to-refresh behavior
               setFolderCache,
               setCurrentItems,
               setLoading,

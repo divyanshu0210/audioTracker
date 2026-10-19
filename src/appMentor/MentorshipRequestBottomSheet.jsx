@@ -19,6 +19,8 @@ import {useAppState} from '../contexts/AppStateContext';
 import {BASE_URL} from '../appMentorBackend/userMgt';
 import { navigationRef } from '../handlers/navigationRef';
 
+const normalizeEmail = value => value.trim().toLowerCase();
+
 const MentorshipRequestBottomSheet = forwardRef(({}, ref) => {
   const [email, setEmail] = useState('');
   const [userExists, setUserExists] = useState(false);
@@ -45,8 +47,9 @@ const MentorshipRequestBottomSheet = forwardRef(({}, ref) => {
   // whole debounce and reads as nothing having happened.
   useEffect(() => {
     const lookupId = ++lookupIdRef.current;
+    const normalizedEmail = normalizeEmail(email);
 
-    if (!email.trim()) {
+    if (!normalizedEmail) {
       setChecking(false);
       setUserExists(false);
       setUserFullName('');
@@ -56,7 +59,7 @@ const MentorshipRequestBottomSheet = forwardRef(({}, ref) => {
 
     setChecking(true);
     const delayDebounce = setTimeout(() => {
-      checkUser(email.trim(), lookupId);
+      checkUser(normalizedEmail, lookupId);
     }, 300);
     return () => clearTimeout(delayDebounce);
   }, [email]);
@@ -104,7 +107,7 @@ const MentorshipRequestBottomSheet = forwardRef(({}, ref) => {
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({
           sender_id: userInfo?.id,
-          receiver_email: email,
+          receiver_email: normalizeEmail(email),
           request_type: type,
         }),
       });

@@ -3,16 +3,14 @@ import { StyleSheet, Text, View} from 'react-native';
 import RNFS from 'react-native-fs';
 import {useShallow} from 'zustand/react/shallow';
 import {DownloadProgressIndicator} from '../components/buttons/DownloadProgressIndicator';
-import BaseMenu from '../components/menu/BaseMenu';
 import {AssignmentSubtitle} from '../appMentor/AssignmentStatusStrip';
-import {ItemTypes} from '../contexts/constants';
 import {useAppState} from '../contexts/AppStateContext';
 import {DownloadedBadge, getFileIcon} from '../contexts/fileIconHelper';
 import { useMediaStore } from '../stores/useMediaStore';
 import useDownloadStore from '../stores/useDownloadStore';
 import {cancelDownload} from '../backgroundService/backgroundDownloadService';
 
-const DriveItem = ({item, screen}) => {
+const DriveItem = ({item}) => {
   const [fileExists, setFileExists] = useState(false);
 
   const {setDriveLinksList, setData} = useMediaStore(
@@ -101,25 +99,23 @@ const DriveItem = ({item, screen}) => {
         )}
       </View>
 
-      {/* The menu is the row's permanent action now that a Drive file plays
-          without being downloaded — Download moved inside it. Progress sits
-          beside the menu rather than replacing it, so everything else the menu
-          offers stays reachable while bytes are coming down. */}
-      <View style={styles.actionWrapper}>
-        {!isFolder && isDownloading && (
+      {/* Progress sits beside the shared BaseItem menu rather than replacing
+          it, so the menu remains reachable while bytes are coming down. */}
+      {!isFolder && isDownloading && (
+        <View style={styles.actionWrapper}>
           <DownloadProgressIndicator
             progress={download.progress}
             onCancel={() => cancelDownload(item.source_id)}
           />
-        )}
-        <BaseMenu item={item} screen={screen} type={ItemTypes.DRIVE} />
-      </View>
+        </View>
+      )}
     </View>
   );
 };
 
 const styles = StyleSheet.create({
   row: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
   },

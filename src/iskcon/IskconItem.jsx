@@ -7,12 +7,11 @@
 // Folders get a pin toggle and a chevron; a tap on one walks deeper (BaseItem
 // routes it to onFolderPress off `kind`), and it can't be selected.
 //
-// Files are always playable (streamed remotely if not downloaded), so they
-// show the three-dot menu — "Download"/"Remove Download" lives inside it — and
-// keep it while a download runs, with the progress ring beside it rather than
-// in place of it. Everything else the menu offers stays reachable that way.
-// This row renders BaseMenu itself rather than letting BaseItem do it (BaseItem
-// defers for ItemTypes.ISKCON + itemComponent) so the two can sit together.
+// Files are always playable (streamed remotely if not downloaded). BaseItem
+// supplies the shared menu, while this row keeps its progress ring and pin
+// controls beside the content.
+// BaseItem renders the shared menu beside this row. This component owns only
+// the pin and download-progress controls.
 //
 // The "download finished" sync still belongs to the row, not the menu entry
 // that starts it: react-native-material-menu keeps its children in a Modal
@@ -32,10 +31,8 @@ import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityI
 import RNFS from 'react-native-fs';
 
 import {DownloadedBadge, getFileIcon} from '../contexts/fileIconHelper';
-import BaseMenu from '../components/menu/BaseMenu';
 import {AssignmentSubtitle} from '../appMentor/AssignmentStatusStrip';
 import {DownloadProgressIndicator} from '../components/buttons/DownloadProgressIndicator';
-import {ItemTypes} from '../contexts/constants';
 import {useMediaStore} from '../stores/useMediaStore';
 import useDownloadStore from '../stores/useDownloadStore';
 import {cancelDownload} from '../backgroundService/backgroundDownloadService';
@@ -59,10 +56,9 @@ const formatBreadcrumb = path => {
   return prefix + shown.join(' › ');
 };
 
-// `screen` is handed down by BaseItem and forwarded to BaseMenu below —
-// CommonMenuItems uses it to decide whether "Remove from category" applies
-// here, so dropping it would take that entry off the IDT tab.
-const IskconItem = ({item: entry, screen}) => {
+// The shared BaseItem owns the menu and passes the current screen to it. This
+// row keeps only its pin and download-progress controls beside the content.
+const IskconItem = ({item: entry}) => {
   // Only the browser's scraped listing carries `kind`. Rows coming from the
   // DB — the category-filtered listing, the pinned files strip — are always
   // files, and fall through to the file branches below.
@@ -156,7 +152,8 @@ const IskconItem = ({item: entry, screen}) => {
           <MaterialIcons name="chevron-right" size={24} color="#bbb" />
         </>
       ) : (
-        <View style={styles.actionWrapper}>
+        (isPinned || isDownloading) && (
+          <View style={styles.actionWrapper}>
           {/* Only once pinned, and so only ever an unpin. Pinning a file is
               offered from the player, where you have just heard it and know
               whether you want it again - a pin icon on every browse row would
@@ -177,12 +174,8 @@ const IskconItem = ({item: entry, screen}) => {
               onCancel={() => cancelDownload(entry.source_id)}
             />
           )}
-          <BaseMenu
-            item={{...mergedEntry, file_path: fileExists ? filePath : null}}
-            type={ItemTypes.ISKCON}
-            screen={screen}
-          />
-        </View>
+          </View>
+        )
       )}
     </View>
   );

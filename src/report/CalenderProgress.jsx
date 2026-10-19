@@ -8,7 +8,6 @@ import {
 import {Calendar} from 'react-native-calendars';
 import {generateWatchData} from './utils/ProgressDataCollector';
 import {getHourlyWatchMap, getSumOfWatchTimesByDate} from '../database/R';
-import {lastNDays} from './utils/hourlyMap';
 import {useFocusEffect, useIsFocused} from '@react-navigation/native';
 import {SafeAreaView} from 'react-native-safe-area-context';
 import WatchTimeChart from './WatchTimeChart';
@@ -81,18 +80,38 @@ const CalendarProgress = () => {
   const mentee = useMentorMenteeStore(state => state.activeMentee);
   const ownerKey = mentee?.id ?? 'self';
   const {userInfo} = useAppState();
+  const [hourlyMap, setHourlyMap] = useState([]);
+  const [hourlyLoading, setHourlyLoading] = useState(true);
+  const hourlyRequestRef = useRef(0);
 
-  // Whichever week the bar chart is showing, so swiping it moves both. Falls
-  // back to the last seven days until the chart has reported a week.
+  // Whichever week the bar chart is showing, so swiping it moves both. Wait
+  // until the chart reports its week instead of briefly showing a separate
+  // rolling seven-day range first.
   const refreshHourlyMap = useCallback(() => {
-    const dates = currentWeek?.length ? currentWeek : lastNDays(7);
+    const requestId = ++hourlyRequestRef.current;
+    const dates = currentWeek;
+    if (!dates?.length) {
+      setHourlyMap([]);
+      setHourlyLoading(true);
+      return;
+    }
+    setHourlyLoading(true);
     const load = mentee
       ? fetchHourlyWatchMapFromBackend(userInfo?.id, mentee.id, dates)
       : getHourlyWatchMap(dates);
 
-    load.then(setHourlyMap).catch(error => {
-      console.error('Could not build the hourly watch map:', error);
-    });
+    load
+      .then(nextMap => {
+        if (requestId !== hourlyRequestRef.current) return;
+        setHourlyMap(nextMap);
+        setHourlyLoading(false);
+      })
+      .catch(error => {
+        if (requestId !== hourlyRequestRef.current) return;
+        console.error('Could not build the hourly watch map:', error);
+        setHourlyMap([]);
+        setHourlyLoading(false);
+      });
   }, [currentWeek, mentee, userInfo?.id]);
 
   // Rebuilt whenever the week changes, and on focus - coming back from the
@@ -100,7 +119,6 @@ const CalendarProgress = () => {
   useEffect(() => {
     refreshHourlyMap();
   }, [refreshHourlyMap]);
-  const [hourlyMap, setHourlyMap] = useState([]);
 
   useEffect(() => {
     if (
@@ -121,6 +139,9 @@ const CalendarProgress = () => {
   ]);
 
   useEffect(() => {
+    setCurrentWeek(null);
+    setHourlyMap([]);
+    setHourlyLoading(true);
     fetchWatchData(currentMonth, true, true);
     const previousMonth = getPreviousMonth(currentMonth);
     fetchWatchData(previousMonth, false);
@@ -268,6 +289,9 @@ const CalendarProgress = () => {
 
     if (newMonth === currentMonth) return;
 
+    setCurrentWeek(null);
+    setHourlyMap([]);
+    setHourlyLoading(true);
     cacheFor(ownerKey)[currentMonth] = data;
     setCurrentMonth(newMonth);
     fetchWatchData(newMonth, true);
@@ -490,7 +514,11 @@ const CalendarProgress = () => {
               onWeekChange={onWeekChange}
             />
 
-            <WatchTimeHeatGrid data={hourlyMap} mentee={mentee} />
+            <WatchTimeHeatGrid
+              data={hourlyMap}
+              mentee={mentee}
+              loading={hourlyLoading}
+            />
 
             {currentWeek && !mentee && (
               <WeeklyReportCard currentWeek={currentWeek} />

@@ -50,8 +50,13 @@ const cellColor = minutes => {
 const HOUR_TICKS = [0, 3, 6, 9, 12, 15, 18, 21];
 
 const WEEKDAYS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+const LOADING_ROWS = WEEKDAYS.map((label, index) => ({
+  date: `loading-${index}`,
+  label,
+  hours: Array(24).fill(0),
+}));
 
-const WatchTimeHeatGrid = ({data, mentee}) => {
+const WatchTimeHeatGrid = ({data, mentee, loading = false}) => {
   const rows = useMemo(
     () =>
       (data ?? []).map(day => {
@@ -66,18 +71,19 @@ const WatchTimeHeatGrid = ({data, mentee}) => {
       }),
     [data],
   );
+  const displayedRows = loading ? LOADING_ROWS : rows;
 
-  if (rows.length === 0) return null;
+  if (rows.length === 0 && !loading) return null;
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, loading && styles.loadingContainer]}>
       <Text style={styles.heading}>
         {mentee
           ? `When ${mentee.full_name?.split(' ')[0] ?? 'they'} watches`
           : 'When you watch'}
       </Text>
 
-      {rows.map(row => (
+      {displayedRows.map(row => (
         <View key={row.date} style={styles.row}>
           <Text style={styles.dayLabel}>{row.label}</Text>
           <View style={styles.cells}>
@@ -105,6 +111,7 @@ const WatchTimeHeatGrid = ({data, mentee}) => {
           ))}
         </View>
       </View>
+
     </View>
   );
 };
@@ -118,6 +125,9 @@ const styles = StyleSheet.create({
     padding: 12,
     marginBottom: 10,
     elevation: 2,
+  },
+  loadingContainer: {
+    minHeight: 170,
   },
   heading: {
     fontSize: 14,

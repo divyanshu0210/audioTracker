@@ -22,7 +22,7 @@ import {getMediaFileSize} from '../utils/mediaFile';
 // Direct assignment of a local device file is allowed up to 50 MB. Larger
 // files can still be assigned after the mentor explicitly approves the upload
 // and its mobile-data/storage cost in the Assign screen.
-export const MAX_ASSIGNABLE_DEVICE_BYTES = 5 * 1024 * 1024;
+export const MAX_ASSIGNABLE_DEVICE_BYTES = 50 * 1024 * 1024;
 
 export const AssignStatus = Object.freeze({
   // Addressable on the mentee's device and ready to post.

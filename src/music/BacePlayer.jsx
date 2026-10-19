@@ -361,14 +361,7 @@ const BacePlayer = () => {
   // What floats over the bottom of the player, so the verse panel can stop
   // above it rather than under it.
   //
-  // The queue bar and the save bar are both position:absolute at bottom:0 -
-  // deliberately, since neither should make the three screens they appear on
-  // rearrange themselves. That was free while the verse panel overflowed its
-  // container and had no real bottom; now that it sizes into the space that is
-  // left, the space that is left has to account for them.
-  //
-  // Measured rather than declared: both are content-sized, with no height to
-  // read off a stylesheet, and the queue bar's text wraps on a narrow screen.
+  // Measured heights keep the player content clear of the queue and save bars.
   const [queueBarHeight, setQueueBarHeight] = useState(0);
   const [saveBarHeight, setSaveBarHeight] = useState(0);
   const durationRef = useRef(0);
@@ -1486,25 +1479,18 @@ const BacePlayer = () => {
 
   // What the verse panel has to stop above.
   //
-  // The two bars are both pinned to bottom:0, so when both are up they cover
-  // each other rather than stacking - the taller one is the whole obstruction.
-  //
-  // Each measurement is discarded when its bar is not on screen, because
-  // onLayout cannot report a height for something that is not rendered. Without
-  // that, closing the queue left a bar's worth of empty space under the panel
-  // for the rest of the session. SaveToListBar also returns null on its own for
-  // an item already in a list, which is why its height is tied to the item
-  // rather than only to the flags.
+  // Each measurement is discarded when its bar is not on screen. The save bar
+  // sits above the queue when both are visible, so their heights add together.
   // A maximized local/VLC video owns the whole screen. Keep the queue
   // available in the normal player and for YouTube, but do not let its bar
   // remain visible below a fullscreen VLC video.
   const isVlcFullscreen = !isMinimized && source_type !== 'youtube_video';
   const queueUp = !showNotes && autoplay && !isInPip && !isVlcFullscreen;
   const saveBarUp = !isInPip && !showNotes;
-  const bottomOverlay = Math.max(
-    queueUp ? queueBarHeight : 0,
-    saveBarUp ? saveBarHeight : 0,
-  );
+  const queueBarVisible = queueUp && playlist.length > 1;
+  const visibleQueueBarHeight = queueBarVisible ? queueBarHeight : 0;
+  const bottomOverlay =
+    visibleQueueBarHeight + (saveBarUp ? saveBarHeight : 0);
   const needsSourceResolution = !!currentItem && (
     currentItem.type === 'drive_file' ||
     isContentUri(currentItem.file_path) ||
@@ -1924,6 +1910,7 @@ const BacePlayer = () => {
           {!isInPip && !showNotes && (
             <SaveToListBar
               item={currentItem}
+              bottomOffset={visibleQueueBarHeight}
               onBarLayout={e => setSaveBarHeight(e.nativeEvent.layout.height)}
             />
           )}

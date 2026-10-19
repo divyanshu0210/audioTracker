@@ -1,16 +1,20 @@
 import React from 'react';
 import { View, Image, StyleSheet } from 'react-native';
 
-export default function PlaylistThumbnail({ uri }) {
+export default function PlaylistThumbnail({uri, size = 'default'}) {
+  const compact = size === 'search';
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, compact && styles.searchContainer]}>
       {/* Background layers that converge towards center */}
       {/* <View style={[styles.backLayer, styles.back3]} /> */}
-      <View style={[styles.backLayer, styles.back2]} />
-      <View style={[styles.backLayer, styles.back1]} />
+      <View style={[styles.backLayer, styles.back2, compact && styles.searchBack2]} />
+      <View style={[styles.backLayer, styles.back1, compact && styles.searchBack1]} />
 
       {/* Front image */}
-      <Image source={uri} style={[styles.image, styles.front]} />
+      <Image
+        source={uri}
+        style={[styles.image, styles.front, compact && styles.searchFront]}
+      />
     </View>
   );
 }
@@ -63,6 +67,28 @@ const styles = StyleSheet.create({
     // shadowOpacity: 0.1,
     // shadowRadius: 4,
     // elevation: 5,
+  },
+  searchContainer: {
+    width: 140,
+    height: 80,
+    top: 0,
+  },
+  searchBack2: {
+    width: 133,
+    height: 72,
+    top: -4,
+    borderRadius: 7,
+  },
+  searchBack1: {
+    width: 137,
+    height: 76,
+    top: -2,
+    borderRadius: 7,
+  },
+  searchFront: {
+    width: 140,
+    height: 80,
+    borderRadius: 7,
   },
   image: {
     position: 'absolute',

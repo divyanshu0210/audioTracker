@@ -58,6 +58,8 @@ import {BottomSheetModalProvider} from '@gorhom/bottom-sheet';
 import {GlobalBottomSheets} from './components/bottomsheets/GlobalBottomSheets';
 import MainHeader from './components/headers/MainHeader';
 import SearchWrapper from './Search/SearchWrapper';
+import YouTubeSearchScreen from './Search/YouTube/YouTubeSearchScreen';
+import YouTubeCollectionScreen from './Search/YouTube/YouTubeCollectionScreen';
 import FullHistoryScreen from './history/FullHistoryScreen';
 import DownloadsView from './downloads/DownloadsView';
 import {initDatabase, resetDatabase} from './database/database';
@@ -238,6 +240,16 @@ const RootNavigator = track(function RootNavigator() {
           name="SearchWrapper"
           component={SearchWrapper}
           options={{headerShown: false, unmountOnBlur: true}}
+        />
+        <Stack.Screen
+          name="YouTubeSearch"
+          component={YouTubeSearchScreen}
+          options={{headerShown: false}}
+        />
+        <Stack.Screen
+          name="YouTubeCollection"
+          component={YouTubeCollectionScreen}
+          options={{headerShown: false}}
         />
         <Stack.Screen
           name="BackupExplorerScreen"

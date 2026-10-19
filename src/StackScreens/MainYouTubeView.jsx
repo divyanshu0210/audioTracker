@@ -1,18 +1,15 @@
-import React, { useMemo } from 'react';
-import {SectionList, StyleSheet, Text, View} from 'react-native';
-import {useAppState} from '../contexts/AppStateContext';
-import {groupItemsByDate} from './utils/grouppByDate';
-import YouTubeItem from './YouTubeItem';
+import React, {useMemo} from 'react';
 import BaseMediaListComponent from './BaseMediaListComponent';
 import {ItemTypes, ScreenTypes} from '../contexts/constants';
 import {useMediaStore} from '../stores/useMediaStore';
 import useLoadingStore from '../stores/useLoadingStore';
+import YouTubeSearchBar from '../Search/YouTube/YouTubeSearchBar';
 
 const MainScreen = ({onRefresh}) => {
   const emptyText = '  Press + to Add Videos/Playlists using YouTube Links';
   const data = useMediaStore(state => state.items);
   const loading = useLoadingStore(state => state.loadingStates.youtube);
-   const memoizedData = useMemo(() => data, [data]);
+  const memoizedData = useMemo(() => data, [data]);
 
   return (
     <BaseMediaListComponent
@@ -22,10 +19,9 @@ const MainScreen = ({onRefresh}) => {
       loading={loading}
       type={ItemTypes.YOUTUBE}
       screen={ScreenTypes.MAIN}
+      listHeaderComponent={<YouTubeSearchBar />}
     />
   );
 }
-
-const styles = StyleSheet.create({});
 
 export default React.memo(MainScreen);
